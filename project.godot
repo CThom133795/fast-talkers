@@ -6,7 +6,7 @@ config/name="Project Fast Talkers"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/description="An original negotiation shooter. Prototype 0.6: first online build (host/join, deal rounds), offline practice modes."
-config/version="0.7"
+config/version="0.8"
 
 [display]
 window/size/viewport_width=1280

@@ -112,6 +112,9 @@ func _run() -> void:
 
 func _pure_checks() -> void:
 	var script: GDScript = online.get_script()
+	# Doors sync online by index: every door in the (much bigger) city must fit the host's world-event check.
+	var last_door: int = (game.world.interactable_doors as Array).size() - 1
+	_check(FastNet.world_event_ok("door", last_door, 1) and FastNet.world_event_ok("lift", last_door, 1), "all %d doors fit the network's door index limit" % (last_door + 1))
 	_check(script.weekday_index_of(1, 5) == 0 and script.weekday_index_of(5, 5) == 4, "a 5-Day Week runs Monday to Friday")
 	var blood: Array = script.blood_lines({"kingsway>morris": 2, "morris>kingsway": 1, "bogus": 3})
 	_check(blood.size() == 2 and str(blood[0]).contains("ROYALS dropped MORRIS x2") and str(blood[1]).contains("MORRIS dropped ROYALS."), "the morning paper names who shot whom (%s)" % str(blood))

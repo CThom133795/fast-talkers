@@ -1456,8 +1456,13 @@ func send_world_event(kind: String, index: int, value: int) -> void:
 		_world_event.rpc_id(1, kind, index, value)
 
 
+## Highest door or lift index a world event may name. Map 0.8 has about 1,270 doors; tests/net_security.gd checks
+## the real world stays under this.
+const MAX_WORLD_INDEX: int = 8191
+
+
 static func world_event_ok(kind: String, index: int, value: int) -> bool:
-	return kind.length() <= 8 and WORLD_KINDS.has(kind) and index >= 0 and index <= 1023 and value >= -1 and value <= 255
+	return kind.length() <= 8 and WORLD_KINDS.has(kind) and index >= 0 and index <= MAX_WORLD_INDEX and value >= -1 and value <= 255
 
 
 @rpc("any_peer", "reliable", "call_remote", 0)

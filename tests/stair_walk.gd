@@ -171,6 +171,19 @@ func _run() -> void:
 		if child is Node3D and child.has_meta("routes"):
 			nodes.append(child as Node3D)
 	nodes.sort_custom(func(a: Node3D, b: Node3D) -> bool: return str(a.name) < str(b.name))
+	# Map 0.8 places hundreds of prefabs: walk every landmark, and one placed prefab per kind (tests/prefabs.gd
+	# walks every kind's stairs at several sizes and seeds).
+	var seen_kinds: Dictionary = {}
+	var sampled: Array[Node3D] = []
+	for node: Node3D in nodes:
+		if node.has_meta("enterable") and node.has_meta("kind"):
+			var kind: String = str(node.get_meta("kind"))
+			if seen_kinds.has(kind):
+				continue
+			seen_kinds[kind] = true
+		sampled.append(node)
+	print("Walking %d of %d buildings with routes (prefab kinds: %s)" % [sampled.size(), nodes.size(), ", ".join(PackedStringArray(seen_kinds.keys()))])
+	nodes = sampled
 	for node: Node3D in nodes:
 		var key: String = str(node.name)
 		var routes: Dictionary = node.get_meta("routes", {})
