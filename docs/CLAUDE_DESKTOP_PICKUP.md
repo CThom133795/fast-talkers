@@ -78,5 +78,5 @@ exporting and merging into cloud/map-integration (never master).
 | Vehicles | `vehicle_art` 110/0; footwell, seats, wheels, arches and z-fighting fixed | GPU cabin review; small leftovers |
 | Audio | 110 procedural sounds; guns rebuilt; `sfx_audio` 321/0; nothing listened to yet | Listen and tune; surface footsteps |
 | Network | Host-validated relays; handshake; rate limits; `net_security` 91/0; Steam transport written, untested | GodotSteam install and a 2-PC test |
-| Voice | See the voice section of CLAUDE_HANDOFF.md and docs/VOICE_CHAT.md | Real-mic and 2-PC validation |
+| Voice | Open-mic proximity by default, optional push-to-talk on N, crew radio on Y (mutes proximity), building walls block passers-by; `voice` 87/0 including a real four-peer ENet run | Real-mic and 2-PC validation; jitter pre-buffer; echo; a mute-player menu; Steam voice API later |
 | Gameplay | Hands up, binoculars, round report, potato toggle, audio hooks; `social_features` 29/0 | Gamepad binds; decisions on the proposals |

@@ -190,6 +190,21 @@ boomy, with no "childish beeps".
    - Deal and round rule changes (inspect-trade, anti-turtling clock, crew spectating, case-carrier cue) stay **proposals** for
      the user to decide.
 
+7. **Voice chat (audio agent, at the user's explicit request; this overrides the earlier "no voice" rule).** Files: new
+   `scripts/voice.gd`, `scripts/voice_codec.gd`, `scripts/voice_relay.gd`, `tests/voice.gd` (87 checks), `docs/VOICE_CHAT.md`;
+   changes to `scripts/net.gd`, `scripts/main.gd`, `scripts/net_security.gd` (PROTOCOL 3 → 4) and `project.godot`
+   (`audio/driver/enable_input=true`).
+   - Open-mic proximity is the default and the intended way to play; the settings toggle reads "Open mic (recommended)".
+   - Proximity push-to-talk is optional, on **N**.
+   - Holding **Y** sends to the talker's crew only, at any distance, and mutes the talker in proximity. The host enforces this.
+   - V and B were already bound, which is why the keys differ from the brief.
+   - People inside a building hear each other; passers-by outside do not, except muffled within 4 m of the same open doorway.
+   - The dead and the living are kept apart.
+   - Codec: 16 kHz IMA-ADPCM, about 65 kbit/s per talker while speaking and nothing in silence.
+   - All voice goes through the host, which validates it and relays it within 35 m.
+   - **Untested:** a real microphone, a 2-PC run and echo. No echo cancellation or jitter buffer yet; headsets are recommended.
+     See the Windows checklist in `docs/VOICE_CHAT.md`.
+
 ### Tests (Linux cloud, Godot 4.4.1 headless)
 `bash tests/run_all.sh` on the final tree reports **OVERALL: PASS** (exit 0), with 1,710 assertions and 0 failures:
 
@@ -231,12 +246,12 @@ boomy, with no "childish beeps".
   door toggles have no distance check.
 - `free_roam`'s "round goes live when the buy timer runs out" check was flaky under heavy parallel load (it waits 6 frames for a
   0.05 s timer). It passed on every unloaded run.
-- `Run Tests.cmd` was not edited, to avoid clobbering local Windows changes. Add the new suites there: `city_audit`,
+- `Run Tests.cmd` was not edited here; Claude Desktop takes it over (see `docs/CLAUDE_DESKTOP_PICKUP.md`) and adds the new suites: `voice`, `city_audit`,
   `building_landmarks`, `sfx_audio`, `social_features`, `net_security`.
 
 ### Claude Desktop: next steps
 1. `git fetch origin && git checkout cloud/overnight-heavy-lift`. Keep your local Windows-only files. Review the diff per commit.
-2. Run the suites on Windows: `Run Tests.cmd` plus the five new suites above, and `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
+2. Run the suites on Windows: `Run Tests.cmd` (after adding the six new suites above), and `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
 3. On the RTX 3080, run `tests/capture_perf.gd` windowed and confirm 60+ fps in the busiest views. Toggle POTATO MODE and compare.
 4. Walk the new interiors, ride the high-rise lifts, drive up the garage, and listen to the guns, reloads and interior beds.
 5. Steam: follow `docs/NETWORK_SECURITY_AND_STEAM.md`. Install a GodotSteam build that matches 4.4.1, put `steam_appid.txt` (480)
