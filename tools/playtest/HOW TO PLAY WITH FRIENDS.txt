@@ -68,8 +68,16 @@ THE GAME IN ONE MINUTE
 - FRIDAY IS THE DEAD DROP. Both cases appear on a street when the doors open, and the chat
   names the spot. Whoever banks them gets paid. No rules.
 - ONE case at a time. While you carry one, only your SIDEARM works. G drops it.
-- THE CREW PHONE sits at your HQ spawn. Whoever holds it calls other crews: ENTER opens chat,
-  TAB picks "CALL <crew>". K drops it. A stolen phone calls as its owners.
+- THE CREW PHONE sits at your HQ spawn. Whoever holds it calls other crews. Press P (pad: D-pad
+  left) and a dial strip lists the other crews: press 1-3 to pick one (pad: D-pad left/right),
+  P again to call (pad: A), ESC to cancel. It rings the other crew's phone for 20 seconds,
+  wherever it is (in a pocket or on the floor, everyone near it hears the ring). They answer with P,
+  or just by picking the phone up. Then simply TALK, close to your phone: anyone within a metre of
+  it is picked up, not the whole room. You are heard, tinny, by everyone within a few metres of
+  the OTHER phone. A phone left on the floor is a speakerphone. P hangs up. A call ends after
+  3 minutes, at the end of the Day, or if the phone holder leaves. The dead cannot use phones.
+  No microphone? ENTER, then TAB to "CALL <crew>" still sends text.
+  K drops the phone. A stolen phone calls as its owners.
 - Hands up: X (pad: R3). It really holsters your gun. Binoculars: hold Z (pad: hold D-pad up).
 - Die and you drop what you carry, and you are back at HQ 10 s later with a pistol.
   Survivors keep their gear into tomorrow.

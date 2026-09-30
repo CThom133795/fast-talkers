@@ -7,7 +7,7 @@ $godot = Join-Path $work "tools\godot\Godot_v4.4.1-stable_win64_console.exe"
 $hostLog = Join-Path $work "net-host.log"
 $clientLog = Join-Path $work "net-client.log"
 $limit = 70
-if ($Steps -match "(^|,)round(,|$)") { $limit = 140 }
+if ($Steps -match "(^|,)(round|phone)(,|$)") { $limit = 140 }
 
 function Start-Role([string]$role, [string]$log) {
 	$errLog = $log + ".err"

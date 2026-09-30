@@ -112,6 +112,7 @@ func _run() -> void:
 
 func _pure_checks() -> void:
 	var script: GDScript = online.get_script()
+	_call_machine_checks()
 	# Doors sync online by index: every door in the (much bigger) city must fit the host's world-event check.
 	var last_door: int = (game.world.interactable_doors as Array).size() - 1
 	_check(FastNet.world_event_ok("door", last_door, 1) and FastNet.world_event_ok("lift", last_door, 1), "all %d doors fit the network's door index limit" % (last_door + 1))
@@ -137,6 +138,177 @@ func _pure_checks() -> void:
 			far += 1
 	_check(bad == 0, "Dead Drop spots never sit inside a building footprint (%d of 40 did)" % bad)
 	_check(far == 0, "Dead Drop spots are within 80 m of their landmark (%d of 40 were not)" % far)
+
+
+## The call state machine on its own (scripts/phone_calls.gd).
+func _call_machine_checks() -> void:
+	var Calls: GDScript = load("res://scripts/phone_calls.gd")
+	var machine: RefCounted = Calls.new()
+	_check(machine.dial(2, 3) == "" and machine.is_busy(2) and machine.is_busy(3), "dialling rings both ends of a fresh call")
+	_check(machine.dial(4, 2) == "Line busy." and machine.dial(3, 5) == "Line busy.", "a busy phone, caller or callee, gives 'Line busy.'")
+	_check(machine.dial(4, 4) == "Wrong number." and machine.dial(-1, 4) == "Wrong number.", "a phone cannot dial itself or a bad number")
+	_check(not machine.answer(2) and not machine.answer(9), "only the ringing callee can answer (not the caller, not a stranger)")
+	_check(machine.answer(3) and int(machine.call_of(2)["state"]) == Calls.State.LIVE and machine.partner_of(2) == 3, "the callee answers: the call is LIVE")
+	_check(not machine.answer(3), "a live call cannot be answered again")
+	var ended: Dictionary = machine.hang_up(3)
+	_check(not ended.is_empty() and not machine.is_busy(2) and not machine.is_busy(3), "either end hangs up and both phones are free")
+	_check(machine.dial(2, 3) == "" and machine.tick(19.0).is_empty(), "a call still rings at 19 s")
+	var timeout: Array = machine.tick(1.5)
+	_check(timeout.size() == 1 and str(timeout[0]["reason"]) == "noanswer" and not machine.is_busy(3), "an unanswered call ends at 20 s as 'noanswer'")
+	machine.dial(2, 3)
+	machine.answer(3)
+	_check(machine.tick(179.0).is_empty(), "a live call lasts 179 s")
+	var cut: Array = machine.tick(2.0)
+	_check(cut.size() == 1 and str(cut[0]["reason"]) == "timeout" and float(cut[0]["live_seconds"]) >= 180.0, "a live call is cut at 3 minutes")
+	machine.dial(2, 3)
+	machine.dial(4, 5)
+	machine.answer(5)
+	var wire: Array = machine.to_wire()
+	_check(wire.size() == 2 and Calls.from_wire(wire).size() == 2 and int(Calls.from_wire(wire)[1]["state"]) == Calls.State.LIVE, "calls survive the wire round trip")
+	_check(machine.clear("day").size() == 2 and machine.calls.is_empty(), "the Day ending clears every call")
+	_check(Calls.from_wire("junk").is_empty() and Calls.from_wire([[1, 2, 9, 0.0], [1, 1, 0, 0.0], [1, 2], [1, 2, 0, NAN], [-1, 2, 0, 0.0], ["a", 2, 0, 0.0], [70, 2, 0, 0.0]]).is_empty(), "malformed wire rows are dropped")
+	var many: Array = []
+	for index: int in range(20):
+		many.append([1, 2, 0, 0.0])
+	_check(Calls.from_wire(many).size() == Calls.MAX_CALLS, "a flood of call rows is capped")
+
+
+## Host-side call flow with fake peers (no network): dial needs a phone, the dial strip keys, busy lines, ring
+## timeout, pick-up answers, hang-up, a stolen phone dials as its owners, a holder leaving, the 3-minute cut and
+## the Day ending. I hold my crew's phone (buy phase) when this runs, and hold it again when it returns.
+func _phone_calls(mine: int) -> void:
+	var other_crew: String = ""
+	var third_crew: String = ""
+	for crew_id: String in online.Factions.ORDER:
+		if crew_id == _crew():
+			continue
+		if other_crew.is_empty():
+			other_crew = crew_id
+		elif third_crew.is_empty():
+			third_crew = crew_id
+	var other: int = online.phone_item(other_crew)
+	var third: int = online.phone_item(third_crew)
+	var notes: Array = []
+	net.phone_notice_tap = func(peer: int, text: String) -> void: notes.append([peer, text])
+	var at: Vector3 = game.hq_spawn + Vector3(60, 0.3, 0)
+	# Two other crews join on the host (fake peers), their phones on the ground 6 m apart.
+	for fake: Array in [[98, third_crew, third], [99, other_crew, other]]:
+		var pid: int = fake[0]
+		net.players[pid] = net._new_entry("Fake%d" % pid)
+		net.players[pid]["crew"] = fake[1]
+		net._latest[pid] = {"pos": at + Vector3(0, -0.3, float(pid - 98) * 6.0), "flags": 0}
+		net.broadcast_item(int(fake[2]), {"kind": "phone", "holder": 0, "pos": at + Vector3(0, 0, float(pid - 98) * 6.0), "banked": "", "msg": ""})
+	await _wait_until(func() -> bool: return online._loose(other) and online._loose(third), 2.0)
+	_check(online._loose(other) and online._loose(third), "the other crews' phones are on the ground")
+	var press: Callable = func(key: int) -> bool:
+		var event: InputEventKey = InputEventKey.new()
+		event.physical_keycode = key as Key
+		event.pressed = true
+		return bool(online.phone_input(event))
+	# P with no phone shows the existing hint.
+	_check(bool(online.drop_phone()), "I drop my phone to test the no-phone key")
+	await _wait_until(func() -> bool: return int(_item(mine).get("holder", 0)) == 0, 2.0)
+	_check(bool(press.call(KEY_P)) and str(game.feed_label.text).begins_with("No phone in hand"), "P with no phone shows the 'No phone in hand' hint ('%s')" % str(game.feed_label.text))
+	await _teleport(_item(mine).get("pos", Vector3.ZERO))
+	online.interact()
+	await _wait_until(func() -> bool: return int(_item(mine).get("holder", 0)) == 1, 2.0)
+	_check(online._phone_item_of(1) == mine, "I hold my phone again")
+	# Dial needs a phone.
+	online._host_phone_request(99, "dial", mine)
+	_check(online._calls.calls.is_empty() and notes.size() > 0 and int(notes[-1][0]) == 99 and str(notes[-1][1]).begins_with("No phone in hand"), "a player with no phone cannot dial")
+	# The dial strip: P opens it, a number picks, P dials; ESC and a timeout close it.
+	_check(bool(press.call(KEY_P)) and online._dial_until > 0.0 and online._dial_targets.size() >= 2, "P with a phone opens the dial strip (%d phones listed)" % online._dial_targets.size())
+	_check(online._dial_targets.has(other) and not online._dial_targets.has(mine), "the strip lists other crews' phones, never my own")
+	await _frames(2)
+	_check(str(online._phone_label.text).begins_with("DIAL") and online._phone_label.visible, "the HUD shows the dial strip ('%s')" % str(online._phone_label.text))
+	_check(bool(press.call(KEY_ESCAPE)) and online._dial_until == 0.0, "ESC closes the strip")
+	press.call(KEY_P)
+	online._dial_until = online._now() - 0.1
+	await _frames(2)
+	_check(online._dial_until == 0.0, "the strip closes by itself after a few seconds")
+	press.call(KEY_P)
+	var pick: int = online._dial_targets.find(other)
+	press.call(KEY_1 + pick)
+	_check(online._dial_index == pick, "a number key picks a phone")
+	press.call(KEY_P)
+	await _wait_until(func() -> bool: return not online._view_call_of(mine).is_empty(), 2.0)
+	var call: Dictionary = online._calls.call_of(mine)
+	_check(not call.is_empty() and int(call["a"]) == mine and int(call["b"]) == other and int(call["state"]) == 0, "P, pick, P rings the other crew's phone")
+	await _frames(3)
+	_check(str(online._phone_label.text).begins_with("CALLING %s" % str(online._phone_name(other))), "the caller's HUD says who is being called ('%s')" % str(online._phone_label.text))
+	_check(int(online._view_call_of(other)["state"]) == 0, "the ringing state is replicated to every peer")
+	# Busy lines: my own, and a ringing callee.
+	notes.clear()
+	online._host_phone_request(1, "dial", third)
+	_check(notes.size() == 1 and str(notes[0][1]) == "Line busy.", "my phone is in a call: 'Line busy.'")
+	online._host_item_request(98, "pickup", third, at)
+	await _frames(2)
+	notes.clear()
+	online._host_phone_request(98, "dial", other)
+	_check(notes.size() == 1 and int(notes[0][0]) == 98 and str(notes[0][1]) == "Line busy.", "dialling a phone that is already ringing: 'Line busy.'")
+	# No answer in 20 s.
+	notes.clear()
+	online._host_tick_calls(19.0)
+	_check(not online._calls.calls.is_empty(), "still ringing at 19 s")
+	online._host_tick_calls(1.5)
+	_check(online._calls.calls.is_empty() and notes.any(func(n: Array) -> bool: return int(n[0]) == 1 and str(n[1]) == "No answer."), "no answer in 20 s: the call ends and the caller is told 'No answer.'")
+	# Picking up a ringing phone answers it.
+	online._host_phone_request(1, "dial", other)
+	await _frames(2)
+	online._host_item_request(99, "pickup", other, at + Vector3(0, 0, 6.0))
+	var answered: bool = await _wait_until(func() -> bool: return not online._view_call_of(other).is_empty() and int(online._view_call_of(other)["state"]) == 1, 2.0)
+	_check(answered and int(online._day_stats.get("voice_calls", 0)) >= 1, "picking up a ringing phone answers it (and counts a voice call)")
+	var lines: Array = online._host_live_lines()
+	_check(lines.size() == 1 and (lines[0]["a"] as Vector3).distance_to(game.player.global_position) < 0.5 and (lines[0]["b"] as Vector3).distance_to(net.latest_pos(99)) < 0.5, "a live call hands the voice relay both phone positions (a held phone is at its holder)")
+	await _frames(3)
+	_check(str(online._phone_label.text).begins_with("ON CALL: %s" % str(online._phone_name(other))), "the HUD shows 'ON CALL: <phone> m:ss' ('%s')" % str(online._phone_label.text))
+	# Hang up from the far end.
+	notes.clear()
+	online._host_phone_request(99, "hangup", -1)
+	await _frames(2)
+	_check(online._calls.calls.is_empty() and online.phone_view.is_empty() and notes.any(func(n: Array) -> bool: return int(n[0]) == 1 and str(n[1]).ends_with("hung up.")), "hanging up ends the call for everyone and tells the other end")
+	# A stolen phone dials as its owners: I drop mine, 98 takes it and dials the other crew.
+	_check(bool(online.drop_phone()), "I drop my phone so a rival can take it")
+	await _wait_until(func() -> bool: return int(_item(mine).get("holder", 0)) == 0, 2.0)
+	online._host_item_request(98, "drop", third, at)
+	await _wait_until(func() -> bool: return int(_item(third).get("holder", 0)) == 0, 2.0)
+	net._latest[98] = {"pos": (_item(mine).get("pos", Vector3.ZERO) as Vector3) + Vector3(0, -0.3, 0), "flags": 0}
+	online._host_item_request(98, "pickup", mine, _item(mine).get("pos", Vector3.ZERO))
+	await _wait_until(func() -> bool: return int(_item(mine).get("holder", 0)) == 98, 2.0)
+	online._host_item_request(99, "drop", other, at)
+	await _wait_until(func() -> bool: return int(_item(other).get("holder", 0)) == 0, 2.0)
+	online._host_phone_request(98, "dial", other)
+	var stolen: Dictionary = online._calls.call_of(mine)
+	_check(not stolen.is_empty() and int(stolen["a"]) == mine and online.phone_crew(int(stolen["a"])) == _crew(), "a stolen phone dials as its owning crew (the call is from %s)" % str(online.phone_crew(mine)))
+	# The thief disconnects: the call ends.
+	online._on_peer_left(98)
+	_check(online._calls.calls.is_empty(), "a holder disconnecting ends the call")
+	net.players.erase(98)
+	net._latest.erase(98)
+	# 3 minutes: a live call between two phones lying on the ground keeps working, then is cut.
+	net.broadcast_item(mine, {"kind": "phone", "holder": 0, "pos": at + Vector3(3, 0, 0), "banked": "", "msg": ""})
+	await _wait_until(func() -> bool: return online._loose(mine), 2.0)
+	online._calls.dial(mine, other)
+	online._calls.answer(other)
+	var seconds_before: int = int(online._day_stats.get("voice_call_seconds", 0))
+	online._host_tick_calls(170.0)
+	_check(not online._calls.calls.is_empty() and online._host_live_lines().size() == 1, "a live call between two dropped phones still works at 170 s (a speakerphone on the table)")
+	online._host_tick_calls(11.0)
+	_check(online._calls.calls.is_empty() and int(online._day_stats.get("voice_call_seconds", 0)) >= seconds_before + 180, "a live call is cut at 3 minutes and its seconds are tallied (%d)" % int(online._day_stats.get("voice_call_seconds", 0)))
+	# The morning reset of the phones ends every call.
+	online._calls.dial(mine, other)
+	online._calls.answer(other)
+	net.players.erase(99)
+	net._latest.erase(99)
+	online._host_place_phones(online._active_crews())
+	_check(online._calls.calls.is_empty(), "the morning reset of the phones ends every call")
+	await _wait_until(func() -> bool: return online._loose(mine), 2.0)
+	net.phone_notice_tap = Callable()
+	# Take my phone back for the rest of Monday.
+	await _teleport(_item(mine).get("pos", Vector3.ZERO))
+	online.interact()
+	await _wait_until(func() -> bool: return int(_item(mine).get("holder", 0)) == 1, 2.0)
+	_check(int(_item(mine).get("holder", 0)) == 1, "I have my phone back after the reset")
 
 
 func _monday() -> void:
@@ -165,6 +337,7 @@ func _monday() -> void:
 	await _teleport(_item(phone).get("pos", Vector3.ZERO))
 	online.interact()
 	await _wait_until(func() -> bool: return int(_item(phone).get("holder", 0)) == 1, 2.0)
+	await _phone_calls(phone)
 	await _teleport(_item(0).get("pos", Vector3.ZERO))
 	_check(not bool(online.interact()) and int(_item(0).get("holder", 0)) == 0, "trade items can't be picked up in the buy phase")
 	# Buy a primary, then open the doors.
