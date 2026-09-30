@@ -23,6 +23,7 @@ const MeshKit = preload("res://scripts/mesh_kit.gd")
 const Interiors = preload("res://scripts/interiors.gd")
 const CityDetail = preload("res://scripts/city_detail.gd")
 const CityFill = preload("res://scripts/city_fill.gd")
+const CrewHQ = preload("res://scripts/buildings/crew_hq.gd")
 ## Kept for the city-limit tests: the Harbor mole's north quay is at z = -HALF on Halcyon
 ## Avenue, and Union Street ends at the West Slip quay at x = -HALF.
 const HALF: float = 200.0
@@ -95,8 +96,12 @@ var districts: Array[Dictionary] = []
 ## Named places for the map and mission sites: {name, at, neutral}.
 var landmarks: Array[Dictionary] = []
 ## Crew id -> {"car": Vector3, "yaw": float, "hq": Vector3, "spawn": Vector3,
-## "spawn_yaw": float, "door": Vector3}. `hq` is the delivery point on the HQ's doorstep;
-## `spawn`/`spawn_yaw` stand the crew just outside the door looking down the street.
+## "spawn_yaw": float, "door": Vector3, "phone": Vector3, "gate": Vector3}. The crew HQ is a walk-in
+## compound (scripts/buildings/crew_hq.gd): `hq` is the delivery point just inside its front door,
+## `spawn`/`spawn_yaw` stand the crew on the main room's open floor facing the door (8 players line up
+## across it, see online.gd `_apply_my_crew`), `door` is the direction out of the front door, `phone`
+## is where the crew phone sits (on the desk), `car` stays outside on the street, and `gate` is the
+## old doorstep where the crew leaves the compound (the fairness routes start there).
 var crew_spawns: Dictionary = {}
 ## Open paved squares and parks (x/z polygons) for the map.
 var plazas: Array[PackedVector2Array] = []
@@ -2134,6 +2139,35 @@ func _crew_spawn(crew: String, car: Vector3, yaw: float, hq: Vector3, door: Vect
 	crew_spawns[crew] = {"car": _w(car), "yaw": yaw + _xf_yaw, "hq": home, "door": out,
 		"spawn": home + out * 2.5 + Vector3(0, 0.1, 0), "spawn_yaw": atan2(-out.x, -out.z)}
 
+## Builds a crew's walk-in compound (scripts/buildings/crew_hq.gd) on the footprint of the solid `_tower` it
+## replaces (same centre, size and front, authored in the current kit's frame) and returns its world-space
+## spawn data for `_crew_spawn_inside`. The builder works in the building's own frame; the kit frame the
+## district was being authored in is restored afterwards.
+func _crew_compound(crew: String, center: Vector2, size: Vector3, front: Vector3) -> Dictionary:
+	var world_front: Vector3 = (_xf.basis * front).normalized()
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = size.x if across else size.z
+	var depth: float = size.z if across else size.x
+	var saved_xf: Transform3D = _xf
+	var saved_yaw: float = _xf_yaw
+	var saved_target: Node3D = _target
+	_roofs.append({"center": _w2(center), "size": size, "yaw": _xf_yaw, "top": size.y + 0.32, "front": _xf.basis * front, "business": false})
+	_begin_building("crew_hq", true, CrewHQ.title(crew))
+	var info: Dictionary = CrewHQ.build(self, crew, {"center": _w2(center), "size": Vector2(frontage, depth), "height": size.y,
+		"front": world_front, "district": str(Factions.get_crew(crew)["district"])})
+	_end_building()
+	_xf = saved_xf
+	_xf_yaw = saved_yaw
+	_target = saved_target
+	return info
+
+## Registers a crew base whose HQ is a walk-in compound: `info` is what `_crew_compound` returned, `car`
+## and `gate` (the old doorstep) are authored in the current kit's frame.
+func _crew_spawn_inside(crew: String, car: Vector3, yaw: float, gate: Vector3, info: Dictionary) -> void:
+	var out: Vector3 = info["door"]
+	crew_spawns[crew] = {"car": _w(car), "yaw": yaw + _xf_yaw, "hq": info["hq"], "door": out, "spawn": info["spawn"],
+		"spawn_yaw": atan2(-out.x, -out.z), "phone": info["phone"], "gate": _w(gate)}
+
 ## Lantern Row (Kojimoto893, NW): dense, narrow and vertical. Stacked neon, lanterns,
 ## dark timber and slate roofs.
 func _build_lantern_row() -> void:
@@ -2145,7 +2179,7 @@ func _build_lantern_row() -> void:
 	var slate: Color = Color(0.16, 0.16, 0.2)
 	# HQ block: the Kojimoto Building with a walled front garden and a timber gate.
 	var hq: Rect2 = _block(Rect2(-200, -200, 44, 44), Color(0.36, 0.35, 0.38), "cobble")
-	_tower(Vector2(-181, -184), Vector3(28, 22, 22), Color(0.17, 0.16, 0.2), "panel", Vector3.BACK, "", Color.WHITE, slate, 0.5)
+	var hq_info: Dictionary = _crew_compound("kojimoto", Vector2(-181, -184), Vector3(28, 22, 22), Vector3.BACK)
 	_neon("KOJIMOTO", Vector3(-166.6, 13, -176), PI * 0.5, violet, 110, true, true)
 	_neon("KARAOKE  MURASAKI", Vector3(-181, 4.4, -172.6), 0.0, Color(0.95, 0.35, 0.85), 70)
 	for side: float in [-1.0, 1.0]:
@@ -2156,7 +2190,7 @@ func _build_lantern_row() -> void:
 		_box(Vector3(x, 1.1, -166), Vector3(0.5, 2.2, 12), plaster, true, "stucco")
 	_label("KOJIMOTO893", Vector3(-176, 3.6, -160.1), 44, Color(0.95, 0.9, 1.0))
 	_landmark("KOJIMOTO BUILDING", Vector3(-181, 0, -172), false)
-	_crew_spawn("kojimoto", Vector3(-152.6, 0.5, -170), PI, Vector3(-176, 0.2, -163))
+	_crew_spawn_inside("kojimoto", Vector3(-152.6, 0.5, -170), PI, Vector3(-176, 0.2, -163), hq_info)
 	# Pachinko and bar row with stacked vertical neon.
 	_block(Rect2(-144, -200, 50, 44), Color(0.36, 0.35, 0.38), "cobble")
 	var fronts: Array = [["PACHINKO", Color(0.3, 0.9, 1.0)], ["RAMEN", Color(1.0, 0.35, 0.3)], ["HOTEL", Color(0.95, 0.45, 0.9)], ["BAR KOI", Color(1.0, 0.8, 0.3)]]
@@ -2208,7 +2242,7 @@ func _build_solana_heights() -> void:
 	_box(Vector3(189.5, 1.3, -158.8), Vector3(15.5, 2.6, 0.6), wall, true, "stucco")
 	for side: float in [-1.0, 1.0]:
 		_box(Vector3(178 + side * 3.9, 2.0, -158.8), Vector3(0.9, 4.0, 0.9), wall.darkened(0.1), true, "stucco")
-	_tower(Vector2(178, -187), Vector3(30, 8.2, 14), Color(0.94, 0.86, 0.72), "stucco", Vector3.BACK, "", Color.WHITE, terracotta, 0.55)
+	var hq_info: Dictionary = _crew_compound("solnegro", Vector2(178, -187), Vector3(30, 8.2, 14), Vector3.BACK)
 	_neon("SOL NEGRO IMPORTS", Vector3(178, 5.2, -158.3), 0.0, gold, 66, true)
 	_cylinder(Vector3(178, 0.55, -170), 2.4, 0.9, Color(0.8, 0.72, 0.6), 12)
 	_cylinder(Vector3(178, 0.95, -170), 2.0, 0.1, Color(0.2, 0.4, 0.45), 12, _material(Color(0.2, 0.4, 0.45), 0.1, "water"))
@@ -2216,7 +2250,7 @@ func _build_solana_heights() -> void:
 	for at: Vector3 in [Vector3(164, 0.16, -174), Vector3(192, 0.16, -174), Vector3(164, 0.16, -165), Vector3(192, 0.16, -165)]:
 		_tree(at, "palm")
 	_landmark("SOL NEGRO COMPOUND", Vector3(178, 0, -170), false)
-	_crew_spawn("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161))
+	_crew_spawn_inside("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161), hq_info)
 	# Cantina and auto shop.
 	_block(Rect2(94, -200, 50, 44), Color(0.7, 0.6, 0.48), "tiles")
 	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7, "bar")
@@ -2254,12 +2288,12 @@ func _build_morris_park() -> void:
 	var green: Color = Color(0.16, 0.34, 0.24)
 	# HQ: the Morris Social Club with its garage.
 	_block(Rect2(-200, 156, 44, 44), Color(0.46, 0.43, 0.4), "cobble")
-	_tower(Vector2(-180, 172), Vector3(30, 11, 18), bricks[0], "brick", Vector3.FORWARD, "", Color.WHITE, Color(0.25, 0.2, 0.2), 0.5)
+	var hq_info: Dictionary = _crew_compound("morris", Vector2(-180, 172), Vector3(30, 11, 18), Vector3.FORWARD)
 	_awning(Vector3(-180, 3.3, 163), 28.0, Vector3.FORWARD, crimson, cream)
 	_neon("MORRIS  SOCIAL CLUB", Vector3(-180, 6.4, 162.6), PI, crimson, 64, true)
 	_tower(Vector2(-166, 190), Vector3(16, 5.5, 14), bricks[3], "brick", Vector3.RIGHT, "GARAGE", cream, Color(0.25, 0.2, 0.2), 0.0)
 	_landmark("MORRIS SOCIAL CLUB", Vector3(-180, 0, 162), false)
-	_crew_spawn("morris", Vector3(-147.4, 0.5, 178), 0.0, Vector3(-180, 0.2, 160.5), Vector3.FORWARD)
+	_crew_spawn_inside("morris", Vector3(-147.4, 0.5, 178), 0.0, Vector3(-180, 0.2, 160.5), hq_info)
 	# Bakery and tenements with fire escapes.
 	_block(Rect2(-144, 156, 50, 44), Color(0.46, 0.43, 0.4), "cobble")
 	for index: int in range(3):
@@ -2305,7 +2339,7 @@ func _build_kingsway() -> void:
 	var tags: Array[Color] = [teal, Color(0.95, 0.3, 0.7), Color(0.98, 0.82, 0.2), Color(0.35, 0.55, 1.0)]
 	# HQ: Kingsway Courts, an L of slab towers around a courtyard.
 	_block(Rect2(156, 156, 44, 44), Color(0.5, 0.5, 0.49), "tiles")
-	_tower(Vector2(165, 178), Vector3(12, 25, 36), concrete, "panel", Vector3.RIGHT, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.4)
+	var hq_info: Dictionary = _crew_compound("kingsway", Vector2(165, 178), Vector3(12, 25, 36), Vector3.RIGHT)
 	_tower(Vector2(184, 190), Vector3(26, 19, 12), concrete.darkened(0.08), "panel", Vector3.FORWARD, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.4)
 	for floor_index: int in range(1, 8):
 		_box(Vector3(171.2, floor_index * 3.1, 178), Vector3(0.4, 0.25, 36), teal)
@@ -2315,7 +2349,7 @@ func _build_kingsway() -> void:
 		_box(Vector3(177.5 + index * 4.4, 1.6, 166.28), Vector3(3.6, 2.6, 0.06), tags[index])
 	_label("KINGSWAY COURTS", Vector3(184, 2.9, 165.7), 40, Color(1, 1, 1), PI)
 	_landmark("KINGSWAY COURTS", Vector3(184, 0, 176), false)
-	_crew_spawn("kingsway", Vector3(178, 0.5, 152.6), -PI * 0.5, Vector3(184, 0.2, 162), Vector3.FORWARD)
+	_crew_spawn_inside("kingsway", Vector3(178, 0.5, 152.6), -PI * 0.5, Vector3(184, 0.2, 162), hq_info)
 	# The Cage: fenced basketball court.
 	_block(Rect2(94, 156, 50, 44), Color(0.5, 0.5, 0.49), "tiles")
 	_box(Vector3(119, 0.19, 176), Vector3(28, 0.04, 16), Color(0.22, 0.38, 0.42), false, "asphalt")
