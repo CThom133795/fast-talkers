@@ -143,6 +143,44 @@ Clarifications I made:
 - **Conduct floor (I).** Two team-kills in a Week and the player is "fired" and spectates the next Day. Votekick
   needs a majority of the other crews.
 
+## 12. The phone is a microphone: voice calls through the handset [0.9, for the playtest]
+
+- **The user's direction (2026-09-30).** "It shouldn't be a tab you go to. If you are holding or near the phone and
+  talk in local, it picks it up and transmits. But only very close; it shouldn't pick up the whole room."
+- **No Big Deal (analysis).** The public wikis don't document its phone rules in detail (Fandom, Miraheze and Namu
+  were checked on 2026-09-30). What is documented, and what the user describes from playing it:
+  - voice is the game;
+  - each company has a phone used to sell to other companies and to trick them;
+  - you talk into the phone with your ordinary local voice, with no separate chat mode.
+
+  What goes wrong in both references:
+  - Calls are a mode you switch into. Text calls are slow in a firefight.
+  - "Who is on the line" is invisible to people standing next to you.
+- **What we do.**
+  - **Dial with one key.** Holding a crew phone, press **P** (pad: a free D-pad direction) and pick a crew. The call
+    rings the other crew's *phone*, not a person. Whoever holds it answers with P. If the phone is lying on the HQ
+    desk, picking it up answers it. It rings for 20 s.
+  - **The handset hears only what is right next to it.** Open-mic proximity voice within **1.2 m** of a phone in a
+    live call goes down the line:
+    - the holder always;
+    - a crewmate leaning in;
+    - never the room.
+
+    The far end plays it as a tinny phone voice from that phone's position, audible within **3.5 m**. Bystanders
+    can overhear the far side of a call. A phone dropped on the table becomes a speakerphone.
+  - **Normal proximity is unchanged.** People next to you still hear you directly. The crew radio (hold Y) never
+    goes down a phone line. The dead can't use phones.
+  - **Text calls stay as the fallback** for anyone without a mic (ENTER, TAB to `call:<crew>`).
+  - **Calls end on:**
+    - a hang-up (P);
+    - the end of the Day (phones go home);
+    - a holder disconnecting;
+    - 3 minutes.
+
+    A busy phone answers "Line busy".
+- **Improvement over both.** Negotiating is talking, not a menu. Because the phone is a physical object, holding it
+  close is a choice other players can see. A rival can take the phone, and it keeps its identity.
+
 ## 11. What we will not copy
 
 - No AI courier car, and no NPCs of any kind.
