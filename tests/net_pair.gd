@@ -170,7 +170,7 @@ func _run() -> void:
 		quit(1)
 		return
 
-	if steps.has("round"):
+	if steps.has("round") or steps.has("phone"):
 		watchdog_seconds = ROUND_WATCHDOG_SECONDS
 	create_timer(watchdog_seconds).timeout.connect(func() -> void:
 		if finished:
@@ -227,6 +227,8 @@ func _run_step(step: String) -> void:
 				await _step_disconnect_client()
 		"round":
 			await _step_round()
+		"phone":
+			await _step_phone()
 		_:
 			_check(false, "unknown step '%s'" % step)
 
@@ -324,6 +326,120 @@ func _step_disconnect_client() -> void:
 	net.call("leave")
 	_check(not bool(net.call("is_online")), "client is offline after leave()")
 	await _frames(3)
+
+
+# ---------------------------------------------------------------- step: phone (lobby must have run first)
+# A real two-process phone call (docs/VOICE_CHAT.md "Phone calls"): both pick up their crew phones in the buy
+# phase, the client dials the host's phone, a second dial is refused "Line busy.", the host answers, open-mic
+# voice crosses as Mode.PHONE both ways (the two HQs are far out of proximity range), and the client hangs up.
+
+const PhoneCodec = preload("res://scripts/voice_codec.gd")
+const PhoneRelay = preload("res://scripts/voice_relay.gd")
+var _phone_notices: Array[String] = []
+var _phone_frames: Array = []  # each: [from_id, mode]
+
+
+func _phone_state(item: int) -> int:
+	var view: Dictionary = _online()._view_call_of(item)
+	return -1 if view.is_empty() else int(view["state"])
+
+
+func _phone_talk() -> void:
+	var source: PackedFloat32Array = PackedFloat32Array()
+	source.resize(PhoneCodec.FRAME_SAMPLES)
+	for i: int in range(source.size()):
+		source[i] = 0.3 * sin(float(i) * 0.12)
+	var frame: PackedByteArray = PhoneCodec.new().encode(source)
+	for n: int in range(12):
+		net.send_voice(PhoneRelay.Mode.PROXIMITY, frame)
+		await _wait_seconds(0.04)
+
+
+func _heard_phone_from(id: int) -> bool:
+	return _phone_frames.any(func(row: Array) -> bool: return int(row[0]) == id and int(row[1]) == PhoneRelay.Mode.PHONE)
+
+
+func _step_phone() -> void:
+	var online: Variant = _online()
+	net.phone_notice.connect(func(text: String) -> void: _phone_notices.append(text))
+	net.voice_frame.connect(func(from_id: int, mode: int, _f: PackedByteArray, _d: float, _m: bool) -> void: _phone_frames.append([from_id, mode]))
+	var buy: bool = await _wait_until(func() -> bool: return online != null and bool(online.active) and str(online.phase) == "buy", 15.0)
+	_check(buy, "phone: the buy phase is on (phones are on the HQ tables)")
+	if not buy:
+		return
+	var me: int = _my_id()
+	var other: int = _other_id()
+	var my_phone: int = online.phone_item(net.crew_of(me))
+	var their_phone: int = online.phone_item(net.crew_of(other))
+	var laid: bool = await _wait_until(func() -> bool: return not _item(my_phone).is_empty() and not _item(their_phone).is_empty(), 5.0)
+	_check(laid, "phone: both crews' phones exist (%d, %d)" % [my_phone, their_phone])
+	await _teleport(_item(my_phone).get("pos", Vector3.ZERO))
+	_check(bool(online.interact()), "phone: interact() picks up my crew phone")
+	var held: bool = await _wait_until(func() -> bool: return online.my_phone_item() == my_phone, 5.0)
+	_check(held, "phone: I hold my crew's phone (%d)" % online.my_phone_item())
+	if not await _sync("phones_held"):
+		return
+	await _wait_until(func() -> bool: return _item_holder(their_phone) == other, 5.0)
+	_check(_item_holder(their_phone) == other, "phone: I see the other player holding their phone")
+	var host_phone: int = my_phone if role == "host" else their_phone
+	var client_phone: int = their_phone if role == "host" else my_phone
+	# 1. The client dials; the host's phone rings on both machines.
+	if role == "client":
+		net.send_phone_request("dial", host_phone)
+	var ringing: bool = await _wait_until(func() -> bool: return _phone_state(host_phone) == 0, 5.0)
+	_check(ringing, "phone: the host's phone is RINGING on this machine (state %d)" % _phone_state(host_phone))
+	if role == "host":
+		await _frames(2)
+		_check(str(online._phone_label.text).contains("CALLING"), "phone: the ringing holder's HUD says CALLING ('%s')" % str(online._phone_label.text))
+	if not await _sync("ringing"):
+		return
+	# 2. The host tries to dial the client's phone while its own rings: "Line busy."
+	if role == "host":
+		_phone_notices.clear()
+		net.send_phone_request("dial", client_phone)
+		var busy: bool = await _wait_until(func() -> bool: return _phone_notices.has("Line busy."), 5.0)
+		_check(busy, "phone: dialling from a ringing phone gets 'Line busy.' (%s)" % str(_phone_notices))
+	if not await _sync("busy"):
+		return
+	# 3. The host answers with P's request; the call is LIVE everywhere.
+	if role == "host":
+		net.send_phone_request("answer", host_phone)
+	var live: bool = await _wait_until(func() -> bool: return _phone_state(host_phone) == 1 and _phone_state(client_phone) == 1, 5.0)
+	_check(live, "phone: the call is LIVE on this machine")
+	await _frames(2)
+	_check(str(online._phone_label.text).begins_with("ON CALL"), "phone: my HUD shows ON CALL ('%s')" % str(online._phone_label.text))
+	if not await _sync("live"):
+		return
+	# 4. Voice down the line, one direction at a time: far out of proximity, so only Mode.PHONE can carry it.
+	_check(_flat(game.player.global_position, net.latest_pos(other)) > PhoneRelay.PROXIMITY_RANGE, "phone: the two phones are out of proximity range (%.0f m)" % _flat(game.player.global_position, net.latest_pos(other)))
+	_phone_frames.clear()
+	if role == "client":
+		await _phone_talk()
+	else:
+		var heard: bool = await _wait_until(func() -> bool: return _heard_phone_from(other), 5.0)
+		_check(heard, "phone: the host hears the client's voice as PHONE mode (%d frames)" % _phone_frames.size())
+		_check(not _phone_frames.any(func(row: Array) -> bool: return int(row[1]) == PhoneRelay.Mode.PROXIMITY), "phone: no proximity copy crossed the city")
+	if not await _sync("talk_client"):
+		return
+	_phone_frames.clear()
+	if role == "host":
+		await _phone_talk()
+	else:
+		var heard_host: bool = await _wait_until(func() -> bool: return _heard_phone_from(other), 5.0)
+		_check(heard_host, "phone: the client hears the host's voice as PHONE mode (%d frames)" % _phone_frames.size())
+		_check(online.phone_voice_position(other).is_finite(), "phone: the client knows where the host's voice comes out (the far phone)")
+	if not await _sync("talk_host"):
+		return
+	# 5. The client hangs up: both phones are free and the host is told.
+	_phone_notices.clear()
+	if role == "client":
+		net.send_phone_request("hangup", client_phone)
+	var over: bool = await _wait_until(func() -> bool: return _phone_state(host_phone) == -1 and _phone_state(client_phone) == -1, 5.0)
+	_check(over, "phone: the call is over on this machine")
+	if role == "host":
+		var told: bool = await _wait_until(func() -> bool: return _phone_notices.any(func(t: String) -> bool: return t.ends_with("hung up.")), 5.0)
+		_check(told, "phone: the host is told the other end hung up (%s)" % str(_phone_notices))
+	await _sync("phone_done")
 
 
 # ---------------------------------------------------------------- step: round (lobby must have run first)

@@ -49,6 +49,10 @@ var yaw: float = 0.0
 var size: Vector2 = Vector2.ZERO
 var _current: Node3D
 var _finished: bool = false
+## Every flight built by stairs_straight / stairs_u, in this kit's local frame (published as the node's
+## "flights" meta for tests/stair_walk.gd's trap probe): {kind, start, heading, steps, rise, run, width, base_y, bottom};
+## a U stair also adds its half landing as {kind "u_landing", start (centre of the near edge), heading, depth, span, base_y, bottom}.
+var flights: Array[Dictionary] = []
 
 
 func _init(owner: Node3D, title: String, plot_spec: Dictionary) -> void:
@@ -277,24 +281,36 @@ func window_grid(origin: Vector3, along: Vector3, normal: Vector3, length: float
 
 ## One flight of `steps` solid steps of rise `rise` and run `run`. `start` is the middle of the first
 ## riser at floor level; `heading` is the horizontal direction of ascent. Visible steps merge with
-## the building; one StaticBody3D carries the box colliders.
-func _flight(start: Vector3, heading: Vector3, steps: int, rise: float, width: float, run: float, material: Material) -> void:
+## the building; one StaticBody3D carries the box colliders. `base_y` is the floor the flight's mass
+## stands on (default: `start`'s height): every step block runs down to it, so the space under a flight
+## is solid (collision and visual) and nobody can walk or fall under it, e.g. under the return flight of
+## a U stair, which starts on a half landing high above the floor. `widen` (a displacement along the flight's
+## lateral axis) fattens the step blocks (not the walking slab) on one side: a U stair uses it to close the gap
+## between its two flights.
+func _flight(start: Vector3, heading: Vector3, steps: int, rise: float, width: float, run: float, material: Material, base_y: float = NAN, kind: String = "straight", widen: Vector3 = Vector3.ZERO) -> void:
 	focus()
 	var angle: float = atan2(heading.x, heading.z)
+	var floor_y: float = start.y if is_nan(base_y) else base_y
 	var body: StaticBody3D = StaticBody3D.new()
 	body.name = "Flight"
 	_current.add_child(body)
 	for index: int in range(steps):
 		var top: float = (index + 1) * rise
-		var center: Vector3 = start + heading * ((index + 0.5) * run) + Vector3(0, top * 0.5, 0)
-		world._box_with(center, Vector3(width, top, run), material, false, angle)
+		var block: float = start.y - floor_y + top
+		var center: Vector3 = start + heading * ((index + 0.5) * run)
+		center.y = floor_y + block * 0.5
+		center += widen * 0.5
+		var block_width: float = width + widen.length()
+		world._box_with(center, Vector3(block_width, block, run), material, false, angle)
 		var shape: CollisionShape3D = CollisionShape3D.new()
 		var box_shape: BoxShape3D = BoxShape3D.new()
-		box_shape.size = Vector3(width, top, run)
+		box_shape.size = Vector3(block_width, block, run)
 		shape.shape = box_shape
 		shape.transform = Transform3D(Basis(Vector3.UP, angle), center)
 		body.add_child(shape)
 	body.add_child(_glide_slab(start, heading, angle, steps, rise, width, run))
+	flights.append({"kind": kind, "start": start, "heading": heading, "steps": steps, "rise": rise, "run": run, "width": width, "base_y": floor_y, "bottom": start})
+	node.set_meta("flights", flights)
 
 
 ## The invisible collision slope over a flight. A capsule pressed into a stack of square step boxes snags
@@ -324,7 +340,7 @@ func stairs_straight(start: Vector3, heading: Vector3, total_rise: float, width:
 	var direction: Vector3 = Vector3(heading.x, 0, heading.z).normalized()
 	var steps: int = maxi(1, int(ceil(total_rise / STEP_RISE_MAX - 0.0001)))
 	var rise: float = total_rise / steps
-	_flight(start, direction, steps, rise, width, run, material)
+	_flight(start, direction, steps, rise, width, run, material, NAN, "straight")
 	var top: Vector3 = start + direction * (steps * run) + Vector3(0, total_rise, 0)
 	if rails:
 		var lateral: Vector3 = Vector3.UP.cross(direction)
@@ -335,16 +351,20 @@ func stairs_straight(start: Vector3, heading: Vector3, total_rise: float, width:
 
 
 ## A U-return stair: a flight, a half landing, and a flight back the other way, side by side. The
-## returned `top` is above `start` (offset sideways by width + gap).
-func stairs_u(start: Vector3, heading: Vector3, total_rise: float, width: float, gap: float, material: Material, rails: bool = true, run: float = STEP_RUN) -> Dictionary:
+## returned `top` is above `start` (offset sideways by width + gap). Everything stands on the floor of
+## `start`: the return flight's blocks run down to it and reach across the gap to the first flight (no space
+## under or between them), and with `rails` the landing's open edges (both sides and the far edge) and the return
+## flight's inner side carry stair rails too. `landing_deep` (0 = the default 1.2 m or `width`) lets a
+## builder run the landing out to a wall so nothing is left behind it.
+func stairs_u(start: Vector3, heading: Vector3, total_rise: float, width: float, gap: float, material: Material, rails: bool = true, run: float = STEP_RUN, landing_deep: float = 0.0) -> Dictionary:
 	var direction: Vector3 = Vector3(heading.x, 0, heading.z).normalized()
 	var lateral: Vector3 = Vector3.UP.cross(direction)
 	var steps: int = maxi(2, int(ceil(total_rise / STEP_RISE_MAX - 0.0001)))
 	var rise: float = total_rise / steps
 	var first: int = steps / 2
 	var second: int = steps - first
-	_flight(start, direction, first, rise, width, run, material)
-	var landing_depth: float = maxf(width, 1.2)
+	_flight(start, direction, first, rise, width, run, material, NAN, "u_up")
+	var landing_depth: float = landing_deep if landing_deep > 0.0 else maxf(width, 1.2)
 	var landing_top: float = first * rise
 	var landing_size: Vector3 = Vector3(width * 2.0 + gap, landing_top, landing_depth)
 	var landing_center: Vector3 = start + direction * (first * run + landing_depth * 0.5) + lateral * ((width + gap) * 0.5) + Vector3(0, landing_top * 0.5, 0)
@@ -353,13 +373,28 @@ func stairs_u(start: Vector3, heading: Vector3, total_rise: float, width: float,
 	# The return flight starts at the landing's near edge, beside the end of the first flight (it
 	# used to start at the far edge, which stood its lower steps on the landing and blocked the turn).
 	var second_start: Vector3 = start + lateral * (width + gap) + direction * (first * run) + Vector3(0, landing_top, 0)
-	_flight(second_start, -direction, second, rise, width, run, material)
+	_flight(second_start, -direction, second, rise, width, run, material, start.y, "u_back", -lateral * gap)
+	flights[flights.size() - 1]["bottom"] = start
+	flights.append({"kind": "u_landing", "start": start + direction * (first * run) + lateral * ((width + gap) * 0.5) + Vector3(0, landing_top, 0), "heading": direction,
+		"depth": landing_depth, "span": width * 2.0 + gap, "base_y": start.y, "bottom": start})
 	var top: Vector3 = second_start - direction * (second * run) + Vector3(0, second * rise, 0)
 	if rails:
 		var outer_a: Vector3 = start - lateral * (width * 0.5 - 0.05)
 		stair_rail(outer_a, outer_a + direction * (first * run) + Vector3(0, landing_top, 0), first)
 		var outer_b: Vector3 = second_start + lateral * (width * 0.5 - 0.05)
 		stair_rail(outer_b, outer_b - direction * (second * run) + Vector3(0, second * rise, 0), second)
+		# The return flight's inner side drops onto the first flight: rail it too.
+		var inner_b: Vector3 = second_start - lateral * (width * 0.5 - 0.05)
+		stair_rail(inner_b, inner_b - direction * (second * run) + Vector3(0, second * rise, 0), second)
+		# Landing edges: both sides and the far edge.
+		var level: Vector3 = Vector3(0, landing_top, 0)
+		var side_a: Vector3 = outer_a + direction * (first * run) + level
+		var side_b: Vector3 = outer_b
+		var reach: Vector3 = direction * (landing_depth - 0.05)
+		var landing_steps: int = maxi(2, int(landing_depth / 0.3))
+		stair_rail(side_a, side_a + reach, landing_steps)
+		stair_rail(side_b, side_b + reach, landing_steps)
+		stair_rail(side_a + reach, side_b + reach, maxi(2, int((width * 2.0 + gap) / 0.3)))
 	return {"bottom": start, "top": top, "landing": landing_center + Vector3(0, landing_top * 0.5, 0), "steps": steps, "rise": rise, "run": run, "heading": direction, "width": width}
 
 

@@ -9,7 +9,7 @@ extends RefCounted
 ## Bump whenever an RPC signature, the RPC list order or the world generation changes. Peers whose
 ## protocol or build tag differ are refused at the handshake (the world is built by creation order, so
 ## mismatched builds would silently disagree about car / door / item indices).
-const PROTOCOL: int = 4
+const PROTOCOL: int = 5
 ## Longest string any RPC argument may carry before it is even looked at.
 const MAX_WIRE_STRING: int = 512
 ## Movement snapshot bounds: nothing in the game moves faster than this (cars top out well below).

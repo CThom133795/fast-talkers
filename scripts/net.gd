@@ -26,6 +26,7 @@ const Factions = preload("res://scripts/factions.gd")
 const Sec = preload("res://scripts/net_security.gd")
 const VoiceRelayS = preload("res://scripts/voice_relay.gd")
 const VoiceCodecS = preload("res://scripts/voice_codec.gd")
+const PhoneCallsS = preload("res://scripts/phone_calls.gd")
 ## Loaded on demand (never preloaded), so net.gd works even if this file or the extension is missing.
 const STEAM_TRANSPORT_PATH: String = "res://scripts/steam_transport.gd"
 
@@ -51,6 +52,8 @@ const LIMIT_REQUEST: int = 10
 const LIMIT_HIT: int = 25
 const LIMIT_HELLO: int = 3
 const ITEM_ACTIONS: PackedStringArray = ["pickup", "drop", "bank"]
+## Phone requests a client may make (dial the phone item in `item`; answer / hang up the phone it holds).
+const PHONE_ACTIONS: PackedStringArray = ["dial", "answer", "hangup"]
 ## A connected peer must send a valid hello (name + build tag) within this time.
 const HELLO_TIMEOUT_MS: int = 10000
 ## Global per-peer message budget (all client RPCs share it): burst and refill per second.
@@ -96,6 +99,10 @@ signal item_update(item: int, data: Dictionary)
 signal round_state(data: Dictionary)
 signal grant(amount: int, reason: String)
 signal chat(from_id: int, channel: String, text: String)
+## The phone calls in progress, as the host last sent them: [{"a", "b", "state", "t"}, ...] (phone item ids).
+signal phone_calls(calls: Array)
+## A private line from the host's phone logic to this peer ("Line busy.", "No answer.").
+signal phone_notice(text: String)
 ## A voice frame for the local player to play: from_id, mode (VoiceRelayS.Mode), ADPCM frame, metres from the talker.
 signal voice_frame(from_id: int, mode: int, frame: PackedByteArray, distance: float, muffled: bool)
 ## Shared world state changed by a player: kind "door" (value 1 open / 0 shut) or "lift"
@@ -107,6 +114,7 @@ signal host_seat_request(from_id: int, car: int, seat: int)
 signal host_seat_leave(from_id: int, car: int, seat: int)
 signal host_car_damage(from_id: int, car: int, amount: float)
 signal host_item_request(from_id: int, action: String, item: int, pos: Vector3)
+signal host_phone_request(from_id: int, action: String, item: int)
 ## A hit claim passed validation and damage was sent to the victim.
 signal hit_validated(shooter: int, victim: int, amount: float, head: bool, weapon: String)
 
@@ -156,9 +164,25 @@ var voice_tap: Callable = Callable()
 ## Host-side world knowledge for proximity occlusion (set by main.gd): `voice_space(pos: Vector3) -> int`
 ## (-1 outdoors, else an id of the walk-in building around that point) and `voice_doors() -> Array` of
 ## the world positions of currently open doorways.
-var voice_space: Callable = Callable()
+var voice_space: Callable = Callable():
+	set(value):
+		voice_space = value
+		_voice_space_cache.clear()
 var voice_doors: Callable = Callable()
+## Optional faster form of `voice_doors`: `voice_doors_near(pos: Vector3, radius: float) -> Array` returns only the
+## open doorways within `radius` metres of `pos`. The host asks for the talker's DOOR_RADIUS, which is all that matters.
+var voice_doors_near: Callable = Callable()
+## Host (set by online.gd): `voice_phones() -> Array` of {"a": Vector3, "b": Vector3}, the two phone positions of
+## every LIVE call. Proximity frames near one phone are also relayed to listeners by the other (Mode.PHONE).
+var voice_phones: Callable = Callable()
+## Test hook: when valid, the host calls it (peer, text) instead of sending a private phone notice.
+var phone_notice_tap: Callable = Callable()
 var voice_range: float = 35.0
+## Host: peer id -> {"pos", "ms", "space"}: each player's last voice space, refreshed at most every
+## VOICE_SPACE_MS unless they moved more than VOICE_SPACE_MOVE (the lookup scans buildings, so it is cached).
+var _voice_space_cache: Dictionary = {}
+const VOICE_SPACE_MS: int = 200
+const VOICE_SPACE_MOVE: float = 1.0
 ## Host: peer id -> tick (ms) until which that peer is "on the radio": their proximity frames are dropped.
 var _voice_radio_until: Dictionary = {}
 const VOICE_RADIO_HOLD_MS: int = 300
@@ -768,6 +792,8 @@ func _reset_state() -> void:
 	_teleport_all_until = 0
 	_last_phase = ""
 	_last_hitter.clear()
+	_voice_space_cache.clear()
+	_voice_radio_until.clear()
 
 
 func _on_peer_connected(id: int) -> void:
@@ -792,6 +818,7 @@ func _on_peer_disconnected(id: int) -> void:
 	_hello_done.erase(id)
 	_rl.erase(id)
 	_voice_radio_until.erase(id)
+	_voice_space_cache.erase(id)
 	_hello_deadline.erase(id)
 	_hello_rejected.erase(id)
 	_budget.erase(id)
@@ -1444,6 +1471,67 @@ func _receive_grant(amount: int, reason: String) -> void:
 	grant.emit(clampi(amount, -100000, 100000), clean_text(reason, REASON_MAX))
 
 
+# ---------------------------------------------------------------- phone calls
+#
+# Calls join two crew phones (scripts/phone_calls.gd, owned by the host in online.gd). Clients only ASK
+# (dial a phone item, answer or hang up the phone they hold); the host validates against the call gate and
+# replicates the resulting calls to everyone. Private replies ("Line busy.") go to one peer.
+
+func send_phone_request(action: String, item: int) -> void:
+	if _mode == Mode.HOST:
+		_h_phone_request(1, action, item)
+	elif _can_send():
+		_host_phone_request.rpc_id(1, action, item)
+
+
+@rpc("any_peer", "reliable", "call_remote", 0)
+func _host_phone_request(action: String, item: int) -> void:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
+		_h_phone_request(multiplayer.get_remote_sender_id(), action, item)
+
+
+func _h_phone_request(sender: int, action: String, item: int) -> void:
+	if not players.has(sender) or not Sec.string_ok(action, 12) or not PHONE_ACTIONS.has(action) or item < -1 or item >= max_items:
+		_strike(sender, "bad phone request")
+		return
+	if _rate_ok(sender, "req", LIMIT_REQUEST):
+		host_phone_request.emit(sender, action, item)
+
+
+## Host: announce the calls in progress (a late joiner is caught up by calling this again).
+func broadcast_phone_calls(data: Array) -> void:
+	if _mode == Mode.HOST:
+		_phone_calls.rpc(data)
+
+
+@rpc("authority", "reliable", "call_local", 0)
+func _phone_calls(data: Array) -> void:
+	if _mode == Mode.OFFLINE or data.size() > PhoneCallsS.MAX_CALLS:
+		return
+	phone_calls.emit(PhoneCallsS.from_wire(data, max_items))
+
+
+## Host: a private line for one peer (the host itself included).
+func send_phone_notice(peer: int, text: String) -> void:
+	if _mode != Mode.HOST or not players.has(peer):
+		return
+	if phone_notice_tap.is_valid():
+		phone_notice_tap.call(peer, text)
+	elif peer == 1:
+		phone_notice.emit(clean_text(text, CHAT_MAX))
+	elif is_inside_tree() and multiplayer.get_peers().has(peer):
+		_phone_notice.rpc_id(peer, text)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _phone_notice(text: String) -> void:
+	if _mode != Mode.CLIENT or multiplayer.get_remote_sender_id() != 1:
+		return
+	var clean: String = clean_text(text, CHAT_MAX)
+	if not clean.is_empty():
+		phone_notice.emit(clean)
+
+
 # ---------------------------------------------------------------- world events
 
 const WORLD_KINDS: PackedStringArray = ["door", "lift"]
@@ -1557,7 +1645,7 @@ func _host_voice(mode: int, frame: PackedByteArray) -> void:
 
 ## Host: validate and route one frame. Returns how many listeners it went to (0 when dropped).
 func _h_voice(sender: int, mode: int, frame: PackedByteArray) -> int:
-	if not players.has(sender) or not VoiceRelayS.valid_mode(mode):
+	if not players.has(sender) or not VoiceRelayS.valid_send_mode(mode):
 		_strike(sender, "bad voice mode")
 		return 0
 	if frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
@@ -1569,6 +1657,10 @@ func _h_voice(sender: int, mode: int, frame: PackedByteArray) -> int:
 	elif now < int(_voice_radio_until.get(sender, 0)):
 		# Holding the squad key mutes you in proximity: the same mic can't go out both ways.
 		return 0
+	var proximity: bool = mode == VoiceRelayS.Mode.PROXIMITY
+	var talker_pos: Vector3 = Vector3.INF
+	if _latest.has(sender) and (_latest[sender] as Dictionary).has("pos"):
+		talker_pos = _latest[sender]["pos"]
 	var peers: Dictionary = {}
 	for id: int in players.keys():
 		var pos: Vector3 = Vector3.INF
@@ -1576,32 +1668,82 @@ func _h_voice(sender: int, mode: int, frame: PackedByteArray) -> int:
 		if state.has("pos"):
 			pos = state["pos"]
 		var space: int = -1
-		if voice_space.is_valid() and pos.is_finite():
-			space = int(voice_space.call(pos))
+		# Crew radio ignores walls, and anyone beyond earshot is dropped by distance first, so only the
+		# talker and people within range need the (cached) building lookup.
+		if proximity and pos.is_finite() and (id == sender or (talker_pos.is_finite() and pos.distance_to(talker_pos) <= voice_range)):
+			space = _voice_space_of(id, pos)
 		peers[id] = {"crew": crew_of(id), "pos": pos, "dead": is_dead(id), "space": space}
 	var doors: Array = []
-	if voice_doors.is_valid():
-		doors = voice_doors.call()
+	if proximity and _voice_needs_doors(sender, peers):
+		if voice_doors_near.is_valid():
+			doors = voice_doors_near.call(talker_pos, VoiceRelayS.DOOR_RADIUS)
+		elif voice_doors.is_valid():
+			doors = voice_doors.call()
 	var sent: int = 0
+	var heard: Dictionary = {}
 	for entry: Array in VoiceRelayS.targets(sender, mode, peers, voice_range, doors):
 		var id: int = int(entry[0])
-		var dist: float = float(entry[1])
-		var muffled: bool = bool(entry[2])
-		if voice_tap.is_valid():
-			voice_tap.call(id, sender, mode, dist, frame, muffled)
-			sent += 1
-		elif id == 1:
-			voice_frame.emit(sender, mode, frame, dist, muffled)
-			sent += 1
-		elif is_inside_tree() and multiplayer.get_peers().has(id) and _hello_done.has(id):
-			_relay_voice.rpc_id(id, sender, mode, dist, frame, muffled)
-			sent += 1
+		heard[id] = true
+		sent += _deliver_voice(id, sender, mode, float(entry[1]), frame, bool(entry[2]))
+	if proximity and voice_phones.is_valid():
+		# A talker by a phone in a live call is also heard at the other phone. People who already hear them
+		# directly (same room, in range) are not sent a second, tinny copy.
+		var lines: Array = voice_phones.call()
+		if not lines.is_empty():
+			for entry: Array in VoiceRelayS.phone_targets(sender, peers, lines):
+				var id: int = int(entry[0])
+				if not heard.has(id):
+					sent += _deliver_voice(id, sender, VoiceRelayS.Mode.PHONE, float(entry[1]), frame, false)
 	return sent
+
+
+## The walk-in building a player is in (-1 outdoors), remembered for VOICE_SPACE_MS unless they moved.
+func _voice_space_of(id: int, pos: Vector3) -> int:
+	if not voice_space.is_valid():
+		return -1
+	var now: int = Time.get_ticks_msec()
+	var cached: Dictionary = _voice_space_cache.get(id, {})
+	if not cached.is_empty() and now - int(cached["ms"]) < VOICE_SPACE_MS and (cached["pos"] as Vector3).distance_to(pos) <= VOICE_SPACE_MOVE:
+		return int(cached["space"])
+	var space: int = int(voice_space.call(pos))
+	_voice_space_cache[id] = {"pos": pos, "ms": now, "space": space}
+	return space
+
+
+## Doorways only matter when somebody in earshot stands in a different space from the talker.
+func _voice_needs_doors(sender: int, peers: Dictionary) -> bool:
+	var me: Dictionary = peers.get(sender, {})
+	var my_pos: Vector3 = me.get("pos", Vector3.INF)
+	if not my_pos.is_finite():
+		return false
+	var my_space: int = int(me.get("space", -1))
+	for id: int in peers.keys():
+		if id == sender:
+			continue
+		var them: Dictionary = peers[id]
+		var pos: Vector3 = them["pos"]
+		if pos.is_finite() and int(them["space"]) != my_space and my_pos.distance_to(pos) <= voice_range:
+			return true
+	return false
+
+
+## Hands one relayed frame to listener `id` (the host itself through the signal). Returns 1 if it went out.
+func _deliver_voice(id: int, sender: int, mode: int, dist: float, frame: PackedByteArray, muffled: bool) -> int:
+	if voice_tap.is_valid():
+		voice_tap.call(id, sender, mode, dist, frame, muffled)
+		return 1
+	if id == 1:
+		voice_frame.emit(sender, mode, frame, dist, muffled)
+		return 1
+	if is_inside_tree() and multiplayer.get_peers().has(id) and _hello_done.has(id):
+		_relay_voice.rpc_id(id, sender, mode, dist, frame, muffled)
+		return 1
+	return 0
 
 
 @rpc("authority", "unreliable_ordered", "call_remote", 2)
 func _relay_voice(from_id: int, mode: int, dist: float, frame: PackedByteArray, muffled: bool) -> void:
-	if _mode != Mode.CLIENT or multiplayer.get_remote_sender_id() != 1 or from_id <= 1 or from_id == my_id():
+	if _mode != Mode.CLIENT or multiplayer.get_remote_sender_id() != 1 or from_id < 1 or from_id == my_id():
 		return
 	if not VoiceRelayS.valid_mode(mode) or not is_finite(dist) or frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
 		return
