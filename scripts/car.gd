@@ -130,6 +130,17 @@ var _ap_stuck: float = 0.0
 var _ap_reverse: float = 0.0
 var _ai_steer: float = 0.0
 var _ai_throttle: float = 0.0
+## Online: another peer drives this car. It follows their snapshots 100 ms behind instead
+## of simulating (docs/NET_M1_SPEC.md §6).
+var net_puppet: bool = false
+## Online: health belongs to the host. When set, take_damage() reports through this
+## `func(car: FastCar, amount: float)` instead of changing health locally.
+var net_damage_hook: Callable = Callable()
+var _net_buffer: Array[Dictionary] = []
+const NET_DELAY: float = 0.1
+const NET_FLAG_BRAKING: int = 1
+const NET_FLAG_HANDBRAKE: int = 2
+const NET_FLAG_LIT: int = 4
 
 
 func _ready() -> void:
@@ -154,7 +165,8 @@ func _ready() -> void:
 	max_slides = 5
 	# World/characters can collide with the vehicle as a normal solid body.
 	collision_layer = 1
-	collision_mask = 1
+	# Layer 3 (value 4): other players on foot, so cars can run them down.
+	collision_mask = 1 | 4
 	_build_hull()
 	_body = Node3D.new()
 	_body.position.y = 0.8
@@ -357,6 +369,9 @@ func _scatter_glass(at: Vector3) -> void:
 # --- Driving -----------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	if net_puppet:
+		_follow_net(delta)
+		return
 	var driven: bool = (occupied or autopilot) and enabled
 	if not driven and _resting:
 		return
@@ -438,6 +453,77 @@ func _physics_process(delta: float) -> void:
 	_update_visuals(delta, velocity.dot(forward), grounded)
 	# Parked and still: stop simulating until someone gets in (saves CPU with many cars).
 	_resting = not driven and grounded and planar_velocity.length() < 0.05 and absf(_bounce) < 0.002 and _body_spin.length() < 0.01
+
+
+## Snapshot for the network: what a puppet needs to follow and animate this car.
+func net_state() -> Dictionary:
+	var flags: int = (NET_FLAG_BRAKING if braking else 0) | (NET_FLAG_HANDBRAKE if handbrake_on else 0) | (NET_FLAG_LIT if occupied or autopilot else 0)
+	return {"xform": global_transform, "vel": velocity, "steer": _steering, "speed": longitudinal_speed, "flags": flags}
+
+
+## Buffers a driver's snapshot (`time` = local receive time in seconds).
+func push_net_state(time: float, state: Dictionary) -> void:
+	if not _net_buffer.is_empty():
+		if time <= float(_net_buffer[-1]["t"]):
+			return
+		# A teleport (respawn, reset): jump straight there.
+		if (state["xform"] as Transform3D).origin.distance_to((_net_buffer[-1]["xform"] as Transform3D).origin) > 12.0:
+			_net_buffer.clear()
+	var entry: Dictionary = state.duplicate()
+	entry["t"] = time
+	_net_buffer.append(entry)
+	while _net_buffer.size() > 24:
+		_net_buffer.pop_front()
+	if _net_buffer.size() == 1:
+		global_transform = state["xform"]
+
+
+## Becomes (or stops being) a puppet. Leaving puppet mode keeps the last velocity so a car
+## whose driver got out rolls on naturally under local simulation.
+func set_net_puppet(on: bool) -> void:
+	if on == net_puppet:
+		return
+	net_puppet = on
+	_net_buffer.clear()
+	_resting = false
+
+
+func _follow_net(delta: float) -> void:
+	if _net_buffer.is_empty():
+		return
+	var render: float = Time.get_ticks_msec() / 1000.0 - NET_DELAY
+	var older: Dictionary = _net_buffer[0]
+	var newer: Dictionary = _net_buffer[-1]
+	for index: int in range(_net_buffer.size() - 1):
+		if float(_net_buffer[index + 1]["t"]) >= render:
+			older = _net_buffer[index]
+			newer = _net_buffer[index + 1]
+			break
+	var span: float = maxf(float(newer["t"]) - float(older["t"]), 0.001)
+	var weight: float = clampf((render - float(older["t"])) / span, 0.0, 1.0)
+	var from: Transform3D = older["xform"]
+	var to: Transform3D = newer["xform"]
+	var target: Transform3D = from.interpolate_with(to, weight)
+	if render > float(newer["t"]):
+		# Past the newest snapshot: coast on its velocity for up to 0.2 s.
+		var ahead: float = minf(render - float(newer["t"]), 0.2)
+		target = Transform3D(to.basis, to.origin + (newer["vel"] as Vector3) * ahead)
+	global_transform = target
+	velocity = (newer["vel"] as Vector3)
+	_steering = lerpf(float(older["steer"]), float(newer["steer"]), weight)
+	var speed: float = lerpf(float(older["speed"]), float(newer["speed"]), weight)
+	longitudinal_speed = speed
+	speed_kph = Vector2(velocity.x, velocity.z).length() * 3.6
+	var flags: int = int(newer["flags"])
+	braking = flags & NET_FLAG_BRAKING != 0
+	handbrake_on = flags & NET_FLAG_HANDBRAKE != 0
+	var speed_fraction: float = clampf(absf(speed) / maximum_forward_speed, 0.0, 1.0)
+	_wheel_angle = _steering * lerpf(0.52, 0.12, speed_fraction)
+	_update_visuals(delta, speed, true)
+	if is_instance_valid(_tail_material):
+		var lit: bool = flags & NET_FLAG_LIT != 0 and not disabled
+		_tail_material.emission_energy_multiplier = 3.2 if braking else (0.7 if lit else 0.0)
+		_head_material.emission_energy_multiplier = 1.6 if lit else 0.1
 
 
 ## Practice wheelman: pure-pursuit steering around a waypoint loop, slowing for corners,
@@ -548,9 +634,33 @@ func wake() -> void:
 	_resting = false
 
 
+func is_resting() -> bool:
+	return _resting
+
+
+## Online: the host's word on this car's health.
+func set_net_health(value: float, is_disabled: bool) -> void:
+	health = clampf(value, 0.0, max_health)
+	if is_disabled and not disabled:
+		disabled = true
+		wrecked.emit()
+	elif not is_disabled:
+		disabled = false
+
+
 ## Bullets and crashes wear the vehicle down. At zero the engine dies: it still rolls and
 ## still gives cover, but it will not drive until the round (or the practice world) resets.
 func take_damage(amount: float, _source: Vector3 = Vector3.INF) -> void:
+	if amount <= 0.0 or disabled:
+		return
+	if net_damage_hook.is_valid():
+		net_damage_hook.call(self, amount)
+		return
+	apply_damage(amount)
+
+
+## Changes health directly (offline, or the host resolving online damage).
+func apply_damage(amount: float) -> void:
 	if amount <= 0.0 or disabled:
 		return
 	health = maxf(0.0, health - amount)

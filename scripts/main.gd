@@ -14,6 +14,7 @@ const Factions = preload("res://scripts/factions.gd")
 const CharacterModel = preload("res://scripts/character_model.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
 const NetScript = preload("res://scripts/net.gd")
+const OnlineScript = preload("res://scripts/online.gd")
 const START_CASH: int = 3200
 const DEAL_COST: int = 800
 const PAYOUT: int = 2600
@@ -73,6 +74,8 @@ var drill_guards: Array[FastGuard] = []
 var world: FastWorld
 ## Online session (docs/NET_M1_SPEC.md). Always present; idle offline.
 var net: FastNet
+## The online match: remote players, shared cars, items and host rules (scripts/online.gd).
+var online: FastOnline
 var armory: ArmoryScript
 var effects: EffectsScript
 var sfx: SfxScript
@@ -234,6 +237,8 @@ func _ready() -> void:
 	player.footstep.connect(_on_footstep)
 	player.landed.connect(func(_speed: float): sfx.play("land"))
 	player.died.connect(_on_player_died)
+	# Other players' bodies (layer 3) are solid to you on foot.
+	player.collision_mask = 1 | 4
 	chase = Camera3D.new()
 	chase.fov = 72.0
 	chase.far = 650.0
@@ -251,6 +256,10 @@ func _ready() -> void:
 	_build_lineup()
 	_build_ui()
 	_build_audio()
+	online = OnlineScript.new()
+	online.name = "Online"
+	add_child(online)
+	online.setup(self, net)
 	_load_settings()
 	_apply_crew()
 	_show_title()
@@ -327,7 +336,7 @@ func _all_guards() -> Array[FastGuard]:
 func _setup_input() -> void:
 	var keys: Dictionary = {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"crouch":KEY_CTRL,"jump":KEY_SPACE,"handbrake":KEY_SPACE,"reload":KEY_R,"interact":KEY_E,"buy":KEY_B,"escape":KEY_ESCAPE,"drop":KEY_G,
 		"weapon_1":KEY_1,"weapon_2":KEY_2,"weapon_3":KEY_3,"weapon_4":KEY_4,"weapon_5":KEY_5,"quick_swap":KEY_Q,"horn":KEY_H,"rearm":KEY_T,"fullscreen":KEY_F11,"fps":KEY_F3,
-		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V}
+		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER}
 	for action: String in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
@@ -335,6 +344,8 @@ func _setup_input() -> void:
 		key.physical_keycode = keys[action]
 		InputMap.action_add_event(action, key)
 	InputMap.action_add_event("crouch", _key(KEY_C))
+	InputMap.action_add_event("chat", _key(KEY_KP_ENTER))
+	InputMap.action_add_event("chat", _key(KEY_T))
 	var buttons: Dictionary = {"fire":MOUSE_BUTTON_LEFT,"aim":MOUSE_BUTTON_RIGHT,"weapon_prev":MOUSE_BUTTON_WHEEL_UP,"weapon_next":MOUSE_BUTTON_WHEEL_DOWN,
 		"driveby_aim":MOUSE_BUTTON_RIGHT,"driveby_fire":MOUSE_BUTTON_LEFT}
 	for action: String in buttons:
@@ -428,12 +439,13 @@ func _key(code: Key) -> InputEventKey:
 	return key
 
 func _process(delta: float) -> void:
+	online.tick(delta)
 	if phase == Phase.MENU:
 		_orbit_title(delta)
 		for model: Node3D in lineup:
 			(model as CharacterModel).animate(delta, Vector3.ZERO, false)
 	if phase == Phase.BUY and not paused:
-		buy_time_left -= delta
+		buy_time_left = online.time_left if online.active else buy_time_left - delta
 		# Doors are locked: the player can look around and walk the HQ yard, nothing more.
 		var offset: Vector3 = player.global_position - hq_spawn
 		offset.y = 0.0
@@ -442,10 +454,12 @@ func _process(delta: float) -> void:
 			player.global_position = Vector3(held.x, player.global_position.y, held.z)
 		if is_instance_valid(buy_status):
 			_update_buy_status()
-		if buy_time_left <= 0.0:
+		if buy_time_left <= 0.0 and not online.active:
 			_start_live()
 	if phase == Phase.LIVE and not paused:
-		if not free_roam:
+		if online.active:
+			time_left = online.time_left
+		elif not free_roam:
 			time_left -= delta
 			_tick_tip(delta)
 			if time_left <= 0.0:
@@ -524,6 +538,12 @@ func _notification(what: int) -> void:
 		_pause()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if online.is_typing():
+		return
+	if online.active and event.is_action_pressed("chat") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
+		online.open_chat()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventJoypadButton and event.is_action_pressed("ui_cancel") and menu.visible and _menu_back.is_valid():
 		_menu_back.call()
 		return
@@ -594,6 +614,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		if ride != null:
 			_ride(ride)
 			return
+	if event.is_action_pressed("drop") and online.drop():
+		return
 	if event.is_action_pressed("drop") and carrying:
 		carrying = false
 		case_mesh.position = player.position - player.global_basis.z * 1.2
@@ -643,7 +665,9 @@ func _interact() -> void:
 			return
 		_exit_vehicle()
 		return
-	if not free_roam:
+	if online.active and online.interact():
+		return
+	if not free_roam and not online.active:
 		if _tip_interact():
 			return
 		if carrying and _flat_distance(player.position,HOME) < 4.5:
@@ -719,6 +743,10 @@ func _ride(target: FastCar) -> void:
 func _enter_vehicle(target: FastCar, index: int) -> void:
 	if target == null or not target.seat_free(index) or player.is_dead():
 		return
+	# Online the host hands out seats; we get in when it says so (FastOnline._on_seat_update).
+	if online.active and not online.seat_granted(target, index):
+		online.request_seat(target, index)
+		return
 	vehicle = target
 	seat = index
 	car = target
@@ -792,6 +820,7 @@ func _exit_vehicle(force: bool = false) -> bool:
 	var info: Dictionary = leaving.seat_info(seat)
 	leaving.set_window_open(int(info.get("pane", -1)), false)
 	leaving.occupants[seat] = ""
+	online.leave_seat(leaving, seat)
 	if seat == 0:
 		leaving.occupied = false
 	player.remove_collision_exception_with(leaving)
@@ -827,6 +856,13 @@ func _swap_seat() -> void:
 	if next < 0:
 		_message("No free seat to move to.")
 		return
+	if online.active:
+		online.request_seat(vehicle, next)
+		return
+	_swap_to_seat(next)
+
+## Moves the player to another seat of the vehicle they are in.
+func _swap_to_seat(next: int) -> void:
 	var info: Dictionary = vehicle.seat_info(seat)
 	vehicle.set_window_open(int(info.get("pane", -1)), false)
 	vehicle.occupants[seat] = ""
@@ -1186,6 +1222,9 @@ func _respawn() -> void:
 func _on_player_died() -> void:
 	if vehicle != null:
 		_exit_vehicle(true)
+	if online.active:
+		online.on_local_death()
+		return
 	if free_roam:
 		respawn_timer = 2.6
 		_message("You were dropped. Respawning at the armory...")
@@ -1598,6 +1637,16 @@ func _update_gps(delta: float) -> void:
 	if _gps_timer > 0.0:
 		return
 	_gps_timer = 1.0
+	if online.active:
+		var goal: Vector3 = online.gps_target()
+		gps_color = TEAL if goal == HOME else GOLD
+		if goal == Vector3.INF or _flat_distance(player.global_position, goal) < 12.0:
+			gps_path = PackedVector3Array()
+			return
+		gps_path = world.route(player.global_position, goal)
+		if not gps_path.is_empty():
+			gps_path.append(goal)
+		return
 	var target: Vector3 = Vector3.INF
 	if carrying or tip_state == "carried":
 		target = HOME
@@ -1680,7 +1729,7 @@ func _show_title() -> void:
 	chase.make_current()
 	_clear_menu()
 	_menu_back = Callable()
-	_heading("FAST\nTALKERS", "PORT HALCYON  /  PROTOTYPE 0.4")
+	_heading("FAST\nTALKERS", "PORT HALCYON  /  PROTOTYPE 0.6")
 	_text("GOOD BUSINESS.  BAD COMPANY.",22,GOLD)
 	var identity: Dictionary = Factions.get_crew(crew)
 	_button("CREW:  %s  (%s)" % [identity["name"], str(identity["kind"]).to_upper()], func():
@@ -1688,6 +1737,8 @@ func _show_title() -> void:
 		_apply_crew()
 		_save_settings()
 		_show_title())
+	_button("PLAY ONLINE  /  HOST OR JOIN A MATCH  →", online.show_lobby)
+	_text("The deal round with friends: LAN, Tailscale or a forwarded port. Players only, no bots.", 14, MUTED)
 	_button("FREE ROAM  /  ARMORY, RANGE & MOTOR POOL  →", _start_free_roam)
 	_text("No clock, no money. Every weapon and vehicle, the range and practice bots.", 14, MUTED)
 	_button("CONTRACT  /  ROUND MODE  →",func():
@@ -1699,7 +1750,7 @@ func _show_title() -> void:
 	_text("Buy at your HQ, get the case from the Exchange by deal or by force, bring it home.", 14, MUTED)
 	_button("CONTROLS & SETTINGS",func(): _settings(true))
 	_button("QUIT",func(): get_tree().quit())
-	_text("OFFLINE PRACTICE BUILD  •  Bots exist only here; real matches are players only.\nMultiplayer and proximity voice are planned, not in this build.",13,MUTED)
+	_text("Offline modes use practice bots; online matches are players only.\nVoice: use Discord for now. In-game proximity voice is planned.",13,MUTED)
 	menu.show()
 
 func _orbit_title(delta: float) -> void:
@@ -1713,6 +1764,13 @@ func _pause() -> void:
 	_lock_controls(true)
 	_clear_menu()
 	_menu_back = _resume
+	if online.active:
+		_heading("ON HOLD", "ONLINE MATCH  /  THE CITY KEEPS MOVING")
+		_button("RESUME", _resume)
+		_button("CONTROLS & SETTINGS", func(): _settings(false))
+		_button("LEAVE MATCH", online.leave_match)
+		menu.show()
+		return
 	if free_roam:
 		_heading("ON HOLD", "FREE ROAM  /  PAUSED")
 		_button("RESUME",_resume)
@@ -1916,8 +1974,8 @@ func _lock_controls(lock: bool) -> void:
 	paused = lock
 	player.enabled = not lock
 	for ride: FastCar in cars:
-		ride.enabled = not lock and phase != Phase.BUY
-		ride.set_physics_process(not lock)
+		ride.enabled = (not lock or online.active) and phase != Phase.BUY
+		ride.set_physics_process(not lock or online.active)
 	for guard: FastGuard in _all_guards(): guard.active = not lock and phase == Phase.LIVE and guard.visible
 	for target: StaticBody3D in armory.get("targets"):
 		target.set("active", not lock)
@@ -1967,7 +2025,12 @@ func _on_shot(origin: Vector3,direction: Vector3,damage: float) -> void:
 		var headshot: bool = collider.has_method("hit_zone") and str(collider.call("hit_zone", end)) == "head"
 		if headshot:
 			amount *= float(stats.get("headshot", 2.0))
-		if collider is FastGuard:
+		if collider is FastRemote:
+			if online.active:
+				online.claim_hit(collider as FastRemote, amount, headshot, origin, end)
+			_register_hit(headshot, false)
+			effects.call("impact", end, hit.normal, "flesh")
+		elif collider is FastGuard:
 			var guard: FastGuard = collider as FastGuard
 			var was_alive: bool = guard.health > 0.0
 			guard.take_damage(amount)
@@ -2014,8 +2077,9 @@ func _break_car_glass(from: Vector3, to: Vector3) -> void:
 				break
 			ride.break_glass(int(pane["index"]), pane["position"])
 
-func _on_car_glass_broken(_index: int, at: Vector3, _ride: FastCar) -> void:
+func _on_car_glass_broken(index: int, at: Vector3, ride: FastCar) -> void:
 	sfx.play_at("glass", at, randf_range(0.92, 1.1))
+	online.glass_broken(ride, index)
 
 func _register_hit(headshot: bool, killed: bool) -> void:
 	_trigger_hit = true
@@ -2066,6 +2130,7 @@ func _on_weapon_fired(id: String) -> void:
 	_rumble(power[0], power[1], 0.09)
 	var stats: Dictionary = player.weapon_stats()
 	var quiet: bool = bool(stats.get("quiet", false))
+	online.weapon_fired(quiet)
 	if quiet:
 		sfx.play("suppressed", 1.35 - clampf(float(stats["damage"]) / 100.0, 0.0, 0.6))
 	else:
@@ -2432,7 +2497,9 @@ func _update_hud() -> void:
 		return
 	var seconds: int = maxi(0,int(ceil(time_left)))
 	var stats: Dictionary = player.weapon_stats()
-	if free_roam:
+	if online.active:
+		online.update_hud()
+	elif free_roam:
 		top_left.text = "%s    /    FREE ROAM" % Factions.get_crew(crew)["name"]
 		top_center.text = "ARMORY OPEN"
 		top_center.add_theme_color_override("font_color", TEAL)
@@ -2506,7 +2573,11 @@ func _update_hud() -> void:
 
 func _prompt_text() -> String:
 	if player.is_dead():
-		return "RESPAWNING..." if free_roam else ""
+		return "RESPAWNING..." if free_roam or online.active else ""
+	if online.active and vehicle == null:
+		var online_prompt: String = online.prompt_text()
+		if not online_prompt.is_empty():
+			return online_prompt
 	if vehicle != null:
 		if absf(vehicle.speed_kph) > 8.0:
 			return "[%s]  ASK THE WHEELMAN TO PULL OVER" % _glyph("interact") if seat != 0 and vehicle.autopilot else ""
@@ -2680,6 +2751,7 @@ func _draw_map() -> void:
 	mini_map.draw_rect(Rect2(Vector2.ZERO, mini_map.size), Color(0.07, 0.16, 0.21, 0.94))
 	_draw_city(mini_map, _radar_point, scale, false)
 	_draw_gps(mini_map, _radar_point, 2.5)
+	online.draw_markers(mini_map, _radar_point, true)
 	var center: Vector2 = mini_map.size * 0.5
 	if free_roam:
 		_radar_marker(ArmoryScript.RACK, TEAL)
@@ -2758,6 +2830,7 @@ func _draw_full_map() -> void:
 	full_map.draw_rect(Rect2(Vector2(290, 0), full_map.size - Vector2(290, 0)), Color(0.06, 0.15, 0.2, 0.95))
 	_draw_city(full_map, _full_map_point, scale, true)
 	_draw_gps(full_map, _full_map_point, 3.0)
+	online.draw_markers(full_map, _full_map_point, false)
 	var facing: Vector3 = _facing()
 	_draw_arrow(full_map, _full_map_point(player.global_position), Vector2(facing.x, facing.z), 9.0, Color.WHITE)
 	if free_roam:
