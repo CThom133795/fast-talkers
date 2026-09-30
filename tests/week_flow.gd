@@ -111,6 +111,8 @@ func _run() -> void:
 func _pure_checks() -> void:
 	var script: GDScript = online.get_script()
 	_check(script.weekday_index_of(1, 5) == 0 and script.weekday_index_of(5, 5) == 4, "a 5-Day Week runs Monday to Friday")
+	var blood: Array = script.blood_lines({"kingsway>morris": 2, "morris>kingsway": 1, "bogus": 3})
+	_check(blood.size() == 2 and str(blood[0]).contains("ROYALS dropped MORRIS x2") and str(blood[1]).contains("MORRIS dropped ROYALS."), "the morning paper names who shot whom (%s)" % str(blood))
 	_check(script.weekday_index_of(1, 3) == 2 and script.weekday_index_of(3, 3) == 4, "a 3-Day Week runs Wednesday to Friday, so it still ends on the Dead Drop")
 	# The Dead Drop always lands on a road, near a neutral landmark, and never inside a building footprint.
 	var bad: int = 0

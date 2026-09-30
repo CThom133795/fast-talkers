@@ -479,7 +479,7 @@ func _on_player_died(id: int, killer: int, pos: Vector3) -> void:
 		var a: String = net.crew_of(killer)
 		var b: String = net.crew_of(id)
 		if killer > 0 and not a.is_empty() and a != b:
-			_kills["%s>%s" % [a, b]] = true
+			_kills["%s>%s" % [a, b]] = int(_kills.get("%s>%s" % [a, b], 0)) + 1
 	var text: String = "%s was dropped" % net.name_of(id)
 	if killer > 0 and killer != id:
 		text += " by %s" % net.name_of(killer)
@@ -1556,7 +1556,23 @@ func _host_settle() -> void:
 				net.grant_to(id, bonus, "Clean deal")
 	if results.is_empty():
 		results.append("Time ran out. Nobody banked anything.")
+	# Tomorrow's paper also says who shot whom: yesterday's grudges are today's phone calls.
+	results.append_array(blood_lines(_kills))
 	_host_set_phase("settle", settle_seconds)
+
+
+## "MORRIS dropped ROYALS x2" lines from the Day's crew-on-crew kills ("a>b" -> count). Pure: tests call it.
+static func blood_lines(kills: Dictionary) -> Array:
+	var lines: Array = []
+	var keys: Array = kills.keys()
+	keys.sort()
+	for key: Variant in keys:
+		var pair: PackedStringArray = str(key).split(">")
+		if pair.size() != 2 or not Factions.DATA.has(pair[0]) or not Factions.DATA.has(pair[1]):
+			continue
+		var count: int = int(kills[key])
+		lines.append("Blood on the street: %s dropped %s%s." % [Factions.get_crew(pair[0])["short"], Factions.get_crew(pair[1])["short"], (" x%d" % count) if count > 1 else ""])
+	return lines
 
 
 func _host_drop_all(id: int, pos: Vector3) -> void:
