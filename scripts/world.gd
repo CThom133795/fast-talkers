@@ -86,6 +86,8 @@ var eye_blockers: Array[Rect2] = []
 var lod_lots: Array[Dictionary] = []
 ## Corner polygons of the traffic-calming kerb islands the fill pass put in the streets (see city_fill.gd).
 var calming_islands: Array[PackedVector2Array] = []
+## Per island: {center, u (along the street), n (across), width, side (which kerb), axis (the street's centre line at the island)}.
+var calming_info: Array[Dictionary] = []
 ## Beyond this distance a fill building is drawn as its massing box only.
 const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
@@ -491,6 +493,9 @@ func door_near(at: Vector3, radius: float = 2.2) -> int:
 ## point on the road nearest `from` to the point on the road nearest `to` (y = 0).
 ## Empty if unreachable.
 func route(from: Vector3, to: Vector3) -> PackedVector3Array:
+	return _weave_islands(_route_raw(from, to))
+
+func _route_raw(from: Vector3, to: Vector3) -> PackedVector3Array:
 	if _graph_points.is_empty():
 		_build_road_graph()
 	var path: PackedVector3Array = PackedVector3Array()
@@ -555,10 +560,54 @@ func wheelman_path(from: Vector3) -> PackedVector3Array:
 	path.append_array(road_loop)
 	return path
 
+## Adds waypoints in the open lane wherever the route runs into a traffic-calming kerb island, so the GPS line
+## and the practice wheelman thread each chicane instead of running down the centre line into it (`route()`
+## returns the woven path; the extra distance is a few metres per chicane).
+func _weave_islands(path: PackedVector3Array) -> PackedVector3Array:
+	if calming_info.is_empty():
+		return path
+	var woven: PackedVector3Array = PackedVector3Array()
+	for index: int in range(path.size()):
+		woven.append(path[index])
+		if index + 1 >= path.size():
+			break
+		var a: Vector2 = Vector2(path[index].x, path[index].z)
+		var b: Vector2 = Vector2(path[index + 1].x, path[index + 1].z)
+		var length: float = a.distance_to(b)
+		if length < 0.5:
+			continue
+		var hits: Array = []
+		for info: Dictionary in calming_info:
+			var centre: Vector2 = info["center"]
+			if centre.distance_to((a + b) * 0.5) > length * 0.5 + 8.0:
+				continue
+			var half_reach: float = float(info["width"]) * 0.5 + 1.6
+			var t: float = (centre - a).dot((b - a) / length)
+			if t < 0.0 or t > length:
+				continue
+			var closest: Vector2 = a + (b - a) / length * t
+			var offset: Vector2 = closest - centre
+			if absf(offset.dot(info["n"])) < half_reach and absf(offset.dot(info["u"])) < 4.0:
+				hits.append([t, info])
+		hits.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) < float(q[0]))
+		for hit: Array in hits:
+			var info: Dictionary = hit[1]
+			var free: Vector2 = (info["axis"] as Vector2) - (info["n"] as Vector2) * float(info["side"]) * float(info["width"]) * 0.5
+			# Approach and exit points 9 m either side of the island, in the open lane (the pure-pursuit bot
+			# switches waypoint 7 m early, so it clears the island's edge before it turns for the next one).
+			var heading: Vector2 = (b - a) / length
+			var approach: Vector2 = free - heading * 9.0
+			var leave: Vector2 = free + heading * 9.0
+			woven.append(Vector3(approach.x, 0.0, approach.y))
+			woven.append(Vector3(free.x, 0.0, free.y))
+			woven.append(Vector3(leave.x, 0.0, leave.y))
+	return woven
+
 ## Length in metres of `route(from, to)` plus the walk from each point to its road (INF if
 ## there is no way through).
 func route_length(from: Vector3, to: Vector3) -> float:
-	var path: PackedVector3Array = route(from, to)
+	# The street-graph distance (the crews' fairness metric); `route()` adds a few metres of chicane weave.
+	var path: PackedVector3Array = _route_raw(from, to)
 	if path.is_empty():
 		return INF
 	var total: float = Vector2(from.x - path[0].x, from.z - path[0].z).length() + Vector2(to.x - path[path.size() - 1].x, to.z - path[path.size() - 1].z).length()

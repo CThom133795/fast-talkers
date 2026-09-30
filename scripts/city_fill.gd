@@ -823,7 +823,7 @@ func _dress_alleys() -> void:
 ## parked cars. Every island is recorded in `world.calming_islands` (corner polygons) for the tests.
 const CALM_SPACING: float = 100.0
 const CALM_LENGTH: float = 4.0
-const CALM_PAIR_GAP: float = 14.0
+const CALM_PAIR_GAP: float = 20.0
 const KIOSKS: PackedStringArray = ["NEWS & TOBACCO", "FLOWERS", "PRETZELS", "LOTTO", "BUS TOKENS", "COFFEE", "MAPS & CARDS", "FRESH JUICE"]
 const BOARDS: PackedStringArray = ["MILLENNIUM SALE", "VISIT THE PIER", "HALCYON RADIO 98.7", "LOTTO TONIGHT", "GRAND OPENING", "CALL 555-0142", "RENT A STORAGE UNIT", "PORT HALCYON SAVINGS"]
 var _calm_index: int = 0
@@ -833,12 +833,12 @@ var _calm_cells: Dictionary = {}
 ## The longest 2D sightlines down the streets are found first (a ray along every street every 30 m, blocked
 ## by lots, footprints, props and the islands already placed) and a chicane pair goes ~90-125 m along each
 ## one that runs past SIGHT_LIMIT, in three passes, so islands land where the views actually are.
-const SIGHT_LIMIT: float = 135.0
+const SIGHT_LIMIT: float = 110.0
 var _hot: Array = []
 
 func _calming() -> void:
 	# Existing islands (none at first) block rays; each new pair is registered as it is placed.
-	for pass_index: int in range(4):
+	for pass_index: int in range(5):
 		_hot.clear()
 		for road_index: int in range(w.roads.size()):
 			var road: Dictionary = w.roads[road_index]
@@ -937,6 +937,16 @@ func _march(p: Vector2, dir: Vector2) -> Array:
 
 
 func _calm_ok(p: Vector2, q: Vector2, road_index: int) -> bool:
+	# The practice wheelman's downtown ring (world.road_loop, a square at +-85 m) stays free of chicanes.
+	# Both islands lie on this one straight stretch of the street.
+	for spot: Vector2 in [p, q, (p + q) * 0.5]:
+		if _road_at(spot) != road_index:
+			_why("c-bend")
+			return false
+	for spot: Vector2 in [p, q, (p + q) * 0.5]:
+		var outline: float = maxf(absf(spot.x), absf(spot.y))
+		if minf(absf(spot.x), absf(spot.y)) < 96.0 and absf(outline - 85.0) < 9.0:
+			return false
 	# Nothing solid already stands in the carriageway here (a wall or prop that intrudes on the road).
 	var along: Vector2 = (q - p).normalized()
 	var across: Vector2 = Vector2(-along.y, along.x)
@@ -960,9 +970,9 @@ func _calm_ok(p: Vector2, q: Vector2, road_index: int) -> bool:
 		if w.door_within(at, 5.0):
 			_why("c-door")
 			return false
-		# Chicane pairs keep 26 m from each other, so a car can always thread each one.
+		# Chicane pairs keep 27 m from each other, so a car can always thread each one.
 		for poly: PackedVector2Array in w.calming_islands:
-			if (poly[0] + poly[2]) * 0.5 != Vector2.ZERO and ((poly[0] + poly[2]) * 0.5).distance_to(at) < 26.0:
+			if (poly[0] + poly[2]) * 0.5 != Vector2.ZERO and ((poly[0] + poly[2]) * 0.5).distance_to(at) < 27.0:
 				_why("c-island")
 				return false
 		for vehicle: Dictionary in w.parked_vehicles:
@@ -1002,6 +1012,7 @@ func _island(at: Vector2, u: Vector2, n: Vector2, half: float, side: float) -> v
 	for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
 		corners.append(center + n * corner.x * width * 0.5 + u * corner.y * CALM_LENGTH * 0.5)
 	w.calming_islands.append(corners)
+	w.calming_info.append({"center": center, "u": u, "n": n, "width": width, "side": side, "axis": center - n * lateral})
 	_register_obb(_obbs, center, n, u, width * 0.5, CALM_LENGTH * 0.5)
 	w._target = _calm_node(center)
 	w._xf = Transform3D.IDENTITY
