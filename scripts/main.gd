@@ -193,6 +193,15 @@ var _interior_bed: String = ""
 var _interior_bed_player: AudioStreamPlayer
 var _interior_nodes: Array[Node3D] = []
 var _interiors_scanned: bool = false
+## Coarse grid over the walk-in interiors (cell -> indices into _interior_nodes, ascending), built once after the
+## world exists: the host looks a building up for every voice frame, so it must not scan all ~700 of them.
+var _interior_grid: Dictionary = {}
+const INTERIOR_CELL: float = 32.0
+## Same idea for doors (cell -> indices into world.interactable_doors). Lift doors move, so they are listed apart.
+var _door_grid: Dictionary = {}
+var _door_lifts: PackedInt32Array = PackedInt32Array()
+var _door_grid_count: int = -1
+const DOOR_CELL: float = 16.0
 ## Round summary bookkeeping (contract rounds).
 var _round_started_msec: int = 0
 var _round_shots_base: int = 0
@@ -301,6 +310,9 @@ func _ready() -> void:
 				if bool(door.get("open", false)) and door.get("position") is Vector3:
 					open_doors.append(door["position"])
 		return open_doors
+	# The host routes every voice frame: only the open doorways next to the talker matter (grid lookup).
+	net.voice_doors_near = _open_doors_near
+	voice.phone_locator = online.phone_voice_position
 	_load_settings()
 	_apply_crew()
 	_show_title()
@@ -418,7 +430,7 @@ func _setup_input() -> void:
 	var keys: Dictionary = {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"crouch":KEY_CTRL,"jump":KEY_SPACE,"handbrake":KEY_SPACE,"reload":KEY_R,"interact":KEY_E,"buy":KEY_B,"escape":KEY_ESCAPE,"drop":KEY_G,
 		"weapon_1":KEY_1,"weapon_2":KEY_2,"weapon_3":KEY_3,"weapon_4":KEY_4,"weapon_5":KEY_5,"quick_swap":KEY_Q,"horn":KEY_H,"rearm":KEY_T,"fullscreen":KEY_F11,"fps":KEY_F3,
 		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER,
-		"hands_up":KEY_X,"binoculars":KEY_Z,"voice_radio":KEY_Y,"voice_ptt":KEY_N,"drop_phone":KEY_K}
+		"hands_up":KEY_X,"binoculars":KEY_Z,"voice_radio":KEY_Y,"voice_ptt":KEY_N,"drop_phone":KEY_K,"phone_call":KEY_P}
 	for action: String in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
@@ -468,6 +480,9 @@ func _setup_gamepad() -> void:
 		# R3 is only the vehicle camera, so on foot it is free: hands up. Binoculars (hold D-pad up) and the
 		# phone drop (hold D-pad down) are timed holds handled in _pad_hold_update, not plain button actions.
 		"hands_up": [JOY_BUTTON_RIGHT_STICK],
+		# D-pad left is also the shop: online.phone_input only takes the press while you hold a phone
+		# (or a call is ringing / live) and you are not at the HQ counter or in the buy phase.
+		"phone_call": [JOY_BUTTON_DPAD_LEFT],
 	}
 	for action: String in pad_buttons:
 		if not InputMap.has_action(action):
@@ -505,7 +520,7 @@ const GLYPHS: Dictionary = {
 	"weapons": ["1-5", "LB / RB", "L1 / R1"], "handbrake": ["SPACE", "A", "CROSS"],
 	"drive": ["W / S", "RT / LT", "R2 / L2"], "steer": ["A / D", "L-STICK", "L-STICK"], "look": ["MOUSE", "R-STICK", "R-STICK"],
 	"seat": ["F", "D-PAD RIGHT", "D-PAD RIGHT"], "camera_toggle": ["V", "R3", "R3"], "hands_up": ["X", "R3", "R3"],
-	"binoculars": ["Z", "HOLD D-PAD UP", "HOLD D-PAD UP"], "drop_phone": ["K", "HOLD D-PAD DOWN", "HOLD D-PAD DOWN"], "driveby_aim": ["HOLD RMB", "HOLD LB", "HOLD L1"], "driveby_fire": ["LMB", "RB", "R1"],
+	"binoculars": ["Z", "HOLD D-PAD UP", "HOLD D-PAD UP"], "drop_phone": ["K", "HOLD D-PAD DOWN", "HOLD D-PAD DOWN"], "phone_call": ["P", "D-PAD LEFT", "D-PAD LEFT"], "driveby_aim": ["HOLD RMB", "HOLD LB", "HOLD L1"], "driveby_fire": ["LMB", "RB", "R1"],
 }
 
 ## Prompt name for an action on the device the player is using right now.
@@ -638,6 +653,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton and not event.pressed:
 		_pad_hold_release((event as InputEventJoypadButton).button_index)
 	if online.is_typing():
+		return
+	# P (D-pad left) works the crew phone: dial, answer, hang up. While the dial strip is open it also takes 1-4, ESC.
+	if online.active and (phase == Phase.LIVE or phase == Phase.BUY) and not paused and not buy_menu_open and online.phone_input(event):
+		get_viewport().set_input_as_handled()
 		return
 	if online.active and event.is_action_pressed("chat") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
 		online.open_chat()
@@ -1930,21 +1949,95 @@ func _building_around_player() -> Node3D:
 
 
 ## The walk-in building around a world point, or null (also used by the voice relay to decide who
-## shares a room with whom).
+## shares a room with whom). Looks only at the interiors in the point's grid cell.
 func _building_at(at: Vector3) -> Node3D:
 	if not _interiors_scanned and is_instance_valid(world):
 		_interiors_scanned = true
 		_collect_interiors(world, 0)
-	for node: Node3D in _interior_nodes:
+		_build_interior_grid()
+	var cell: Vector2i = Vector2i(floori(at.x / INTERIOR_CELL), floori(at.z / INTERIOR_CELL))
+	for index: int in (_interior_grid.get(cell, PackedInt32Array()) as PackedInt32Array):
+		var node: Node3D = _interior_nodes[index]
 		if not is_instance_valid(node):
 			continue
 		var local: Vector3 = node.global_transform.affine_inverse() * at
 		var half: Vector2 = node.get_meta("interior_half")
 		# Garage roof deck and the motel's roof walkway are open air.
-		var ceiling: float = 5.5 if node.name.begins_with("Garage") else (4.3 if node.name.begins_with("Motel") else 9.0)
+		var ceiling: float = _interior_ceiling(node)
 		if absf(local.x) < half.x and absf(local.z) < half.y and local.y > -1.0 and local.y < ceiling:
 			return node
 	return null
+
+
+func _interior_ceiling(node: Node3D) -> float:
+	return 5.5 if node.name.begins_with("Garage") else (4.3 if node.name.begins_with("Motel") else 9.0)
+
+
+## Files every interior under the grid cells its world-space box touches (buildings never move).
+func _build_interior_grid() -> void:
+	_interior_grid.clear()
+	for index: int in range(_interior_nodes.size()):
+		var node: Node3D = _interior_nodes[index]
+		if not is_instance_valid(node):
+			continue
+		var half: Vector2 = node.get_meta("interior_half")
+		var low: Vector2 = Vector2(INF, INF)
+		var high: Vector2 = Vector2(-INF, -INF)
+		for corner: Vector2 in [Vector2(-half.x, -half.y), Vector2(half.x, -half.y), Vector2(-half.x, half.y), Vector2(half.x, half.y)]:
+			for y: float in [-1.0, _interior_ceiling(node)]:
+				var world_point: Vector3 = node.global_transform * Vector3(corner.x, y, corner.y)
+				low = Vector2(minf(low.x, world_point.x), minf(low.y, world_point.z))
+				high = Vector2(maxf(high.x, world_point.x), maxf(high.y, world_point.z))
+		for cx: int in range(floori(low.x / INTERIOR_CELL), floori(high.x / INTERIOR_CELL) + 1):
+			for cz: int in range(floori(low.y / INTERIOR_CELL), floori(high.y / INTERIOR_CELL) + 1):
+				var cell: Vector2i = Vector2i(cx, cz)
+				var list: PackedInt32Array = _interior_grid.get(cell, PackedInt32Array())
+				list.append(index)
+				_interior_grid[cell] = list
+
+
+## Positions of the currently OPEN doorways within `radius` metres of `at` (voice routing asks for the talker's
+## DOOR_RADIUS). Doors are filed in a grid once; lift doors move with their car, so they are checked live.
+func _open_doors_near(at: Vector3, radius: float) -> Array:
+	var out: Array = []
+	if not is_instance_valid(world):
+		return out
+	var doors: Array[Dictionary] = world.interactable_doors
+	if _door_grid_count != doors.size():
+		_build_door_grid()
+	var low: Vector2i = Vector2i(floori((at.x - radius) / DOOR_CELL), floori((at.z - radius) / DOOR_CELL))
+	var high: Vector2i = Vector2i(floori((at.x + radius) / DOOR_CELL), floori((at.z + radius) / DOOR_CELL))
+	for cx: int in range(low.x, high.x + 1):
+		for cz: int in range(low.y, high.y + 1):
+			for index: int in (_door_grid.get(Vector2i(cx, cz), PackedInt32Array()) as PackedInt32Array):
+				_add_open_door(doors[index], at, radius, out)
+	for index: int in _door_lifts:
+		_add_open_door(doors[index], at, radius, out)
+	return out
+
+
+func _add_open_door(door: Dictionary, at: Vector3, radius: float, out: Array) -> void:
+	if bool(door.get("open", false)) and door.get("position") is Vector3 and at.distance_to(door["position"]) <= radius:
+		out.append(door["position"])
+
+
+func _build_door_grid() -> void:
+	_door_grid.clear()
+	_door_lifts = PackedInt32Array()
+	var doors: Array[Dictionary] = world.interactable_doors
+	_door_grid_count = doors.size()
+	for index: int in range(doors.size()):
+		var door: Dictionary = doors[index]
+		if not (door.get("position") is Vector3):
+			continue
+		if str(door.get("kind", "")) == "lift":
+			_door_lifts.append(index)
+			continue
+		var at: Vector3 = door["position"]
+		var cell: Vector2i = Vector2i(floori(at.x / DOOR_CELL), floori(at.z / DOOR_CELL))
+		var list: PackedInt32Array = _door_grid.get(cell, PackedInt32Array())
+		list.append(index)
+		_door_grid[cell] = list
 
 
 ## Interior sound beds (docs/AUDIO_PASS.md): muffled club bass in the two clubs, room tone in

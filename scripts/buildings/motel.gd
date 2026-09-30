@@ -12,13 +12,14 @@ const HALF: Vector2 = Vector2(14, 11)   # the ground-floor shell (neighborhood_r
 const DECK_Y: float = 4.45               # top of the ground-floor roof slab
 const ROOM_H: float = 3.0
 const ROOMS_FRONT: float = -1.0          # z of the upper rooms' front wall
-const STAIR_X: float = 15.0
+## The stair stands against the wall (its inner edge 0.05 m inside the wall face): no slot between them.
+const STAIR_X: float = 14.8
 const LANDING_Z: Vector2 = Vector2(3.6, 5.6)
 ## Walk routes for tests/building_landmarks.gd (y values are only hints; the test finds the floor).
-const EAST_ROUTE: Array[Vector3] = [Vector3(15.0, 0.16, 14.6), Vector3(15.0, 0.16, 13.2), Vector3(15.0, 4.45, 5.6),
-	Vector3(15.0, 4.45, 4.6), Vector3(12.5, 4.45, 4.6), Vector3(3.5, 4.45, 1.0), Vector3(3.5, 4.45, -0.3), Vector3(3.5, 4.45, -3.0)]
-const WEST_ROUTE: Array[Vector3] = [Vector3(-15.0, 0.16, 14.6), Vector3(-15.0, 0.16, 13.2), Vector3(-15.0, 4.45, 5.6),
-	Vector3(-15.0, 4.45, 4.6), Vector3(-12.5, 4.45, 4.6), Vector3(-10.5, 4.45, 1.0), Vector3(-10.5, 4.45, -0.3), Vector3(-10.5, 4.45, -3.0)]
+const EAST_ROUTE: Array[Vector3] = [Vector3(14.8, 0.16, 14.6), Vector3(14.8, 0.16, 13.2), Vector3(14.8, 4.45, 5.6),
+	Vector3(14.8, 4.45, 4.6), Vector3(12.5, 4.45, 4.6), Vector3(3.5, 4.45, 1.0), Vector3(3.5, 4.45, -0.3), Vector3(3.5, 4.45, -3.0)]
+const WEST_ROUTE: Array[Vector3] = [Vector3(-14.8, 0.16, 14.6), Vector3(-14.8, 0.16, 13.2), Vector3(-14.8, 4.45, 5.6),
+	Vector3(-14.8, 4.45, 4.6), Vector3(-12.5, 4.45, 4.6), Vector3(-10.5, 4.45, 1.0), Vector3(-10.5, 4.45, -0.3), Vector3(-10.5, 4.45, -3.0)]
 
 
 static func build(world: Node3D, plot: Dictionary) -> void:
