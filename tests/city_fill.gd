@@ -340,11 +340,38 @@ func _write_map(grid: PackedByteArray, columns: int, rows: int, expanded: Array[
 						color = Color(0.95, 0.9, 0.3)
 						break
 			image.set_pixel(column, row, color)
-	image.resize(columns * 4, rows * 4, Image.INTERPOLATE_NEAREST)
 	var folder: String = ProjectSettings.globalize_path("res://work/captures")
 	DirAccess.make_dir_recursive_absolute(folder)
+	if OS.get_cmdline_user_args().has("quadrants"):
+		_write_quadrants(image, bounds, folder)
+	image.resize(columns * 4, rows * 4, Image.INTERPOLATE_NEAREST)
 	image.save_png(folder + "/city_fill_map.png")
 	print("MAP written to %s/city_fill_map.png (origin %.0f, %.0f; %.0f m per pixel/2; red = empty land, yellow = enterable building, slate = solid building, grey = road, green = park)" % [folder, bounds.position.x, bounds.position.y, CELL])
+
+
+## Four zoomed quadrant maps (2 px per metre) with a 50 m grid (bright every 100 m), for planning streets.
+func _write_quadrants(image: Image, bounds: Rect2, folder: String) -> void:
+	var scale: int = 8
+	var big: Image = image.duplicate()
+	big.resize(image.get_width() * scale, image.get_height() * scale, Image.INTERPOLATE_NEAREST)
+	var px_per_m: float = float(scale) / CELL
+	for metre_x: int in range(int(ceilf(bounds.position.x / 50.0)) * 50, int(bounds.end.x), 50):
+		var px: int = int((metre_x - bounds.position.x) * px_per_m)
+		var color: Color = Color(1, 1, 1, 1) if metre_x % 100 == 0 else Color(0.55, 0.55, 0.65)
+		for py: int in range(0, big.get_height()):
+			big.set_pixel(px, py, color)
+	for metre_z: int in range(int(ceilf(bounds.position.y / 50.0)) * 50, int(bounds.end.y), 50):
+		var py: int = int((metre_z - bounds.position.y) * px_per_m)
+		var color: Color = Color(1, 1, 1, 1) if metre_z % 100 == 0 else Color(0.55, 0.55, 0.65)
+		for px: int in range(0, big.get_width()):
+			big.set_pixel(px, py, color)
+	var half_w: int = big.get_width() / 2
+	var half_h: int = big.get_height() / 2
+	var names: Array[String] = ["nw", "ne", "sw", "se"]
+	for index: int in range(4):
+		var part: Image = big.get_region(Rect2i((index % 2) * half_w, (index / 2) * half_h, half_w, half_h))
+		part.save_png("%s/city_fill_q_%s.png" % [folder, names[index]])
+	print("QUADRANTS written; origin (%.0f, %.0f), 2 px per metre, quadrant size %d x %d px, split at x %.0f z %.0f" % [bounds.position.x, bounds.position.y, half_w, half_h, bounds.position.x + half_w / px_per_m, bounds.position.y + half_h / px_per_m])
 
 
 # --- No overlaps ------------------------------------------------------------------------------------------

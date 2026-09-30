@@ -13,6 +13,8 @@ const PREFABS_PATH: String = "res://scripts/buildings/prefabs.gd"
 const SEED: int = 8081999
 ## Kerb-to-building setback (a 3.4 m sidewalk), lot gaps, alley width.
 const SETBACK: float = 3.4
+## Coast rows: an 8 m promenade between the quay rail and the lot, and how close a lot may come to the water.
+const PROMENADE: float = 8.0
 const PARTY_GAP: float = 0.8
 const ALLEY: float = 5.0
 const CELL: float = 16.0
@@ -98,6 +100,7 @@ func build() -> void:
 	_index()
 	for road_index: int in range(w.roads.size()):
 		_frontage(road_index)
+	_coast_frontage()
 	for key: Vector3i in _cells:
 		var node: Node3D = _cells[key]
 		w._finish(node)
@@ -273,6 +276,19 @@ func _dist_segment_lot(a: Vector2, b: Vector2, center: Vector2, u: Vector2, v: V
 	return best
 
 
+var fail_reasons: Dictionary = {}
+var _setback: float = SETBACK
+var _coast_gap: float = 8.0
+var _apron_front: float = 0.0
+
+var fail_log: Array = []
+var _last_reason: String = ""
+
+func _why(reason: String) -> void:
+	_last_reason = reason
+	fail_reasons[reason] = int(fail_reasons.get(reason, 0)) + 1
+
+
 ## Can a lot of this size stand here? `own` is the road it fronts (its own kerb gap is the setback).
 func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra: float = 0.0) -> bool:
 	var hw: float = fw * 0.5 + extra
@@ -280,11 +296,13 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 	var poly: PackedVector2Array = _corners(center, u, v, hw + 1.0, hd + 1.0)
 	for point: Vector2 in poly:
 		if not w._on_land(point):
+			_why("land")
 			return false
 		# 8 m off the coast: quay walks and rails stay open.
 		for angle: int in range(0, 8):
-			var probe: Vector2 = point + Vector2.RIGHT.rotated(angle * PI * 0.25) * 8.0
+			var probe: Vector2 = point + Vector2.RIGHT.rotated(angle * PI * 0.25) * _coast_gap
 			if not w._on_land(probe):
+				_why("coast")
 				return false
 	var box: Rect2 = _bounds(poly).grow(1.0)
 	var low: Vector2i = _key(box.position)
@@ -296,23 +314,28 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 			if _rects.has(key):
 				for rect: Rect2 in _rects[key]:
 					if box.intersects(rect) and _obb_hits(center, u, v, hw, hd, rect):
+						_why("rect")
 						return false
 			if _obbs.has(key):
 				for other: Array in _obbs[key]:
 					if _obb_pair(center, u, v, hw + 0.3, hd + 0.3, other):
+						_why("lot")
 						return false
 			if _segs.has(key):
 				for seg: Array in _segs[key]:
 					var gap: float = _dist_segment_lot(seg[0], seg[1], center, u, v, hw, hd)
 					if gap < float(seg[2]) + 2.6:
+						_why("road")
 						return false
 	for index: int in range(_keepout.size()):
 		if box.intersects(_keepout_bounds[index]) and not Geometry2D.intersect_polygons(poly, _keepout[index]).is_empty():
+			_why("park")
 			return false
 	# Not straddling a slab edge: the whole lot (and its apron) is on one surface height.
 	var height: float = _height_at(center)
 	for point: Vector2 in _corners(center, u, v, hw + 0.6, hd + 0.6):
 		if absf(_height_at(point) - height) > 0.02:
+			_why("slab")
 			return false
 	for mid: Vector2 in [center - u * hw, center + u * hw, center - v * hd, center + v * hd]:
 		if absf(_height_at(mid) - height) > 0.02:
@@ -350,6 +373,30 @@ func _limits(kind: String) -> Array:
 	return limits
 
 
+## Waterfront rows: lots along the quay facing the sea over an 8 m promenade (buildings, bars and
+## warehouses with their backs to the land), so the rim of the island is not bare ground.
+func _coast_frontage() -> void:
+	_setback = PROMENADE
+	_coast_gap = 5.0
+	_apron_front = 1.0
+	var mainland: PackedVector2Array = w.land[0]
+	for index: int in range(mainland.size()):
+		var a: Vector2 = mainland[index]
+		var b: Vector2 = mainland[(index + 1) % mainland.size()]
+		var length: float = a.distance_to(b)
+		if length < 18.0:
+			continue
+		var dir: Vector2 = (b - a) / length
+		var mid: Vector2 = (a + b) * 0.5
+		var inward: float = 1.0 if w._on_land(mid + Vector2(-dir.y, dir.x) * 6.0) else -1.0
+		if not w._on_land(mid + Vector2(-dir.y, dir.x) * inward * 6.0):
+			continue
+		_run(a, dir, length, 0.0, inward)
+	_setback = SETBACK
+	_coast_gap = 8.0
+	_apron_front = 0.0
+
+
 func _frontage(road_index: int) -> void:
 	var road: Dictionary = w.roads[road_index]
 	var points: PackedVector2Array = road["points"]
@@ -374,7 +421,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 	var since_alley: int = 0
 	var run_start: float = -1.0
 	while t < length - 5.0:
-		var probe: Vector2 = a + dir * (t + 6.0) + normal * (half + SETBACK + 6.0)
+		var probe: Vector2 = a + dir * (t + 6.0) + normal * (half + _setback + 6.0)
 		var district: String = w.district_at(Vector3(probe.x, 0, probe.y))
 		var kind: String = _pick_kind(district)
 		var limits: Array = _limits(kind)
@@ -383,6 +430,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 			break
 		# The smallest lot first: if it does not fit here, slide on.
 		if not _fits(a, dir, normal, half, t, float(limits[0]), float(limits[2])):
+			fail_log.append([a + dir * (t + 3.0) + normal * (half + _setback + 5.0), _last_reason])
 			t += 3.0
 			if run_start >= 0.0:
 				run_start = -1.0
@@ -395,14 +443,14 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 				break
 			fw = maxf(float(limits[0]), fw - 2.0)
 			dp = maxf(float(limits[2]), dp - 1.5)
-		var center: Vector2 = a + dir * (t + fw * 0.5) + normal * (half + SETBACK + dp * 0.5)
+		var center: Vector2 = a + dir * (t + fw * 0.5) + normal * (half + _setback + dp * 0.5)
 		_build_lot(kind, district, center, dir, back, front, fw, dp, limits)
 		if run_start < 0.0:
 			run_start = t
 		t += fw
 		since_alley += 1
 		if since_alley >= 3 + rng.randi() % 3 or t - run_start > 58.0:
-			_alley(a + dir * (t + ALLEY * 0.5) + normal * (half + SETBACK), dir, back, dp)
+			_alley(a + dir * (t + ALLEY * 0.5) + normal * (half + _setback), dir, back, dp)
 			t += ALLEY
 			since_alley = 0
 			run_start = -1.0
@@ -411,7 +459,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 
 
 func _fits(a: Vector2, dir: Vector2, normal: Vector2, half: float, t: float, fw: float, dp: float) -> bool:
-	var center: Vector2 = a + dir * (t + fw * 0.5) + normal * (half + SETBACK + dp * 0.5)
+	var center: Vector2 = a + dir * (t + fw * 0.5) + normal * (half + _setback + dp * 0.5)
 	return _clear(center, dir, normal, fw, dp)
 
 
@@ -470,8 +518,8 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 	# lot already stands on a block plinth).
 	var ground: float = _height_at(center)
 	if ground < 0.05:
-		var apron_depth: float = dp + SETBACK + 1.0
-		var apron_center: Vector2 = center - back * (SETBACK * 0.5 - 0.5)
+		var apron_depth: float = dp + _setback - _apron_front + 1.0
+		var apron_center: Vector2 = center - back * ((_setback - _apron_front) * 0.5 - 0.5)
 		var yaw: float = atan2(-u.y, u.x)
 		w._target = _cell_node(center)
 		w._xf = Transform3D.IDENTITY
@@ -479,7 +527,7 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 		w._slab_rot(apron_center, Vector2(fw + 1.6, apron_depth), yaw, Color(0.5, 0.49, 0.45))
 		# A street lamp on the kerb side of the apron.
 		if rng.randf() < 0.5:
-			w._lamp(Vector3(center.x + front.x * (dp * 0.5 + SETBACK - 1.3), 0.16, center.y + front.y * (dp * 0.5 + SETBACK - 1.3)), Vector3(front.x, 0, front.y).round() if absf(front.x) > 0.5 or absf(front.y) > 0.5 else Vector3.BACK)
+			w._lamp(Vector3(center.x + front.x * (dp * 0.5 + _setback - 1.3), 0.16, center.y + front.y * (dp * 0.5 + _setback - 1.3)), Vector3(front.x, 0, front.y).round() if absf(front.x) > 0.5 or absf(front.y) > 0.5 else Vector3.BACK)
 		ground = 0.16
 	var sign_text: String = _sign_for(kind)
 	var record_before: int = w.buildings.size()
@@ -580,8 +628,8 @@ func _alley(at: Vector2, u: Vector2, back: Vector2, depth: float) -> void:
 	var yaw: float = atan2(-u.y, u.x)
 	var floor_y: float = ground
 	if ground < 0.05:
-		var mid: Vector2 = at + back * ((depth + 1.0 - SETBACK) * 0.5)
-		w._slab_rot(mid, Vector2(ALLEY + 1.6, depth + SETBACK + 1.0), yaw, Color(0.42, 0.41, 0.4), "asphalt")
+		var mid: Vector2 = at + back * ((depth + 1.0 - _setback) * 0.5)
+		w._slab_rot(mid, Vector2(ALLEY + 1.6, depth + _setback + 1.0), yaw, Color(0.42, 0.41, 0.4), "asphalt")
 		floor_y = 0.16
 	var side: float = 1.0 if rng.randf() < 0.5 else -1.0
 	var spot: Vector2 = at + back * (depth * 0.35) + u * side * (ALLEY * 0.5 - 1.05)

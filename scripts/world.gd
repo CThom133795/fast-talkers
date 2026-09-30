@@ -805,11 +805,28 @@ func _note_blocker(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
 		return
 	var world_at: Vector3 = _xf * at
 	var yaw: float = angle + _xf_yaw
+	# A long turned box (a diagonal quay face, a fence) is recorded in short pieces, so its bounds
+	# do not swallow the ground beside it.
+	var length: float = maxf(size.x, size.z)
+	if length > 8.0 and minf(size.x, size.z) < 4.0 and absf(sin(2.0 * yaw)) > 0.05:
+		var along: Vector2 = Vector2(cos(yaw), -sin(yaw)) if size.x >= size.z else Vector2(sin(yaw), cos(yaw))
+		var pieces: int = ceili(length / 5.0)
+		for piece: int in range(pieces):
+			var offset: float = (float(piece) + 0.5) / pieces * length - length * 0.5
+			var chunk: Vector2 = Vector2(world_at.x, world_at.z) + along * offset
+			var half_length: float = length / pieces * 0.5
+			var half_thick: float = minf(size.x, size.z) * 0.5
+			var reach_x: float = absf(along.x) * half_length + absf(along.y) * half_thick
+			var reach_z: float = absf(along.y) * half_length + absf(along.x) * half_thick
+			_add_blocker(Rect2(chunk.x - reach_x, chunk.y - reach_z, reach_x * 2.0, reach_z * 2.0), size.y, area)
+		return
 	var ex: float = absf(cos(yaw)) * size.x * 0.5 + absf(sin(yaw)) * size.z * 0.5
 	var ez: float = absf(sin(yaw)) * size.x * 0.5 + absf(cos(yaw)) * size.z * 0.5
-	var rect: Rect2 = Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0)
+	_add_blocker(Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0), size.y, area)
+
+func _add_blocker(rect: Rect2, height: float, area: float) -> void:
 	_blockers.append(rect)
-	if size.y >= 0.5 and area < 400.0:
+	if height >= 0.5 and area < 400.0:
 		var low: Vector2i = Vector2i(floori(rect.position.x / 16.0), floori(rect.position.y / 16.0))
 		var high: Vector2i = Vector2i(floori(rect.end.x / 16.0), floori(rect.end.y / 16.0))
 		for cx: int in range(low.x, high.x + 1):
@@ -2530,6 +2547,15 @@ const FILL_STYLES: Dictionary = {
 	"flats": {"height": Vector2(10.0, 20.0), "colors": [Color(0.64, 0.6, 0.52), Color(0.58, 0.62, 0.6), Color(0.68, 0.56, 0.48), Color(0.52, 0.54, 0.6)], "tex": "stucco", "lit": 0.4, "width": Vector2(14.0, 22.0), "signs": [], "sign_color": Color(1.0, 0.9, 0.7)},
 }
 
+## Which prefab kinds fill each generic style (best fit first); the high-rises stay solid towers.
+const FILL_PREFABS: Dictionary = {
+	"brick": ["walkup", "row_shop", "corner_store"],
+	"flats": ["walkup", "row_shop"],
+	"midrise": ["office", "walkup"],
+	"neon": ["bar", "row_shop"],
+	"warehouse": ["warehouse", "auto_shop"],
+}
+
 ## Fills a block's buildable rectangle with one or two rows of generic buildings. Lots whose
 ## rectangle meets `keep_clear` (a reserved plot) are left out. Front faces the nearer street.
 func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> void:
@@ -2581,8 +2607,53 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 			if style == "neon":
 				sign_color = [Color(1.0, 0.45, 0.85), Color(0.3, 0.9, 1.0), Color(1.0, 0.85, 0.3), Color(0.5, 1.0, 0.45)][_rng.randi() % 4]
 			var roof: Color = Color(0.29, 0.31, 0.3)
+			if _fill_prefab(style, center, lot_size, front, height, color, title):
+				continue
 			_tower(center, Vector3(lot_size.x, height, lot_size.y), color, str(spec["tex"]), front, title, sign_color, roof, float(spec["lit"]))
 			_rooftop(center, lot_size, height)
+
+## The prefab library (scripts/buildings/prefabs.gd), or null while it is not in the project.
+var _prefab_lib: Variant = null
+var _prefab_checked: bool = false
+
+func _prefab_library() -> Variant:
+	if not _prefab_checked:
+		_prefab_checked = true
+		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd"):
+			_prefab_lib = load("res://scripts/buildings/prefabs.gd")
+	return _prefab_lib
+
+## Fills a block lot with an enterable prefab instead of a solid tower: the kinds a style may use, best
+## fit first. Returns false when the library is missing, the style keeps its solid towers (the high-rises)
+## or no kind fits the lot. Axis-aligned lots in world space (district nodes have no transform).
+func _fill_prefab(style: String, center: Vector2, lot: Vector2, front: Vector3, height: float, color: Color, title: String) -> bool:
+	var lib: Variant = _prefab_library()
+	if lib == null or not FILL_PREFABS.has(style):
+		return false
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = lot.x if across else lot.y
+	var depth: float = lot.y if across else lot.x
+	for kind: String in FILL_PREFABS[style]:
+		var least: Vector2 = lib.min_size(kind)
+		if frontage < least.x or depth < least.y:
+			continue
+		var floors: int = clampi(int(height / 3.4), 1, int(lib.max_floors(kind)))
+		var palette: Array[Color] = [color, color.lightened(0.35), color.darkened(0.35)]
+		var seed: int = absi(int(center.x * 131.0) * 7919 + int(center.y * 977.0)) + 17
+		_begin_building(kind, true, title)
+		var record: Dictionary = _building_open
+		var node: Variant = lib.build(self, kind, center, Vector2(frontage, depth), lib.front_yaw(front), floors, seed, {"palette": palette, "sign": title, "lit": 0.3, "district": style})
+		_end_building()
+		if node == null:
+			buildings.erase(record)
+			continue
+		if (record["footprints"] as Array).is_empty():
+			_footprint(Rect2(center - lot * 0.5, lot))
+			(record["footprints"] as Array).append(footprint_polys.size() - 1)
+			buildings.pop_back()
+		_finish(node as Node3D)
+		return true
+	return false
 
 ## A water tank and a vent stack on a roof (breaks up the skyline; nothing solid).
 func _rooftop(center: Vector2, size: Vector2, height: float) -> void:
