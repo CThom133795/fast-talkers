@@ -54,6 +54,17 @@ var week_days: int = DEFAULT_WEEK_DAYS
 var recap: Array = []
 ## Friday: where the Dead Drop is (a neutral landmark name), announced when the doors open.
 var drop_site: String = ""
+## The nervous client (docs/LEAD_DESIGN_DECISIONS.md §7): if nobody has moved a contract item this far into the
+## street phase, the contract loses NERVOUS_STEP of its value per minute (to at most NERVOUS_FLOOR) until someone
+## picks one up. Never on Friday. `nervous_steps` is host-owned and broadcast with the round state.
+const NERVOUS_AFTER: float = 240.0
+const NERVOUS_STEP: float = 0.1
+const NERVOUS_FLOOR: float = 0.5
+var nervous_after: float = NERVOUS_AFTER
+var nervous_steps: int = 0
+## Host: has anyone picked up a trade item this Day?
+var _contract_touched: bool = false
+var _nervous_announced: bool = false
 ## Phase lengths; tests shorten them (tests/week_flow.gd).
 var buy_seconds: float = BUY_SECONDS
 var live_seconds: float = LIVE_SECONDS
@@ -214,7 +225,12 @@ func _apply_my_crew() -> void:
 func start_solo_week() -> void:
 	if net.local_name.strip_edges().is_empty():
 		net.local_name = "Solo"
-	var err: Error = net.host(FastNet.PORT + 11, "127.0.0.1")
+	# A few local ports, so a second copy of the game (or a test run) doesn't block it.
+	var err: Error = ERR_CANT_CREATE
+	for offset: int in range(11, 19):
+		err = net.host(FastNet.PORT + offset, "127.0.0.1")
+		if err == OK:
+			break
 	if err != OK:
 		game._message("Could not start the solo Week (%s)." % error_string(err), 6.0)
 		return
@@ -878,7 +894,8 @@ func contract_value(item: int) -> int:
 		base = LEDGER_VALUE
 	elif item == CASH:
 		base = CASH_VALUE
-	return int(round(base * DAY_VALUE[weekday_index()] / 100.0)) * 100
+	var nerves: float = maxf(1.0 - NERVOUS_STEP * nervous_steps, NERVOUS_FLOOR) if item >= 0 else 1.0
+	return int(round(base * DAY_VALUE[weekday_index()] * nerves / 100.0)) * 100
 
 
 func _on_round_state(data: Dictionary) -> void:
@@ -899,6 +916,14 @@ func _on_round_state(data: Dictionary) -> void:
 	week_days = clampi(int(data.get("week_days", week_days)), 1, WEEKDAYS.size())
 	recap = data.get("recap", [])
 	drop_site = str(data.get("drop_site", ""))
+	var steps: int = clampi(int(data.get("nervous", 0)), 0, 10)
+	if steps >= 1 and not _nervous_announced and active:
+		_nervous_announced = true
+		_system("The client is getting nervous: nobody has moved the goods. The contract loses 10% a minute until someone does.")
+		game._message("The client is getting nervous: the contract loses value until someone moves the goods.", 6.0)
+	elif steps == 0:
+		_nervous_announced = false
+	nervous_steps = steps
 	if not changed:
 		return
 	match phase:
@@ -1269,6 +1294,12 @@ func _host_tick(delta: float) -> void:
 					_host_new_round()
 			"week_end": _host_new_week()
 		return
+	if phase == "live" and not _contract_touched and not is_dead_drop():
+		var elapsed: float = live_seconds - time_left
+		var steps: int = 0 if elapsed < nervous_after else int((elapsed - nervous_after) / 60.0) + 1
+		if steps != nervous_steps:
+			nervous_steps = steps
+			_host_broadcast()
 	if _broadcast_timer <= 0.0:
 		_host_broadcast()
 	# Cars nobody drives are simulated here and followed by clients.
@@ -1294,7 +1325,7 @@ func _host_tick(delta: float) -> void:
 ## Everything a peer needs to draw the Day: phase, clock, roles, the Week and the bank.
 func _round_payload(phase_name: String, seconds: float) -> Dictionary:
 	return {"phase": phase_name, "time": seconds, "round": round_number, "seller": seller, "buyer": buyer, "bank": bank,
-		"results": results, "day": day, "week": week, "week_days": week_days, "recap": recap, "drop_site": drop_site}
+		"results": results, "day": day, "week": week, "week_days": week_days, "recap": recap, "drop_site": drop_site, "nervous": nervous_steps}
 
 
 func _host_broadcast() -> void:
@@ -1328,6 +1359,8 @@ func _host_new_round() -> void:
 	recap = results.duplicate()
 	day += 1
 	drop_site = ""
+	nervous_steps = 0
+	_contract_touched = false
 	if is_dead_drop():
 		seller = ""
 		buyer = ""
@@ -1490,6 +1523,9 @@ func _host_item_request(from_id: int, action: String, item: int, pos: Vector3) -
 			if not phone and _trade_item_of(from_id) >= 0:
 				return
 			data["holder"] = from_id
+			if not phone:
+				# The goods moved: the client calms down (the lost value stays lost).
+				_contract_touched = true
 			var own_phone: bool = phone and phone_crew(item) == crew_id
 			# Grabbing your own crew's phone is routine; everything else is news.
 			data["msg"] = "" if own_phone else "%s (%s) picked up %s." % [who, Factions.get_crew(crew_id)["short"], _item_name(item)]

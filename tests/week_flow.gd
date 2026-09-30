@@ -231,6 +231,15 @@ func _plain_day(expected: int) -> void:
 		game.player.take_damage(1000.0)
 		await _frames(5)
 		_check(game.player.is_dead(), "the player died on Tuesday")
+	elif expected == 4:
+		# Nobody touches the goods: the client gets nervous and the contract loses 10% (never on Friday).
+		online.nervous_after = 0.3
+		online.time_left = 0.0
+		await _wait_until(func() -> bool: return str(online.phase) == "live", 3.0)
+		var nervous: bool = await _wait_until(func() -> bool: return int(online.nervous_steps) == 1, 3.0)
+		_check(nervous, "an untouched contract makes the client nervous (steps %d)" % int(online.nervous_steps))
+		_check(int(online.contract_value(0)) == 10100, "Thursday's Ledger drops 10%% to $10,100 (got %d)" % int(online.contract_value(0)))
+		_check(int(online.contract_value(-1)) == int(round(1500 * 1.25 / 100.0)) * 100, "the clean-deal bonus is not cut by nerves")
 	else:
 		online.time_left = 0.0
 		await _wait_until(func() -> bool: return str(online.phase) == "live", 3.0)
@@ -246,6 +255,10 @@ func _plain_day(expected: int) -> void:
 	online.interact()
 	var paid: bool = await _wait_until(func() -> bool: return int(online.bank.get(_crew(), 0)) == before + value, 2.0)
 	_check(paid, "%s pays $%d for the Ledger" % [online.day_name(), value])
+	if expected == 4:
+		online.nervous_after = 240.0
+		await _frames(5)
+		_check(int(online.nervous_steps) == 1, "once the goods move, the lost value stays lost but stops falling")
 	await _bank_cash()
 	await _wait_until(func() -> bool: return str(online.phase) == "settle", 3.0)
 
@@ -257,6 +270,7 @@ func _friday() -> void:
 	_check(str(online.seller).is_empty() and str(online.buyer).is_empty(), "Friday has no seller or buyer")
 	_check(bool(_item(0).get("hidden", false)) and bool(_item(1).get("hidden", false)), "the goods stay hidden during Friday's buy phase")
 	_check(not online.briefing().contains("Clean deal"), "no clean-deal bonus on Friday")
+	_check(int(online.nervous_steps) == 0, "each morning the client starts calm")
 	online.time_left = 0.0
 	var revealed: bool = await _wait_until(func() -> bool: return str(online.phase) == "live" and not bool(_item(0).get("hidden", false)), 3.0)
 	_check(revealed, "the doors open and the Dead Drop appears")
