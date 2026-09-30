@@ -18,8 +18,10 @@ The M2 tasks run in parallel **only after M1 is merged**.
   - a strip club;
   - a burger joint;
   - a high-rise with a couple of elevators, so it's not a single chokepoint.
-- **The firing range becomes a GUN STORE with a range.** It must **not** be on the playable map in contract or
-  online modes; it's free roam only.
+- **The firing range becomes a GUN STORE with a range.** *Clarified by the user:* the gun store **may exist in
+  contract and online matches** as an ordinary, believable business in the city. What must not appear in those
+  modes is the obvious "beta testing range" from 0.5: target stands, steel plates, painted range lines, floating
+  distance labels and practice bots. Those appear only in free roam.
 
 ## Hard constraints (all tasks)
 - **Files you may not edit:** `scripts/main.gd`, `scripts/online.gd`, `scripts/net.gd`, `scripts/player.gd`,
@@ -96,28 +98,38 @@ and the map/vehicle/capture tests.
    - Give each plot a stub builder file, `scripts/buildings/<key>.gd`, with `static func build(world, plot)`.
      The stub builds a plain placeholder shell with a sign, so the city looks right before M2.
    - `world.gd` calls each builder once, in a fixed order.
-5. **Gun store, free-roam only.**
-   - Move the armory, range and targets out of Midtown into a **"HALCYON ARMS — GUNS & RANGE"** compound at the
-     `gunstore` plot on the city edge. It has a storefront (counters, racks), an indoor range lane and the
-     long outdoor range.
+5. **Gun store, a real business, with the range dressing in free roam only.**
+   - Move the armory, range and targets out of Midtown into **"HALCYON ARMS — GUNS & RANGE"** at the `gunstore`
+     plot. It's a believable late-90s gun shop:
+     - storefront with a sign;
+     - barred windows and a glass door;
+     - counters and gun wall inside;
+     - a back door to an **indoor range** (lanes, booths, baffles);
+     - a fenced outdoor range yard behind, for long range.
    - The old Midtown range lot becomes a normal Midtown business or car park. Keep Midtown's other positions.
    - `armory.gd` constants (`SPAWN`, `RACK`, `LONG_LINE_X`, ...) must move with it. Update every test that uses
      them. main.gd reads `ArmoryScript.SPAWN`/`RACK`, so those names must stay.
      - Report any hard-coded armory coordinates you find in main.gd (for example
        `Vector3(ArmoryScript.LONG_LINE_X, 0, -15)`) as lead hooks.
-   - **Contract/online gating:** add `world.set_mode(mode: String)`, where mode is `"free_roam"`, `"contract"`
-     or `"online"`, and `armory.set_open(open: bool)`.
-     - In contract/online mode, the compound's road entrance and doors are physically closed by gates and
-       roller shutters, its range targets are inactive, and it is **left off the radar/map and the playable
-       bounds**.
-     - Place it where the closed gate costs no route (a dead-end spur).
-     - Lead hook needed: main calls `world.set_mode()` / `armory.set_open()` when a mode starts.
+   - **Mode dressing:** add `world.set_mode(mode: String)`, where mode is `"free_roam"`, `"contract"` or
+     `"online"`, and `armory.set_mode(mode)`.
+     - **Contract and online:** the shop is present and walk-in, like any other business, with a normal door and
+       breakable windows. It gives no buying or rearming there (buying stays at the crew HQ). The **range
+       dressing is hidden and has no collision**: targets, plates, rack, painted lines, distance labels, "LONG
+       RANGE" signage and bench labels. The range doors are locked and the yard gate is shut, so it reads as a
+       closed range, not a test level. It appears on the map as an ordinary business, not a highlighted
+       landmark.
+     - **Free roam:** everything is visible and active, as today.
+     - Lead hook needed: main calls `world.set_mode()` / `armory.set_mode()` when a mode starts.
 6. **Tests.** Extend `tests/map_interiors.gd`, or add `tests/map_06.gd`, to check:
    - all HQ routes and pairwise distances meet the targets above;
    - every plot is on land, faces a road, and overlaps no footprint;
    - each stub building exists;
-   - gun store: gates are closed in contract mode and open in free roam, and there are no range targets in
-     contract mode;
+   - gun store:
+     - the shop exists in all modes;
+     - in contract/online mode every range target, plate, label and painted line is hidden with no collision,
+       and the range door and yard gate are shut;
+     - in free roam it is all visible and active;
    - determinism: build the world twice and compare checksums of the footprint and parked-vehicle lists.
 7. **Captures for the lead.** Aerial full map, one street view per new district, HQ doorsteps. Write them to
    `work/captures/` (add the PNGs to the PR only if they're small, otherwise describe them). Cloud can't render
@@ -150,7 +162,7 @@ Common requirements:
 | `nightclub` | "CLUB VOLTAGE" | Queue rope and door, dance floor with coloured light panels (emissive, no extra dynamic lights), DJ booth, bar, upstairs VIP mezzanine with a stair and a back exit to the alley. |
 | `stripclub` | "THE VELVET ROOM" | **Tasteful, non-explicit.** No dancers or people at all (no AI rule). Main stage with poles, booths, bar, a back office with a safe, dressing-room corridor to the alley exit, neon exterior with no windows. |
 | `burger` | "BIG BOY BURGERS" (or an original name) | Diner-style counter, booths, kitchen behind, **drive-thru lane with window**, big pole sign, parking lot. |
-| `gunstore` | Upgrades the M1 compound | Nicer shop fit: gun wall, glass counters, a lane booth. Free-roam only (M1 gating stays). |
+| `gunstore` | Upgrades the M1 compound | Nicer shop fit: gun wall, glass counters, a lane booth. Keep the M1 mode dressing: a normal shop in matches, the full range in free roam. |
 
 ---
 
