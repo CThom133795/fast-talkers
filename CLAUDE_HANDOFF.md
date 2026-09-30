@@ -232,8 +232,9 @@ boomy, with no "childish beeps".
    - Not done: bus shelters, avenue planters, manholes, and wider crosswalk and hydrant checks.
 
 ### Tests (Linux cloud, Godot 4.4.1 headless)
-`bash tests/run_all.sh` on the final tree, with 19 suites, 1,955 assertions and 0 failures after the free_roam
-timing fix below:
+`bash tests/run_all.sh` on the final tree (19 suites): 1,827 assertions in 17 counted suites, plus the 6,000-frame soak
+and the two-process net_pair. Every suite passed in the final full run except free_roam, which was then fixed (below)
+and re-run alone three times, passing each time:
 
 | Suite | Checks | Suite | Checks |
 |---|---:|---|---:|
