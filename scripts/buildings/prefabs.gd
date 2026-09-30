@@ -27,7 +27,9 @@ const WALL_T: float = 0.3
 const PART_T: float = 0.16
 const PARAPET: float = 1.0
 ## Interior meshes are drawn within this range (the kit uses 45; prefabs are placed many times).
-const INTERIOR_RANGE: float = 32.0
+const INTERIOR_RANGE: float = 26.0
+## Collision-free furnishings are drawn within this range.
+const PROP_RANGE: float = 20.0
 const DOOR_H: float = 2.6
 
 const WALLS: Array = [
@@ -173,6 +175,11 @@ class Ctx extends RefCounted:
 	var m_metal: StandardMaterial3D
 	var m_pane_in: StandardMaterial3D
 	var m_ceil: StandardMaterial3D
+	var m_pale: StandardMaterial3D
+	var m_wood: StandardMaterial3D
+	var m_fabric: StandardMaterial3D
+	var m_ac: StandardMaterial3D
+	var m_glass_in: Material
 	var doors: Array = []
 	var stairs: Array = []
 	var routes: Dictionary = {}
@@ -219,12 +226,17 @@ class Ctx extends RefCounted:
 		m_trim = kit.mat(trim_col, "", 0.8)
 		m_roof = kit.mat(Color(0.2, 0.21, 0.22), "roof", 0.9)
 		m_accent = kit.mat(accent_col, "", 0.7)
-		m_dark = kit.mat(Color(0.15, 0.16, 0.18), "", 0.5)
+		m_dark = kit.mat(Color(0.16, 0.24, 0.29), "", 0.3)
 		m_floor = kit.mat(Color(0.66, 0.6, 0.5), "tiles", 0.9)
 		m_part = kit.mat(Color(0.82, 0.78, 0.68).lerp(accent_col, 0.08), "stucco", 0.95)
 		m_metal = kit.mat(Color(0.22, 0.23, 0.24), "metal", 0.5)
-		m_pane_in = kit.mat(Color(0.62, 0.72, 0.8), "", 0.3)
+		m_pane_in = kit.mat(Color(0.72, 0.82, 0.92), "", 0.3)
 		m_ceil = kit.mat(Color(0.86, 0.83, 0.76), "stucco", 0.95)
+		m_pale = mat(Color(0.9, 0.9, 0.87), "", 0.8)
+		m_wood = kit.mat(Color(0.4, 0.26, 0.16), "planks", 0.8)
+		var fabrics: Array[Color] = [Color(0.5, 0.2, 0.18), Color(0.25, 0.4, 0.3), Color(0.28, 0.34, 0.45), Color(0.55, 0.45, 0.25), Color(0.4, 0.3, 0.42)]
+		m_fabric = mat(fabrics[rng.randi() % fabrics.size()], "", 0.8)
+		m_ac = kit.mat(Color(0.72, 0.72, 0.68), "metal", 0.6)
 		kit.footprint(Rect2(-hx, -hz, W, D))
 
 	## Top of the walking surface of storey `i` (0 = ground floor).
@@ -234,7 +246,10 @@ class Ctx extends RefCounted:
 	func storey_at(y: float) -> int:
 		return maxi(0, roundi((y - f0) / FH))
 
+	## Plain (untextured) colours snap to a coarse grid so a building shares a handful of materials (one draw each).
 	func mat(color: Color, tex: String = "", rough: float = 0.85) -> StandardMaterial3D:
+		if tex.is_empty():
+			return kit.mat(Color(snappedf(color.r, 0.125), snappedf(color.g, 0.125), snappedf(color.b, 0.125)), "", 0.3 if rough < 0.4 else 0.8)
 		return kit.mat(color, tex, rough)
 
 	func glow(color: Color, energy: float = 1.3) -> StandardMaterial3D:
@@ -386,12 +401,12 @@ class Ctx extends RefCounted:
 		var index: int = kit.add_door(center, width, height, facing, label, kind_name, leaf_mat, 2 if width >= 1.4 else 0)
 		var along_x: bool = absf(facing.z) > 0.5
 		frame(center, width, height, along_x, thickness)
-		if inner:
-			for hinge: Node in world._door_nodes[index]:
-				for body: Node in hinge.get_children():
-					for part_node: Node in body.get_children():
-						if part_node is GeometryInstance3D:
-							(part_node as GeometryInstance3D).visibility_range_end = 26.0
+		for hinge: Node in world._door_nodes[index]:
+			for body: Node in hinge.get_children():
+				for part_node: Node in body.get_children():
+					if part_node is GeometryInstance3D:
+						(part_node as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+						(part_node as GeometryInstance3D).visibility_range_end = 16.0 if inner else 40.0
 		var s: int = storey_at(center.y)
 		var reach: Vector2 = Vector2(width * 0.5 + 0.3, 1.7)
 		if along_x:
@@ -421,7 +436,8 @@ class Ctx extends RefCounted:
 		mesh.size = box_shape.size
 		visual.mesh = mesh
 		visual.material_override = kit.mat(Color(0.5, 0.52, 0.5), "metal", 0.6)
-		visual.visibility_range_end = 80.0
+		visual.visibility_range_end = 60.0
+		visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		body.add_child(visual)
 		body.position = Vector3(0, height * 0.5, 0)
 		shutter.add_child(body)
@@ -445,13 +461,13 @@ class Ctx extends RefCounted:
 	## `pos` is the window centre on the wall's outer face; `normal` is the outward unit vector.
 	func window(pos: Vector3, normal: Vector3, w: float, h: float, is_lit: bool, with_ac: bool = false) -> void:
 		var angle: float = atan2(normal.x, normal.z)
-		var glass: StandardMaterial3D = glow(Color(1.0, 0.78, 0.46), 1.3) if is_lit else kit.mat(Color(0.16, 0.24, 0.29), "", 0.3)
+		var glass: StandardMaterial3D = kit.glow(Color(1.0, 0.78, 0.46), 1.3) if is_lit else m_dark
 		kit.box(pos + normal * 0.03, Vector3(w + 0.26, h + 0.26, 0.06), m_trim, false, angle)
 		kit.box(pos + normal * 0.05, Vector3(w, h, 0.04), glass, false, angle)
 		kit.box(pos + normal * 0.09 - Vector3(0, h * 0.5 + 0.17, 0), Vector3(w + 0.4, 0.07, 0.24), m_trim, false, angle)
 		kit.box(pos - normal * (WALL_T + 0.01), Vector3(w, h, 0.04), m_pane_in, false, angle)
 		if with_ac:
-			kit.box(pos + normal * 0.3 - Vector3(0, h * 0.5 + 0.35, 0), Vector3(0.72, 0.44, 0.5), kit.mat(Color(0.74, 0.73, 0.68), "metal", 0.6), false, angle)
+			kit.box(pos + normal * 0.3 - Vector3(0, h * 0.5 + 0.35, 0), Vector3(0.72, 0.44, 0.5), m_ac, false, angle)
 
 	## Rows of windows along one outer wall. side: "front", "back", "left" or "right". `avoid` holds Vector2(min, max)
 	## ranges along the wall (local x or z) that stay clear (doors, storefronts). `storeys` lists the storeys.
@@ -554,7 +570,7 @@ class Ctx extends RefCounted:
 					var geometry: GeometryInstance3D = child as GeometryInstance3D
 					geometry.layers = 1 << (world.INTERIOR_LAYER - 1)
 					geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-					geometry.visibility_range_end = Kit.PROP_RANGE
+					geometry.visibility_range_end = PROP_RANGE
 					geometry.visibility_range_end_margin = 3.0
 			prop_node.add_to_group("potato_optional")
 			prop_node.set_meta("prop_node", true)
@@ -565,7 +581,7 @@ class Ctx extends RefCounted:
 		# No multimesh batching: one merged mesh per material is fewer draws for a unique building.
 		node.set_meta("finished", true)
 		world.MeshMerge.merge_children(node)
-		world.MeshMerge.shadow_proxy(node)
+		BuildingPrefabs._shadow_proxy(node)
 		if kit.interior != null:
 			var interior: Node3D = kit.interior
 			interior.set_meta("finished", true)
@@ -598,6 +614,51 @@ class Ctx extends RefCounted:
 
 ## Folds the plain single-shape static bodies directly under `parent` into one body (the kit makes one body per
 ## wall piece and slab; a building has hundreds). Stair flights, glass and scripted bodies are left alone.
+static func _shadow_proxy(parent: Node3D) -> void:
+	# The world's proxy needs two donors; a merged building has one mesh with many surfaces, and every surface would
+	# be drawn once per shadow split. Fold the casting meshes into one positions-only mesh drawn SHADOWS_ONLY.
+	var vertices: PackedVector3Array = PackedVector3Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	var donors: Array[MeshInstance3D] = []
+	for child: Node in parent.get_children():
+		if not (child is MeshInstance3D):
+			continue
+		var instance: MeshInstance3D = child as MeshInstance3D
+		if instance.mesh == null or instance.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_ON or instance.visibility_range_end > 0.0:
+			continue
+		for surface: int in range(instance.mesh.get_surface_count()):
+			var material: Material = instance.mesh.surface_get_material(surface)
+			if material is BaseMaterial3D and (material as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+				continue
+			var arrays: Array = instance.mesh.surface_get_arrays(surface)
+			var local_vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var local_indices: Variant = arrays[Mesh.ARRAY_INDEX]
+			var base: int = vertices.size()
+			vertices.append_array(instance.transform * local_vertices)
+			if local_indices == null or (local_indices as PackedInt32Array).is_empty():
+				for i: int in range(local_vertices.size()):
+					indices.append(base + i)
+			else:
+				for index: int in (local_indices as PackedInt32Array):
+					indices.append(base + index)
+		donors.append(instance)
+	if donors.is_empty() or vertices.is_empty():
+		return
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var shadow_mesh: ArrayMesh = ArrayMesh.new()
+	shadow_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	for donor: MeshInstance3D in donors:
+		donor.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var proxy: MeshInstance3D = MeshInstance3D.new()
+	proxy.name = "ShadowProxy"
+	proxy.mesh = shadow_mesh
+	proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	parent.add_child(proxy)
+
+
 static func _consolidate(parent: Node3D) -> void:
 	var merged: StaticBody3D = StaticBody3D.new()
 	merged.name = "Solid"
@@ -800,7 +861,7 @@ static func _roof_details(c: Ctx) -> void:
 		c.kit.box(Vector3(spot.x, y + 2.65, spot.y), Vector3(1.1, 0.12, 1.1), c.m_trim)
 	var unit: Vector2 = Vector2(c.hx * 0.3, c.hz * 0.3)
 	if c.claim(c.floors, Rect2(unit.x - 0.8, unit.y - 0.8, 1.6, 1.6)):
-		c.kit.box(Vector3(unit.x, y + 0.5, unit.y), Vector3(1.3, 1.0, 1.3), c.mat(Color(0.7, 0.71, 0.68), "metal", 0.6), true)
+		c.kit.box(Vector3(unit.x, y + 0.5, unit.y), Vector3(1.3, 1.0, 1.3), c.m_ac, true)
 		c.kit.box(Vector3(unit.x, y + 1.02, unit.y), Vector3(1.0, 0.06, 1.0), c.m_dark)
 	for index: int in range(2):
 		var at: Vector2 = Vector2(c.rng.randf_range(-c.hx + 2.0, c.hx - 2.0), c.rng.randf_range(-c.hz + 2.0, c.hz - 2.0))
@@ -942,10 +1003,9 @@ static func _put(c: Ctx, s: int, room: Rect2, kind: String, wall: String, along:
 ## Builds one piece of furniture: `rect` is its floor footprint, `angle` turns local +Z (its front) to face into the room.
 static func _furn(c: Ctx, s: int, kind: String, rect: Rect2, angle: float, dims: Vector2) -> void:
 	var o: Vector3 = Vector3(rect.get_center().x, c.fy(s), rect.get_center().y)
-	var wood: StandardMaterial3D = c.mat(Color(0.4, 0.26, 0.16), "planks", 0.8)
-	var pale: StandardMaterial3D = c.mat(Color(0.9, 0.9, 0.87), "", 0.5)
-	var fabrics: Array[Color] = [Color(0.5, 0.2, 0.18), Color(0.25, 0.4, 0.3), Color(0.28, 0.34, 0.45), Color(0.55, 0.45, 0.25), Color(0.4, 0.3, 0.42)]
-	var fabric: StandardMaterial3D = c.mat(fabrics[c.rng.randi() % fabrics.size()], "", 0.95)
+	var wood: StandardMaterial3D = c.m_wood
+	var pale: StandardMaterial3D = c.m_pale
+	var fabric: StandardMaterial3D = c.m_fabric
 	match kind:
 		"bed":
 			c.fbox(o, angle, Vector3(0, 0.25, 0), Vector3(1.55, 0.4, 2.05), wood)
@@ -1038,9 +1098,9 @@ static func _dims_extra(kind: String, length: float) -> Vector2:
 
 
 static func _furn_extra(c: Ctx, s: int, kind: String, o: Vector3, angle: float, dims: Vector2) -> void:
-	var wood: StandardMaterial3D = c.mat(Color(0.4, 0.26, 0.16), "planks", 0.8)
-	var pale: StandardMaterial3D = c.mat(Color(0.9, 0.9, 0.87), "", 0.5)
-	var goods: Array[Color] = [Color(0.8, 0.3, 0.2), Color(0.25, 0.5, 0.7), Color(0.85, 0.75, 0.3), Color(0.35, 0.6, 0.35), Color(0.9, 0.9, 0.85), Color(0.6, 0.4, 0.6)]
+	var wood: StandardMaterial3D = c.m_wood
+	var pale: StandardMaterial3D = c.m_pale
+	var goods: Array[Color] = [Color(0.8, 0.3, 0.2), Color(0.25, 0.5, 0.7), Color(0.85, 0.75, 0.3), Color(0.9, 0.9, 0.85)]
 	match kind:
 		"shelf":
 			var board: StandardMaterial3D = c.mat(Color(0.55, 0.55, 0.52), "metal", 0.6)
@@ -1124,7 +1184,8 @@ static func _furn_extra(c: Ctx, s: int, kind: String, o: Vector3, angle: float, 
 			var height: float = 3.0
 			var bays: int = maxi(1, int(dims.x / 2.0))
 			for post: int in range(bays + 1):
-				c.fbox(o, angle, Vector3(-dims.x * 0.5 + post * dims.x / bays, height * 0.5, 0), Vector3(0.1, height, dims.y), steel)
+				for zed: float in [-1.0, 1.0]:
+					c.fbox(o, angle, Vector3(-dims.x * 0.5 + post * dims.x / bays, height * 0.5, zed * (dims.y * 0.5 - 0.06)), Vector3(0.1, height, 0.1), steel)
 			for level: int in range(3):
 				c.fbox(o, angle, Vector3(0, 0.6 + level * 1.15, 0.3), Vector3(dims.x, 0.12, 0.08), orange)
 				c.fbox(o, angle, Vector3(0, 0.6 + level * 1.15, -0.3), Vector3(dims.x, 0.12, 0.08), orange)
