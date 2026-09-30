@@ -4,6 +4,7 @@
 Proximity voice never crosses a wall.
 The only exception is an open doorway, where someone standing right at the door hears a muffled voice (see "Walls and doors").
 Crew radio ignores walls and distance, but only ever reaches your own crew.
+Crew phones carry proximity voice between two phones, but only from right next to one phone ("Phone calls" below).
 
 ## What the player gets
 - **Proximity chat is the default and the intended way to play: an open mic.**
@@ -15,6 +16,8 @@ Crew radio ignores walls and distance, but only ever reaches your own crew.
   - **You are muted in proximity while Y is held**, so a nearby enemy or bystander hears nothing.
   - The host enforces this too: a proximity frame from someone who sent a radio frame within the last 300 ms is dropped.
   - Someone with no crew has no radio and speaks in proximity as usual.
+- **Phone calls: press P.** Hold a crew phone, press P (pad: D-pad left), pick a crew, and talk near the phone.
+  See "Phone calls".
 - **HUD (small text):** "MIC (nearby)", "RADIO (crew only)", or "push to talk: hold to speak" for you, plus a line "Name speaking" (prefixed "(radio)" for radio) for whoever you hear.
 - **Settings menu:** voice on/off, open mic, voice volume, microphone level.
   - They are saved in `settings.cfg` under `[voice]`.
@@ -41,13 +44,15 @@ Files:
 | file | role |
 |---|---|
 | `scripts/voice_codec.gd` | ADPCM encode/decode, resampler, noise gate, SNR helper (pure) |
-| `scripts/voice_relay.gd` | who hears whom (pure) |
+| `scripts/voice_relay.gd` | who hears whom (pure), including `phone_targets` for phone calls |
+| `scripts/phone_calls.gd` | the call state machine between two phones (pure; the host owns it) |
 | `scripts/voice.gd` | capture, mode choice, HUD, playback (`FastVoice`, created in `main.gd`) |
 | `scripts/net.gd` | voice RPCs, host validation, `voice_frame` signal, `voice_space` / `voice_doors` hooks |
 | `scripts/main.gd` | actions, settings UI and persistence, provides `voice_space` and `voice_doors` |
 | `scripts/net_security.gd` | `PROTOCOL` bumped 3 -> 4 (the RPC list changed, so old builds are refused at the handshake) |
 | `project.godot` | `audio/driver/enable_input=true` (see below) |
-| `tests/voice.gd` | 87 checks |
+| `tests/voice.gd` | 119+ checks |
+| `tests/voice_perf.gd` | grid vs plain scan, routing equivalence, 1,000-frame benchmark |
 
 Codec:
 - IMA-ADPCM, 16 kHz.
@@ -92,6 +97,58 @@ Codec:
 - The relay stamps the real sender and the distance. The client cannot choose who hears it.
 - Voice needs no new trust in the client's position. It uses the host's `_latest` snapshots, the same ones that validate movement.
 
+## Phone calls
+
+**Design.** A call joins two crew PHONES (the physical items of docs/LEAD_DESIGN_DECISIONS.md section 2), not two people.
+No chat tab and no key to hold: you hold a phone, dial, and talk.
+
+| Step | What happens |
+|---|---|
+| Dial | Hold a phone and press **P** (pad: D-pad left). A strip on the HUD lists the other crews' phones ("1 MORRIS  2 SOL NEGRO  3 KINGSWAY"). **1-3** (pad: D-pad left/right) pick, **P** (pad: **A**) dials, **ESC** (pad: **B**) cancels. The strip closes by itself after 4 s. P with no phone shows "No phone in hand...". |
+| Ring | The callee phone rings for **20 s**, in 3D at the phone's position (its holder, or wherever it lies), so everyone near it hears it (sound `ring`). The callee holder's HUD says "MORRIS PHONE CALLING - P to answer". The caller is told "No answer." after 20 s. |
+| Answer | P while holding the ringing phone, **or picking the ringing phone up**. The call goes LIVE. |
+| Live | HUD "ON CALL: MORRIS PHONE 0:42". **P hangs up.** |
+| End | Either side hangs up, nobody answers, **3 minutes**, the Day ends or the phones reset (`_host_place_phones`), or a phone's holder disconnects. A dead holder drops the phone and the call goes on as a speakerphone. |
+
+- **Host-authoritative.** `online.gd` owns a `phone_calls.gd` machine. Clients only ask (`net.send_phone_request`: `dial` a
+  phone item, `answer`, `hangup`; validated by the host, rate-limited like item requests). The host replicates the calls
+  (`net.broadcast_phone_calls`, reliable; a late joiner is caught up when it joins) and sends private lines ("Line busy.",
+  "No answer.") with `net.send_phone_notice`.
+- **Who may dial.** Only a phone holder (the existing call gate, `_host_may_call`). The phone in play is always the one the
+  sender CARRIES, so a stolen phone dials and answers as its owners. One call per phone: a busy phone gives "Line busy.".
+  The dead cannot use phones.
+- **Live audio (`net.gd _h_voice`).** After the normal proximity relay, if the talker is alive and within
+  `PHONE_PICKUP` = **1.2 m** of either phone in a live call, the host ALSO relays the frame as a new mode, `Mode.PHONE`, to every
+  living listener within `PHONE_SPEAKER` = **3.5 m** of the OTHER phone (`VoiceRelay.phone_targets`).
+  - A held phone is at its holder, so the holder is always picked up; someone standing right next to them can be too, but not
+    the room.
+  - A dropped phone in a live call still works: radii are measured from the phone (a speakerphone on the table).
+  - The talker's normal proximity voice goes out as before. Anyone who already hears the talker directly is not sent a second,
+    tinny copy. **Crew radio is never sent down a phone.**
+  - Only the host makes PHONE frames: a client frame claiming mode 2 is rejected with a strike (`valid_send_mode`), while
+    `valid_mode` (what a listener accepts) includes it.
+- **Playback (`voice.gd`).** A PHONE frame plays from a third per-talker stream, an `AudioStreamPlayer3D` at the far phone
+  (`phone_locator`, set by `main.gd` from `online.phone_voice_position`: the holder's remote player, or the dropped phone),
+  on the new **`VoicePhone`** bus (high-pass 300 Hz, low-pass 3.4 kHz, a little overdrive). It is listed as "(phone) Name"
+  and does not light the talker as speaking at your position.
+- **Text still works** for players without a mic: ENTER, then TAB to "CALL <crew>" (same call gate).
+- **Telemetry.** `voice_calls` (answered calls) and `voice_call_seconds` are tallied in the Day's JSON line.
+- `PROTOCOL` is now **5** (new RPCs: `_host_phone_request`, `_phone_calls`, `_phone_notice`).
+
+## Host routing cost
+
+The host routes every voice frame (25-50 a second per talker with open mics). It used to run a full building scan per player
+and rebuild a list of all ~1,270 doors per frame, which hitched the host. Now:
+- `net.gd` remembers each player's voice space and refreshes it at most every 200 ms unless they moved more than 1 m (it is
+  also skipped for anyone beyond earshot, and for crew radio, which ignores walls);
+- `main.gd _building_at` looks the interior up in a 32 m grid built once (229 interiors in the real city), so it is O(few);
+- doorways are only fetched when someone in earshot stands in a different space, through `net.voice_doors_near(pos, radius)`
+  (a 16 m door grid; only the talker's `DOOR_RADIUS` matters; lift doors move so they are checked live). The old
+  `voice_doors()` hook still works as the fallback.
+- `tests/voice_perf.gd` builds the real city: 1,000 frames to 8 peers took about 60 ms (the old path: over 1 s), with
+  identical targets to the plain scan in 240 scenarios.
+- Also fixed: clients used to drop any voice from the host itself (peer id 1), so nobody heard a host on the mic.
+
 ## Steam (not implemented)
 When `transport == "steam"`, GodotSteam's voice API (`startVoiceRecording`, `getVoice`, `decompressVoice`) could replace capture plus the ADPCM codec.
 Steam compresses the audio itself and handles the mic, so `FastVoice` would only route and play it.
@@ -104,7 +161,9 @@ The host validation and routing in `net.gd` and `voice_relay.gd` stay the same.
 - Headless and dummy-driver runs never touch the mic (`FastVoice` checks `DisplayServer.get_name() == "headless"`).
 
 ## Testing
-- `tests/voice.gd`: **87 checks** (`VOICE RESULT`). Run it with `godot --headless --path . --script res://tests/voice.gd`.
+- `tests/voice.gd`: **120 checks** (`VOICE RESULT`), including the phone relay (pickup and speaker radii, bystander, dead,
+  dropped phone, radio never on a phone, mode validation) and a real-ENet phone frame and a host talking to a client.
+  The call state machine and the host call flow are in `tests/week_flow.gd`. Run it with `godot --headless --path . --script res://tests/voice.gd`.
   - **Codec:**
     - ADPCM round trip, SNR over chained frames, and a frame decoding after its predecessor was lost;
     - frame size and caps;
@@ -140,4 +199,7 @@ Headless tests cannot cover these:
 6. **Bandwidth:** about 65 kbit/s per talker. Test with several talkers on a real WAN/UPnP link.
 7. **Echo.** There is no acoustic echo cancellation, so speakers plus an open mic will feed back. Headsets are recommended, and push-to-talk is the fallback.
 8. **Windows mic permission prompt** on the first launch, and a machine with no microphone.
-9. **Interiors.** Confirm `interior_half` covers each real building, and that doors report `open` as expected, so the inside/outside and doorway rules feel right in the real city.
+9. **Phones by ear.** Two players, a call, and real mics: the tinny handset sound (is 300-3400 Hz intelligible and not
+   annoying?), the 1.2 m pickup and 3.5 m speaker distances (is a phone left on a table clearly heard at 3 m and not at 6?),
+   the ring volume across a room, and P / D-pad left feel. Also check for feedback between a speakerphone and its own mic.
+10. **Interiors.** Confirm `interior_half` covers each real building, and that doors report `open` as expected, so the inside/outside and doorway rules feel right in the real city.

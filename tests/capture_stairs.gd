@@ -1,20 +1,20 @@
 extends SceneTree
-## Review captures of the Halcyon Trust stairwells, roof deck and plant room (copy of capture_interiors.gd with other views). Views are in each plot's local
+## Review captures of the Halcyon Trust stairwells, roof terrace and plant room (copy of capture_interiors.gd with other views). Views are in each plot's local
 ## frame (+Z = out of the front door) and converted with the plot node's transform, so they follow
 ## the building if its plot moves. Run windowed (not headless); writes work/captures/interior_*.png.
 ##   godot --path . --script res://tests/capture_interiors.gd [-- only=<prefix>]
 const WorldScript = preload("res://scripts/world.gd")
 
 const VIEWS: Array = [
-	["roof_stair_office", "highrise", Vector3(-8, 6.4, -7), Vector3(-13.8, 6.5, -3)],
-	["roof_stair_up", "highrise", Vector3(-13.8, 5.8, -7.5), Vector3(-13.8, 8.0, -1)],
-	["roof_deck", "highrise", Vector3(-10, 9.9, 2.5), Vector3(-13, 8.8, -3)],
-	["roof_deck_door", "highrise", Vector3(-13, 9.9, 1.0), Vector3(-8.85, 9.3, -1.5)],
-	["plant_room", "highrise", Vector3(-8.2, 9.9, -1.5), Vector3(-4.5, 9.2, -2.0)],
-	["tower_west_outside", "highrise", Vector3(-40, 12, -1), Vector3(-15, 10, -1)],
+	["roof_stair_office", "highrise", Vector3(-8, 6.4, -7), Vector3(-14.25, 6.5, -3)],
+	["roof_stair_up", "highrise", Vector3(-14.25, 5.8, -7.5), Vector3(-14.25, 8.0, -1)],
+	["roof_deck", "highrise", Vector3(-8, 11.0, 10), Vector3(-13, 8.6, -3)],
+	["roof_deck_door", "highrise", Vector3(-13, 9.9, 2.5), Vector3(-6.2, 9.3, -1.5)],
+	["plant_room", "highrise", Vector3(-5.4, 9.9, -1.5), Vector3(-2.5, 9.2, -2.0)],
+	["tower_west_outside", "highrise", Vector3(-42, 16, 6), Vector3(-10, 9, 0)],
 	["tower_west_far", "highrise", Vector3(-60, 20, 12), Vector3(0, 12, 0)],
-	["stairA_lobby", "highrise", Vector3(-8, 1.7, -3), Vector3(-12.4, 1.5, -10)],
-	["stairA_top", "highrise", Vector3(-9, 6.4, -5), Vector3(-13, 4.5, -11)],
+	["stairA_lobby", "highrise", Vector3(-8, 1.7, -3), Vector3(-12.85, 1.5, -10)],
+	["stairA_top", "highrise", Vector3(-9, 6.4, -5), Vector3(-13.5, 4.5, -11)],
 ]
 
 var world: Node3D
