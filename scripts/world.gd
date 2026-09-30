@@ -22,6 +22,7 @@ const Factions = preload("res://scripts/factions.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
 const Interiors = preload("res://scripts/interiors.gd")
 const CityDetail = preload("res://scripts/city_detail.gd")
+const CityFill = preload("res://scripts/city_fill.gd")
 ## Kept for the city-limit tests: the Harbor mole's north quay is at z = -HALF on Halcyon
 ## Avenue, and Union Street ends at the West Slip quay at x = -HALF.
 const HALF: float = 200.0
@@ -65,6 +66,18 @@ var _lights: Array[OmniLight3D] = []
 ## compatibility) and the exact outlines in `footprint_polys` (same order).
 var footprints: Array[Rect2] = []
 var footprint_polys: Array[PackedVector2Array] = []
+## Every building on the map (0.8), one record each, for the enterable-ratio audit and the map:
+## {name, kind ("solid", "shop", "plot" or a prefab kind), enterable, footprints (indices into
+## footprint_polys)}. A record covers all the outlines its builder registered while it was open.
+var buildings: Array[Dictionary] = []
+var _building_open: Dictionary = {}
+## World x/z bounds of everything solid or tall the builders placed (props, walls, yards), so the
+## 0.8 fill pass (city_fill.gd) never drops a building on top of hand-authored dressing.
+var _blockers: Array[Rect2] = []
+## The 0.8 fill pass (scripts/city_fill.gd): its `placed` lots and `alleys` are for the tests.
+var city_fill: RefCounted
+var _blockers_off: bool = false
+var _solid_grid: Dictionary = {}
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
 var districts: Array[Dictionary] = []
 ## Named places for the map and mission sites: {name, at, neutral}.
@@ -165,6 +178,9 @@ func _ready() -> void:
 	# Walk-in businesses last: each interior is its own node so its lamp only lights it.
 	for shop: Dictionary in Interiors.SHOPS:
 		Interiors.new(self, shop).build_interior()
+	# Map 0.8: street-frontage infill (prefab buildings, aprons, alleys) before the clutter pass.
+	city_fill = CityFill.new(self)
+	city_fill.build()
 	CityDetail.new(self).build()
 	_xf = Transform3D.IDENTITY
 	_xf_yaw = 0.0
@@ -223,7 +239,9 @@ func _build_plots() -> void:
 	for key: String in PLOT_ORDER:
 		var before_nodes: int = get_child_count()
 		var before_footprints: int = footprint_polys.size()
+		_begin_building("plot", true, key)
 		PLOT_BUILDERS[key].build(self, PLOTS[key])
+		_end_building()
 		var indices: Array[int] = []
 		for index: int in range(before_footprints, footprint_polys.size()):
 			indices.append(index)
@@ -658,6 +676,18 @@ func _footprint(rect: Rect2) -> void:
 	for point: Vector2 in outline:
 		bounds = bounds.expand(point)
 	footprints.append(bounds)
+	if _building_open.is_empty():
+		buildings.append({"name": "", "kind": "solid", "enterable": false, "footprints": [footprint_polys.size() - 1]})
+	else:
+		(_building_open["footprints"] as Array).append(footprint_polys.size() - 1)
+
+## Opens a building record: every outline registered until `_end_building()` belongs to it.
+func _begin_building(kind: String, enterable: bool, title: String = "") -> void:
+	_building_open = {"name": title, "kind": kind, "enterable": enterable, "footprints": []}
+	buildings.append(_building_open)
+
+func _end_building() -> void:
+	_building_open = {}
 
 func _on_land(at: Vector2) -> bool:
 	for poly: PackedVector2Array in land:
@@ -763,9 +793,41 @@ func _box_with(at: Vector3, size: Vector3, material: Material, solid: bool = fal
 	instance.position = at
 	instance.rotation.y = angle
 	_target.add_child(instance)
+	_note_blocker(at, size, angle)
 	if solid:
 		_collider(at, size, angle)
 	return instance
+
+## Records a box's world x/z bounds for the fill pass (small flat decals are ignored).
+func _note_blocker(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
+	var area: float = size.x * size.z
+	if _blockers_off or (size.y < 0.5 and area < 25.0) or area > 40000.0:
+		return
+	var world_at: Vector3 = _xf * at
+	var yaw: float = angle + _xf_yaw
+	var ex: float = absf(cos(yaw)) * size.x * 0.5 + absf(sin(yaw)) * size.z * 0.5
+	var ez: float = absf(sin(yaw)) * size.x * 0.5 + absf(cos(yaw)) * size.z * 0.5
+	var rect: Rect2 = Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0)
+	_blockers.append(rect)
+	if size.y >= 0.5 and area < 400.0:
+		var low: Vector2i = Vector2i(floori(rect.position.x / 16.0), floori(rect.position.y / 16.0))
+		var high: Vector2i = Vector2i(floori(rect.end.x / 16.0), floori(rect.end.y / 16.0))
+		for cx: int in range(low.x, high.x + 1):
+			for cy: int in range(low.y, high.y + 1):
+				var key: Vector2i = Vector2i(cx, cy)
+				if not _solid_grid.has(key):
+					_solid_grid[key] = []
+				(_solid_grid[key] as Array).append(rect)
+
+## True if a tall solid the builders placed (prop, wall, container stack) lies within `radius` of `at`.
+func solid_near(at: Vector2, radius: float) -> bool:
+	var key: Vector2i = Vector2i(floori(at.x / 16.0), floori(at.y / 16.0))
+	if not _solid_grid.has(key):
+		return false
+	for rect: Rect2 in _solid_grid[key]:
+		if rect.grow(radius).has_point(at):
+			return true
+	return false
 
 ## Invisible collision only (sea wall height, canal railings, fences).
 func _collider(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
@@ -790,6 +852,8 @@ func _cylinder(at: Vector3, radius: float, height: float, color: Color, segments
 	instance.material_override = material if material != null else _material(color)
 	instance.position = at
 	_target.add_child(instance)
+	if height >= 0.5:
+		_note_blocker(at, Vector3(radius * 2.0, height, radius * 2.0))
 	return instance
 
 func _label(words: String, at: Vector3, font_size: int, color: Color, angle: float = 0.0, pixel: float = 0.017) -> Label3D:
@@ -861,7 +925,24 @@ func surface_height(at: Vector2) -> float:
 			best = float(slab["height"])
 	return best
 
-func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void:
+## A raised slab turned by `yaw` (the fill pass's lot aprons): same bevelled hull as `_slab`.
+func _slab_rot(center: Vector2, size: Vector2, yaw: float, color: Color, tex: String = "tiles", height: float = 0.16, bevel: float = 0.45) -> void:
+	var hx: float = size.x * 0.5
+	var hz: float = size.y * 0.5
+	var corners: PackedVector3Array = PackedVector3Array([
+		Vector3(-hx, 0.0, -hz), Vector3(hx, 0.0, -hz), Vector3(hx, 0.0, hz), Vector3(-hx, 0.0, hz),
+		Vector3(-hx + bevel, height, -hz + bevel), Vector3(hx - bevel, height, -hz + bevel),
+		Vector3(hx - bevel, height, hz - bevel), Vector3(-hx + bevel, height, hz - bevel)
+	])
+	_hull(Vector3(center.x, 0, center.y), corners, _material(color, 0.9, tex), yaw)
+	var top: PackedVector2Array = PackedVector2Array()
+	var basis: Basis = Basis(Vector3.UP, yaw)
+	for corner: Vector2 in [Vector2(-hx + bevel, -hz + bevel), Vector2(hx - bevel, -hz + bevel), Vector2(hx - bevel, hz - bevel), Vector2(-hx + bevel, hz - bevel)]:
+		var turned: Vector3 = basis * Vector3(corner.x, 0, corner.y)
+		top.append(_w2(center + Vector2(turned.x, turned.z)))
+	_slab_tops.append({"poly": top, "height": height})
+
+func _hull(at: Vector3, corners: PackedVector3Array, material: Material, yaw: float = 0.0) -> void:
 	var surface: SurfaceTool = SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var faces: Array[PackedInt32Array] = [
@@ -879,6 +960,7 @@ func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void
 	instance.mesh = surface.commit()
 	instance.material_override = material
 	instance.position = at
+	instance.rotation.y = yaw
 	_target.add_child(instance)
 	var shape: ConvexPolygonShape3D = ConvexPolygonShape3D.new()
 	shape.points = corners
@@ -886,6 +968,7 @@ func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void
 	collision.shape = shape
 	var body: StaticBody3D = StaticBody3D.new()
 	body.position = at
+	body.rotation.y = yaw
 	body.add_child(collision)
 	_target.add_child(body)
 
@@ -1806,7 +1889,9 @@ func _build_district() -> void:
 	# door, breakable shop windows. Their rooms are furnished after Midtown merges.
 	var shop_sites: Array[Vector2] = []
 	for shop: Dictionary in Interiors.SHOPS:
+		_begin_building("shop", true, str(shop["sign"]))
 		Interiors.new(self, shop).build_shell()
+		_end_building()
 		shop_sites.append(shop["at"])
 	_building(Vector3(39, 0, -35), Vector3(14, 8, 18), Color(0.65, 0.54, 0.37), 2, "CARGO  04")
 	for side: float in [-1.0, 1.0]:
