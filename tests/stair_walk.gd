@@ -180,6 +180,13 @@ func _run() -> void:
 			var kind: String = str(node.get_meta("kind"))
 			if seen_kinds.has(kind):
 				continue
+			# Sample a building of this kind that actually has a stair to walk (a one-storey variant has none,
+			# and which variant sorts first by name changes whenever the map moves a building).
+			var climbs: bool = false
+			for route: Variant in (node.get_meta("routes", {}) as Dictionary).values():
+				climbs = climbs or _rises(route as Array)
+			if not climbs:
+				continue
 			seen_kinds[kind] = true
 		sampled.append(node)
 	print("Walking %d of %d buildings with routes (prefab kinds: %s)" % [sampled.size(), nodes.size(), ", ".join(PackedStringArray(seen_kinds.keys()))])
