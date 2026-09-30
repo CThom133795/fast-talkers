@@ -698,3 +698,22 @@ Queue (ticked as it lands):
 - **Map 0.6:** the plan is `docs/tasks/MAP_0_6_PLAN.md`. M1 (layout, plots, gun store) is running as a cloud task.
   Don't edit `world.gd`, `interiors.gd` or `armory.gd` locally until its PR merges.
 - **All suites:** `bash tests/run_all.sh`.
+
+### 21:20 update — 0.6 FIRST ONLINE BUILD EXPORTED
+- `play-fast-talkers/Fast Talkers.exe` is 0.6. `outputs/Fast Talkers 0.6.zip` is the shareable copy, and
+  `HOW TO PLAY ONLINE.txt` is the connection guide.
+  - The 0.5 exe is backed up in `work/backup-0.5-exe/`.
+  - The exe smoke run is clean.
+- **Verified:**
+  - all offline suites are green;
+  - net_lobby_ui 84, remote_player 74, chat_ui 48;
+  - the two-process net_pair `lobby,round` gives 125 checks and passed 6 runs in a row;
+  - a windowed two-instance screenshot review (`tests/run_net_visual.sh`, images in `work/captures/net/`).
+- **Open / next:**
+  - **Real internet playtest by the user.**
+  - Map M1 PR from the cloud (review, then M2 buildings in parallel).
+  - Per-crew payphone tips online.
+  - Decoy/counterfeit items.
+  - In-game voice.
+  - Lead hooks from the map PR: `set_mode`, lifts.
+  - Host authority for movement and wallet before any public play.
