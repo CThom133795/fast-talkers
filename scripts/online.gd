@@ -94,8 +94,6 @@ var _pending_hits: Dictionary = {}
 var _spawned_round: int = -1
 ## The Week this peer last started (a new Week resets money and gear), -1 before the first buy phase.
 var _seen_week: int = -1
-## Last value pushed to player.set_sidearm_only, so it is only called on change.
-var _sidearm_only: bool = false
 
 
 func setup(owner_game: Node, owner_net: FastNet) -> void:
@@ -336,11 +334,12 @@ func tick(delta: float) -> void:
 
 ## The user's rule: carrying a trade item limits you to the sidearm (player.gd owns the weapon logic).
 func _set_sidearm_only(on: bool) -> void:
-	if on == _sidearm_only or game == null or game.player == null:
+	if game == null or game.player == null or not game.player.has_method("set_sidearm_only"):
 		return
-	_sidearm_only = on
-	if game.player.has_method("set_sidearm_only"):
-		game.player.call("set_sidearm_only", on)
+	# Compare with the player's own flag: death and reset_player clear it there.
+	if on == bool(game.player.get("sidearm_only")):
+		return
+	game.player.call("set_sidearm_only", on)
 
 
 func _send_my_state() -> void:
@@ -917,7 +916,6 @@ func _enter_buy() -> void:
 		g.player.reset_player(g.hq_spawn)
 		g.player.set_loadout(["pistol"])
 		g.player.armor = 0.0
-	_sidearm_only = false
 	g.player.infinite_reserve = false
 	g.player.regenerate = false
 	g.player.invulnerable = false

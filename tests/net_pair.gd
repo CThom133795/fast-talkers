@@ -577,6 +577,10 @@ func _round_damage() -> void:
 		expected_loss = 30.0 - minf(game.player.armor, 30.0 * 0.65)
 	await _sync("dmg_ready")
 	if role == "host":
+		# These are synthetic claims fired across the city, through buildings. The host's line-of-sight
+		# hook (main.gd _net_los_clear, covered by tests/social_features.gd) would rightly drop them.
+		_check(net.los_check.is_valid(), "the host has a line-of-sight hook for hit claims")
+		net.los_check = Callable()
 		var remote: Node3D = online.remotes.get(client_id)
 		_check(remote != null, "host has the client's remote to aim at")
 		if remote != null:
