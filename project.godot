@@ -1,0 +1,29 @@
+; Project Fast Talkers — offline prototype 0.4
+config_version=5
+
+[application]
+config/name="Project Fast Talkers"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+config/description="An original negotiation shooter. Offline prototype 0.4 (island city, 13 weapons, vehicles with gunner seats, buy phase, street tips)."
+config/version="0.5"
+
+[display]
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+anti_aliasing/quality/msaa_3d=0
+environment/defaults/default_clear_color=Color(0.48, 0.55, 0.59, 1)
+
+[physics]
+common/physics_ticks_per_second=60
+
+[audio]
+driver/enable_input=false

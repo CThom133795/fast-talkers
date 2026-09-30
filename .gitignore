@@ -1,0 +1,5 @@
+.godot/
+*.tmp
+builds/
+*.log
+*.uid.tmp
