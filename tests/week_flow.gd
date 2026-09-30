@@ -204,6 +204,13 @@ func _monday() -> void:
 	await _bank_cash()
 	var settled: bool = await _wait_until(func() -> bool: return str(online.phase) == "settle", 3.0)
 	_check(settled, "both goods banked: the Day settles")
+	# Host telemetry: one JSON line per Day.
+	var log_path: String = str(online.telemetry_path)
+	_check(not log_path.is_empty() and FileAccess.file_exists(log_path), "the host writes a telemetry line for the Day (%s)" % log_path)
+	if FileAccess.file_exists(log_path):
+		var lines: PackedStringArray = FileAccess.get_file_as_string(log_path).strip_edges().split("\n")
+		var entry: Variant = JSON.parse_string(lines[lines.size() - 1])
+		_check(entry is Dictionary and str(entry.get("weekday", "")) == "MONDAY" and int(entry.get("banks", 0)) == 2 and int(entry.get("pickups", 0)) >= 2, "Monday's telemetry counts two banks and the pickups (%s)" % str(entry))
 
 
 func _bank_cash() -> void:
