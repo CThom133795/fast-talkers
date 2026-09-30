@@ -169,3 +169,22 @@ canvas and shows from the title menu:
 - **Settling.** 15 s of results, then the next round (the host keeps the clock running).
 - **Death.** You drop what you carry at your body. You respawn at HQ after 10 s with the P9 (gear lost, CS rule).
 - **Money.** Payouts go to every member of the crew (`_grant`), capped at $16,000 per player.
+
+## 8. Security rules (every networked change must follow them)
+- `SceneMultiplayer.allow_object_decoding = false`. Never use `bytes_to_var_with_objects`, `get_var(true)`, or
+  load `.pck`, scripts or resources received over the network or from user-writable folders. This closes the
+  classic "send an object, run code" vector.
+- **Typed RPC parameters only.** Every handler sanitises its input:
+  - finite floats only;
+  - clamped string lengths;
+  - ids range-checked;
+  - enums (crew, weapon, channel) checked against a whitelist.
+- **Sender identity.** Check `get_remote_sender_id()` in every handler. A peer can only speak for itself, and
+  only the seated driver can move a car.
+- **Rate limits.** The host rate-limits each peer and disconnects flooders.
+- **The host decides outcomes.** Money, items, hits, seats and the clock. The DEMO shortcuts in §2 (client-side
+  movement and wallet) are cheat risks, not code-execution risks. They must move to the host before any public
+  matchmaking.
+- **Release transport:** Steam Networking Sockets through GodotSteam. It is encrypted, relayed through Steam and
+  hides players' IP addresses. For LAN or direct IP, use ENet with DTLS when we leave friend testing.
+- Keep the engine on the latest 4.x patch release.
