@@ -105,6 +105,7 @@ static func _street_front(kit: BuildingKit) -> void:
 	for index: int in range(4):
 		kit.box(Vector3(5.0 + index * 1.05, 1.7, HALF.y + 0.17), Vector3(0.9, 1.25, 0.02), kit.mat(colors[index]))
 	kit.sign_label("DJ KESTREL / FRI", Vector3(6.6, 2.5, HALF.y + 0.19), 18, Color(0.95, 0.95, 0.9))
+	kit.sign_label("NYE 1999\nSOLD OUT", Vector3(7.1, 1.7, HALF.y + 0.19), 14, Color(0.15, 0.1, 0.1))
 
 
 ## Two structural columns in the main room: real cover, square to the grid.
@@ -242,5 +243,6 @@ static func _back_of_house(kit: BuildingKit) -> void:
 	kit.box(Vector3(14.9, FLOOR_Y + 0.75, -16.28), Vector3(0.18, 0.18, 0.04), kit.mat(Color(0.75, 0.75, 0.7), "metal", 0.3))
 	kit.box(Vector3(5.0, FLOOR_Y + 0.7, -17.4), Vector3(0.6, 1.4, 0.7), kit.mat(Color(0.45, 0.47, 0.44), "metal"), true)
 	kit.box(Vector3(10.5, FLOOR_Y + 2.2, -17.8), Vector3(0.8, 0.6, 0.02), kit.mat(Color(0.9, 0.9, 0.85)))
+	kit.sign_label("DEC 1999", Vector3(10.5, FLOOR_Y + 2.38, -17.78), 14, Color(0.6, 0.1, 0.1))
 	kit.box(Vector3(8.0, FLOOR_Y + 1.9, -17.55), Vector3(0.6, 0.45, 0.4), kit.mat(Color(0.2, 0.2, 0.2), "metal"))
 	kit.box(Vector3(8.0, FLOOR_Y + 1.9, -17.34), Vector3(0.46, 0.33, 0.02), kit.glow(Color(0.5, 0.75, 0.6), 0.6))

@@ -221,6 +221,9 @@ static func _back_of_house(kit: BuildingKit) -> void:
 	kit.box(Vector3(-13.58, FLOOR_Y + 0.75, -13.0), Vector3(0.04, 0.18, 0.18), kit.mat(Color(0.75, 0.75, 0.7), "metal", 0.3))
 	kit.box(Vector3(-14.4, FLOOR_Y + 0.7, -8.0), Vector3(0.7, 1.4, 0.6), kit.mat(Color(0.45, 0.47, 0.44), "metal"), true)
 	kit.box(Vector3(-7.5, FLOOR_Y + 2.1, -13.78), Vector3(3.0, 1.2, 0.04), kit.mat(Color(0.85, 0.85, 0.8)))
+	kit.box(Vector3(-11.5, FLOOR_Y + 2.1, -13.8), Vector3(0.8, 0.6, 0.02), kit.mat(Color(0.9, 0.9, 0.85)))
+	kit.sign_label("DEC 1999", Vector3(-11.5, FLOOR_Y + 2.28, -13.78), 14, Color(0.6, 0.1, 0.1))
+	kit.sign_label("MILLENNIUM GALA  -  BALLROOM  -  DEC 31", Vector3(3.5, FLOOR_Y + 1.35, 12.63), 10, Color(0.85, 0.72, 0.4), PI)
 	for row: int in range(4):
 		for column: int in range(10):
 			if (row + column * 3) % 4 == 0:

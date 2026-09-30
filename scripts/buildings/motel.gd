@@ -65,6 +65,8 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	for x: float in [-4.0, 8.0]:
 		kit.box(Vector3(x, DECK_Y + 0.45, 2.0), Vector3(0.55, 0.06, 0.55), kit.mat(Color(0.9, 0.9, 0.86)))
 		kit.box(Vector3(x, DECK_Y + 0.75, 1.75), Vector3(0.55, 0.6, 0.05), kit.mat(Color(0.9, 0.9, 0.86)))
+		for leg: Vector2 in [Vector2(-0.24, -0.22), Vector2(0.24, -0.22), Vector2(-0.24, 0.22), Vector2(0.24, 0.22)]:
+			kit.box(Vector3(x + leg.x, DECK_Y + 0.21, 2.0 + leg.y), Vector3(0.03, 0.42, 0.03), kit.mat(Color(0.6, 0.62, 0.64), "metal", 0.4))
 	_pole_sign(kit)
 	kit.begin_interior()
 	for index: int in range(4):
