@@ -17,10 +17,14 @@ STEAM (the easy way)
    Steam friends list and pick "Join Game".
    Don't accept the invite while the game is closed: Steam would try to start Spacewar
    instead of Fast Talkers.
-5. In the lobby everyone picks a crew. The host presses START MATCH.
+5. In the lobby everyone picks a crew. The host can tick "Quick Week" (Wednesday to Friday)
+   for a shorter session, then presses START MATCH.
 6. Use a headset. Voice is open mic: people near you hear you, and walls block passers-by.
+   A name tag reading (( NAME )) means that player is talking to you.
    Hold Y for the crew radio: only your crew hears you, at any distance.
    N is push-to-talk if you turn open mic off in Settings.
+
+Waiting for friends? SOLO WEEK on the title screen plays the same Week alone.
 
 IF THE HOST ON STEAM BUTTON IS MISSING
 --------------------------------------

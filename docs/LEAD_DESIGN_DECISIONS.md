@@ -30,6 +30,10 @@ systems.
     Money and gear reset between Weeks.
   - **The host sets the Week length** in the lobby: 5 Days by default, 3 for a quick session. With 3 Days they are
     Wednesday, Thursday and Friday, so the Dead Drop always ends the Week.
+  - **SOLO WEEK** on the title menu runs this same Week on one PC (a localhost host, no bots), for demos and for
+    the user's solo contract-test path (CLAUDE_HANDOFF.md, "test ladder"). It is the same state machine, not a
+    separate mode.
+  - A Day ends early once both goods are banked. 10:00 is the hard cap, not the expected length.
 
 ## 2. One phone per crew, and it is a real object [DEMO]
 
@@ -68,7 +72,10 @@ systems.
   - Hands up really disarms you, and lowering them is visible before you can fire.
   - Binoculars let you look at a meeting without aiming a gun at it.
   - Open-mic proximity voice is the default, with a crew radio that mutes you in proximity.
-- **[NEXT]** A speaking icon over talkers, and the handshake gesture that starts the atomic trade.
+- **[DEMO]** A speaking cue: a rival's name tag reads "(( NAME ))" while their proximity voice reaches you. Crew
+  radio never shows, so a whispered radio call stays secret.
+- **[DEMO]** A carried crew phone is visible on the carrier's belt, banded in the owning crew's colour.
+- **[NEXT]** The handshake gesture that starts the atomic trade.
 
 ## 5. Death costs the Day, not the Week [DEMO]
 

@@ -108,17 +108,16 @@ func _pure_helpers() -> void:
 
 
 func _steam_absent() -> void:
-	var present: bool = SteamTransportScript.extension_present()
-	if present:
-		print("NOTE: GodotSteam is installed here; skipping the 'Steam absent' checks")
-		return
-	_check(net.steam_unavailable_reason() == "Steam add-on not installed", "Steam reports 'add-on not installed' cleanly")
+	# With GodotSteam installed (addons/godotsteam), headless runs keep Steam off on purpose, so the same
+	# "unavailable" path is tested with that reason instead.
+	var why: String = "Steam is off in headless runs" if SteamTransportScript.extension_present() else "Steam add-on not installed"
+	_check(net.steam_unavailable_reason() == why, "Steam reports '%s' cleanly (got '%s')" % [why, net.steam_unavailable_reason()])
 	_check(not net.steam_available(), "steam_available() is false")
 	_check(net.host_steam() == ERR_UNAVAILABLE and not net.is_online() and net.transport == "enet", "host_steam() returns ERR_UNAVAILABLE and changes nothing")
 	_check(net.join_steam(109775240000000000) == ERR_UNAVAILABLE and not net.is_connecting(), "join_steam() returns ERR_UNAVAILABLE")
 	_check(net.join_steam(0) == ERR_INVALID_PARAMETER, "join_steam(0) rejected")
 	net.steam_autostart()
-	_check(net.steam_status == "Steam add-on not installed" and not net.is_online(), "steam_autostart() is a clean no-op")
+	_check(net.steam_status == why and not net.is_online(), "steam_autostart() is a clean no-op")
 	var lobby: FastLobby = FastLobby.new()
 	lobby.config_path = "user://net_security_lobby.cfg"
 	root.add_child(lobby)
@@ -127,7 +126,7 @@ func _steam_absent() -> void:
 	var steam_button: Button = lobby.get("_steam_host_button")
 	var note: Label = lobby.get("_steam_note")
 	_check(steam_button != null and not steam_button.visible, "HOST ON STEAM button hidden without Steam")
-	_check(note != null and note.visible and note.text.contains("Steam add-on not installed"), "one plain line says why (%s)" % (note.text if note != null else "?"))
+	_check(note != null and note.visible and note.text.contains(why), "one plain line says why (%s)" % (note.text if note != null else "?"))
 	_check((lobby.get("_host_button") as Button).visible, "ENet HOST GAME still offered")
 	lobby.queue_free()
 
