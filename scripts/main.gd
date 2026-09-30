@@ -2034,8 +2034,6 @@ func _show_title() -> void:
 		_show_title())
 	_button("PLAY ONLINE  /  HOST OR JOIN A MATCH  →", online.show_lobby)
 	_text("The deal round with friends: LAN, Tailscale or a forwarded port. Players only, no bots.", 14, MUTED)
-	_button("SOLO WEEK  /  THE REAL WEEK, JUST YOU  →", online.start_solo_week)
-	_text("Monday to Friday on this PC: the crew phone, the cases, the Friday Dead Drop. For demos and practice.", 14, MUTED)
 	_button("FREE ROAM  /  ARMORY, RANGE & MOTOR POOL  →", _start_free_roam)
 	_text("No clock, no money. Every weapon and vehicle, the range and practice bots.", 14, MUTED)
 	_button("CONTRACT  /  ROUND MODE  →",func():
@@ -2045,6 +2043,9 @@ func _show_title() -> void:
 		_carry_gear = false
 		_start_round())
 	_text("Buy at your HQ, get the case from the Exchange by deal or by force, bring it home.", 14, MUTED)
+	# Kept below the older modes so pad/menu walks (tests/free_roam.gd) still reach them in the same order.
+	_button("SOLO WEEK  /  THE REAL WEEK, JUST YOU  →", online.start_solo_week)
+	_text("Monday to Friday on this PC: the crew phone, the cases, the Friday Dead Drop. For demos and practice.", 14, MUTED)
 	_button("CONTROLS & SETTINGS",func(): _settings(true))
 	_button("QUIT",func(): get_tree().quit())
 	_text("Offline modes use practice bots; online matches are players only.\nVoice: open-mic proximity voice is on by default; hold Y for the crew radio.",13,MUTED)
