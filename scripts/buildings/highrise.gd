@@ -141,6 +141,20 @@ static func _lobby(kit: BuildingKit) -> void:
 	for x: float in [-10.0, -4.5, 4.5, 10.0]:
 		kit.box(Vector3(x, FLOORS[0] + 0.3, 12.8), Vector3(1.4, 0.6, 1.0), granite, true)
 		kit.box(Vector3(x, FLOORS[0] + 1.0, 12.8), Vector3(1.1, 0.9, 0.8), kit.mat(Color(0.2, 0.34, 0.18)))
+	# Ceiling: a plaster lining under the office slab with a grid of light panels (visual only).
+	var lining_y: float = FLOORS[1] - 0.32
+	kit.box(Vector3(0, lining_y, 3.0), Vector3(HALF.x * 2 - 0.4, 0.03, 23.4), kit.mat(Color(0.82, 0.8, 0.74), "stucco"))
+	for x: float in [-9.0, -3.0, 3.0, 9.0]:
+		for z: float in [-3.0, 3.0, 9.0]:
+			kit.box(Vector3(x, lining_y - 0.02, z), Vector3(1.8, 0.02, 1.2), kit.glow(Color(1.0, 0.95, 0.85), 1.1))
+	# Two waiting groups on rugs: leather sofas, low tables, the day's papers.
+	for side: float in [-1.0, 1.0]:
+		var at: Vector3 = Vector3(side * 9.8, FLOORS[0], 4.0)
+		kit.box(at + Vector3(0, 0.006, 0), Vector3(5.0, 0.012, 4.0), kit.mat(Color(0.4, 0.12, 0.1), "tatami", 0.95))
+		kit.box(at + Vector3(0, 0.22, -1.4), Vector3(3.2, 0.44, 0.9), kit.mat(Color(0.12, 0.1, 0.09), "", 0.45), true)
+		kit.box(at + Vector3(0, 0.7, -1.8), Vector3(3.2, 0.6, 0.2), kit.mat(Color(0.12, 0.1, 0.09), "", 0.45), true)
+		kit.box(at + Vector3(0, 0.2, 0.2), Vector3(1.6, 0.4, 0.8), granite, true)
+		kit.box(at + Vector3(0.3, 0.42, 0.2), Vector3(0.5, 0.04, 0.35), kit.mat(Color(0.85, 0.83, 0.78)))
 	for x: float in [-8.0, 8.0]:
 		kit.box(Vector3(x, FLOORS[0] + 0.23, 9.5), Vector3(2.6, 0.12, 0.7), wood)
 		for dx: float in [-1.0, 1.0]:

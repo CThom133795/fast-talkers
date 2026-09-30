@@ -215,7 +215,7 @@ boomy, with no "childish beeps".
 - `docs/captures/overnight/vehicles/*.png`: cabins.
 - Regenerate them with `tests/capture_interiors.gd [-- only=<prefix>]`, `tests/capture_cabins.gd`, `tests/capture_map06.gd -- only=detail`
   and `tests/capture_perf.gd`. Output goes to the ignored `work/captures/`.
-- The high-rise has no capture yet. Its interior was added after the capture pass; it is covered by the walk, lift and stair tests.
+- High-rise captures: `tower_street`, `tower_lobby`, `tower_office` and `tower_conference` in `docs/captures/overnight/interiors/`.
 
 ### Known limitations and open issues
 - **Gun store range yard crosses Coast Road.** `gunstore.gd` builds the yard 80 m deep along world X. Its side berm (and the
