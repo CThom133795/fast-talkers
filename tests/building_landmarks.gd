@@ -10,6 +10,7 @@ const Burger = preload("res://scripts/buildings/burger.gd")
 const Glass = preload("res://scripts/breakable_glass.gd")
 const Garage = preload("res://scripts/buildings/garage.gd")
 const Motel = preload("res://scripts/buildings/motel.gd")
+const Highrise = preload("res://scripts/buildings/highrise.gd")
 const Car = preload("res://scripts/car.gd")
 var checks: int = 0
 var failures: int = 0
@@ -93,7 +94,8 @@ func _run() -> void:
 	root.add_child(world)
 	await _frames(3)
 	for spec: Array in [["nightclub", "Club Voltage", "CLUB VOLTAGE", 3, Nightclub.HALF], ["stripclub", "Velvet Room", "THE VELVET ROOM", 3, Stripclub.HALF],
-			["hotel", "Hotel Meridian", "HOTEL MERIDIAN", 3, Hotel.HALF], ["garage", "", "CENTRAL PARKING", 0, Garage.HALF]]:
+			["hotel", "Hotel Meridian", "HOTEL MERIDIAN", 3, Hotel.HALF], ["garage", "", "CENTRAL PARKING", 0, Garage.HALF],
+			["highrise", "Halcyon Trust", "HALCYON TRUST", 2, Highrise.HALF]]:
 		var key: String = spec[0]
 		var node: Node3D = world.plot_nodes[key]
 		_check(node.has_meta("walk_in") and (node.has_node("Interior") or key == "garage"), key + " is a walk-in building")
@@ -111,6 +113,8 @@ func _run() -> void:
 				var outside: Vector3 = door["outside"]
 				_check(world.is_on_land(outside), "%s opens onto land" % label)
 				_check(_clear(Vector3(outside.x, 0.05, outside.z) + (outside - (door["position"] as Vector3)).normalized() * 0.4, label), "%s has a clear threshold outside" % label)
+			if str(door.get("kind", "door")) == "lift":
+				continue  # a landing's inside is the shaft; the car is only there when it is called
 			var inside: Vector3 = door["inside"]
 			var floor_y: float = _floor_at(inside)
 			_check(not is_nan(floor_y) and _clear(Vector3(inside.x, floor_y, inside.z), label + " inside"), "%s has a clear landing inside" % label)
@@ -180,6 +184,19 @@ func _run() -> void:
 	var pole: Vector3 = burger.global_transform * Vector3(-13.6, 0, 11.8)
 	var pole_hit: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(pole + Vector3(3, 1.0, 0) + (burger.global_transform.basis * Vector3(0, 0, 0)), pole + Vector3(-3, 1.0, 0)))
 	_check(not pole_hit.is_empty(), "Burger pole sign has a solid pole where it is drawn")
+	# High-rise: two lifts that each ride lobby -> office floor, two stairwells (routes above).
+	var tower: Node3D = world.plot_nodes["highrise"]
+	var tower_lifts: Array = tower.get_meta("lifts", [])
+	_check(tower_lifts.size() == 2, "Halcyon Trust has two lifts")
+	for lift_index: int in tower_lifts:
+		var car: Node3D = world.lifts[lift_index]["car"]
+		var start_y: float = car.global_position.y
+		world.call_lift(lift_index, 1)
+		for step: int in range(600):
+			await physics_frame
+			if absf(car.global_position.y - (start_y + Highrise.FLOORS[1] - Highrise.FLOORS[0])) < 0.05:
+				break
+		_check(absf(car.global_position.y - (start_y + Highrise.FLOORS[1] - Highrise.FLOORS[0])) < 0.05, "Lift %d rides from the lobby to the office floor (car y %.2f -> %.2f)" % [lift_index, start_y, car.global_position.y])
 	# Motel upper storey: both exterior stairs reach the walkway and a room, four upper room doors.
 	var upper: Node3D = null
 	for child: Node in world.get_children():
