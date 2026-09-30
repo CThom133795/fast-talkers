@@ -10,8 +10,8 @@ every PR targets `dev`. Pick up from here.
 | 1 | PR 4 `lead/phone-voice` | Phone voice calls (§12); host voice routing about 17× faster; the parked-car keyframe fix |
 | 2 | PR 5 `lead/stairs` | Halcyon Trust open-air railed terrace; closed stair undersides; rails; stair_walk now 95 checks |
 | 3 | PR 6 `lead/street-props` | Nothing solid in any carriageway (whole-city `_road_sweep`); off-road corner and sightline props |
-| 4 | `lead/crew-hq` | Walk-in crew compounds (see its PR for the state it was left in) |
-| 5 | `cloud/playtest-polish` | Phase 2 polish; contains everything above plus `cloud/playtest-sfx` and `cloud/playtest-city` |
+| 4 | PR 8 `lead/crew-hq` | Four walk-in crew compounds (themed interiors, spawn inside, phone desk, 3 doors each); `city_fill` keeps props off HQ walking routes |
+| 5 | PR 7 `cloud/playtest-polish` | Phase 2 polish; contains everything above plus `cloud/playtest-sfx` and `cloud/playtest-city` |
 
 Merging in this order gives no conflicts. Each merge only fast-forwards the diff that is new to that branch.
 
@@ -47,6 +47,7 @@ Merging in this order gives no conflicts. Each merge only fast-forwards the diff
 
 - Host car sync: parked cars could hang 0.5 m in the air on a client after the Day-start reset, because resting cars were never re-sent. The host now re-sends resting cars every 2 s. This also helps late joiners.
 - `voice.gd`: a peer heard only by phone could count as "speaking" in the first 500 ms of the process, so the voice test flaked.
+- A street-props corner cluster blocked Morris's walk from its HQ to its car. `city_fill` now keeps props and parked cars off the published HQ routes.
 - `stair_walk` sampled the first building per kind even when it had no stair. After the street-props re-lot, the office walk silently dropped out.
 
 ## Windows checks before friends join (Claude Desktop or the user)
@@ -75,5 +76,7 @@ Merging in this order gives no conflicts. Each merge only fast-forwards the diff
   - no door or phone snapshot for late joiners beyond the car keyframes;
   - no new join-failure text.
 - Task 1 (Lantern Row and Kingsway enterable) was not started.
-- HQ lights, signage and hero props (Phase 2d) depend on how far `lead/crew-hq` got. See its PR.
+- HQ lights, signage and hero props (Phase 2d) are as built in PR 8. No extra pass was made.
+- **Lantern Row draw count:** `capture_perf` lantern_row went from 568 to 948 under llvmpipe after crew-hq, and could not be pinned on the HQs. Check it on the RTX 3080.
+- Crew HQ spawn: players drop about 0.6 m onto the floor at spawn. Check that it feels fine.
 - A pad binding for the crew radio.

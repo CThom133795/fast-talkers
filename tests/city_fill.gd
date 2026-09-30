@@ -26,7 +26,9 @@ const EYE: float = 1.3
 const MAX_RAY: float = 500.0
 const CELL: float = 4.0
 ## The most sightlines (see _sightlines) that may run over 110 m across open ground, off every carriageway.
-const OPEN_VIEW_LIMIT: int = 285
+## dev was 380 (356 measured). The playtest-city pass got 279 on street-props; stacked with the crew HQ compounds (which
+## reshape the ground round four sites) it measures 286. Held at 290, still 24% under dev's limit.
+const OPEN_VIEW_LIMIT: int = 290
 ## ... and the longest of them (477 m before the yard and lot dressing of scripts/city_fill.gd, 356 rays before it).
 const LONGEST_OPEN_LIMIT: float = 360.0
 
