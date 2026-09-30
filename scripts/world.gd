@@ -1343,10 +1343,10 @@ func _build_midtown_life() -> void:
 	_payphone(Vector3(9.9, 0.16, -26.5), PI * 0.5)
 	_news_box(Vector3(-9.6, 0.16, -26.0), -PI * 0.5, Color(0.8, 0.2, 0.18))
 	_news_box(Vector3(-9.6, 0.16, -24.8), -PI * 0.5, Color(0.2, 0.45, 0.75))
-	_trash_bags(Vector3(-11.2, 0.16, -48.0 + 4.0))
+	_trash_bags(Vector3(-11.2, 0.16, -42.5))
 	_hydrant(Vector3(9.6, 0.16, 26.0))
 	_hydrant(Vector3(-9.6, 0.16, -62.0))
-	_dumpster(Vector3(-11.0, 0.16, 30.5), -PI * 0.5, Color(0.25, 0.4, 0.3))
+	_dumpster(Vector3(-11.0, 0.16, 27.0), -PI * 0.5, Color(0.25, 0.4, 0.3))
 	_bench(Vector3(10.2, 0.16, 8.0), PI * 0.5)
 	_car_prop(Vector3(5.2, 0.03, -70.0), PI, Color(0.2, 0.32, 0.5))
 	_car_prop(Vector3(-40.0, 0.03, -47.2), PI * 0.5, Color(0.85, 0.72, 0.3))
@@ -1990,7 +1990,7 @@ func _build_district() -> void:
 	# Midtown Parking: the old armory lot is a pay-and-display car park (the range moved to Halcyon Arms).
 	_box(Vector3(20, 0.02, -34), Vector3(21, 0.035, 22), Color(0.2, 0.22, 0.23), false, "asphalt")
 	_box(Vector3(21, 0.10, -43), Vector3(18, 0.20, 1.2), Color(0.70, 0.63, 0.45), true)
-	_box(Vector3(22, 1.6, -45), Vector3(20, 3.2, 0.5), Color(0.46, 0.43, 0.35), true, "panel")
+	_box(Vector3(22, 1.6, -43.5), Vector3(20, 3.2, 0.5), Color(0.46, 0.43, 0.35), true, "panel")
 	_label("MIDTOWN PARKING  /  PAY AT THE MACHINE", Vector3(22, 2.0, -44.70), 34, Color(0.94, 0.79, 0.48))
 	for at: Array in [[Vector3(15.9, 0.03, -34.4), 0.0, Color(0.55, 0.14, 0.14), "sedan"], [Vector3(24.1, 0.03, -34.4), 0.0, Color(0.2, 0.28, 0.4), "coupe"]]:
 		_car_prop(at[0], float(at[1]), at[2], str(at[3]), "MIDTOWN LOT")
@@ -2068,11 +2068,11 @@ func _build_squares() -> void:
 			dial.rotation = Vector3(PI * 0.5, atan2(face.x, face.z), 0)
 		_box(at + Vector3(0, 7.5, 0), Vector3(1.6, 0.3, 1.6), Color(0.3, 0.28, 0.26), false, "roof")
 		_landmark(str(square["name"]), at)
-	for spot: Vector3 in [Vector3(58, 0, -78), Vector3(54, 0, -72), Vector3(78, 0, -56), Vector3(-58, 0, 72), Vector3(-60, 0, 80), Vector3(-80, 0, 54)]:
+	for spot: Vector3 in [Vector3(58, 0, -78), Vector3(54, 0, -72), Vector3(80, 0, -60.5), Vector3(-58, 0, 72), Vector3(-60, 0, 80), Vector3(-80, 0, 54)]:
 		_tree(spot)
-	for spot: Array in [[Vector3(66, 0, -80), PI], [Vector3(70, 0, -55), 0.0], [Vector3(-76, 0, 47), PI], [Vector3(-66, 0, 78), 0.0]]:
+	for spot: Array in [[Vector3(66, 0, -80), PI], [Vector3(76.5, 0, -59.5), 0.0], [Vector3(-76, 0, 47), PI], [Vector3(-66, 0, 78), 0.0]]:
 		_bench(spot[0], spot[1])
-	for spot: Vector3 in [Vector3(56, 0, -80), Vector3(62, 0, -54), Vector3(-58, 0, 66)]:
+	for spot: Vector3 in [Vector3(56, 0, -80), Vector3(60, 0, -76), Vector3(-58, 0, 66)]:
 		_planter(spot)
 	# Canal Walk: the old west half of Canal Street, paved over, planted and closed to
 	# traffic by bollards at both ends. The pawn shop and Meridian Imports open onto it.
@@ -2544,7 +2544,7 @@ func _build_waterfronts() -> void:
 				if not _on_land(at) or _near_other_road(at, roads.find(road), 1.0):
 					at = points[index] - outward * 7.2
 					outward = -outward
-				if _on_land(at) and not _near_other_road(at, roads.find(road), 1.0):
+				if _on_land(at) and not _near_other_road(at, roads.find(road), 1.0) and not _on_carriageway(at, 0.3):
 					_lamp(Vector3(at.x, 0.0, at.y), Vector3(-outward.x, 0, -outward.y).normalized().round())
 
 ## Open squares and parks between the neighbourhoods: fountains, statues, trees, benches
@@ -2593,15 +2593,15 @@ func _build_plazas() -> void:
 	# Eastside Park round the square: lawns, trees, benches and low stone walls.
 	plazas.append(PackedVector2Array([Vector2(103, -94), Vector2(221, -94), Vector2(221, -27), Vector2(103, -27)]))
 	_box(Vector3(162, 0.02, -60), Vector3(118, 0.03, 66), Color(0.3, 0.42, 0.27), false, "grass")
-	for at: Vector2 in [Vector2(112, -86), Vector2(126, -84), Vector2(112, -34), Vector2(128, -36), Vector2(180, -88), Vector2(186, -40), Vector2(180, -30), Vector2(138, -86), Vector2(176, -76)]:
+	for at: Vector2 in [Vector2(112, -86), Vector2(126, -84), Vector2(112, -34), Vector2(128, -36), Vector2(180, -88), Vector2(186, -40), Vector2(180, -30), Vector2(138, -86), Vector2(176, -84)]:
 		_tree(Vector3(at.x, 0.0, at.y))
-	for wall: Array in [[Vector3(120, 0, -70), 10.0, 0.0], [Vector3(186, 0, -70), 12.0, 0.0], [Vector3(182, 0, -44), 10.0, PI * 0.5], [Vector3(128, 0, -44), 8.0, PI * 0.5]]:
+	for wall: Array in [[Vector3(120, 0, -70), 10.0, 0.0], [Vector3(186, 0, -65.5), 12.0, 0.0], [Vector3(182, 0, -44), 10.0, PI * 0.5], [Vector3(128, 0, -44), 8.0, PI * 0.5]]:
 		_box_with((wall[0] as Vector3) + Vector3(0, 0.45, 0), Vector3(float(wall[1]), 0.9, 0.5), _material(stone, 0.9, "stucco"), true, float(wall[2]))
-	for at: Vector3 in [Vector3(120, 0, -73), Vector3(186, 0, -73), Vector3(140, 0, -30)]:
+	for at: Vector3 in [Vector3(120, 0, -73), Vector3(186, 0, -68.5), Vector3(140, 0, -30)]:
 		_bench(at, 0.0)
 	_landmark("EASTSIDE PARK", Vector3(190, 0, -58))
 	# Eastgate: a hotel and a bank tower face the park from the north-east.
-	for at: Vector2 in [Vector2(196, -80), Vector2(206, -70), Vector2(214, -84)]:
+	for at: Vector2 in [Vector2(196, -73), Vector2(206, -70), Vector2(214, -84)]:
 		_tree(Vector3(at.x, 0.0, at.y))
 	_tower(Vector2(204, -38), Vector3(16, 30, 18), Color(0.46, 0.5, 0.52), "panel", Vector3.LEFT, "HALCYON SAVINGS", Color(0.6, 0.9, 1.0), Color(0.28, 0.3, 0.3), 0.35)
 
@@ -2900,7 +2900,7 @@ func _build_nightlife() -> void:
 			else:
 				_district_block(rect, "neon" if (row + column) % 2 == 0 else "midrise", Color(0.36, 0.35, 0.38))
 	_parking_row(Vector3(30, 0.16, 251), 10, Vector3.RIGHT, [Color(0.9, 0.2, 0.5), Color(0.15, 0.15, 0.2), Color(0.85, 0.85, 0.9), Color(0.2, 0.5, 0.7)], 2)
-	_pylon(Vector3(74, 0.16, 214), "NIGHTLIFE", Color(1.0, 0.3, 0.8), 0.0, 11.0)
+	_pylon(Vector3(64.5, 0.16, 204.3), "NIGHTLIFE", Color(1.0, 0.3, 0.8), 0.0, 11.0)
 	_landmark("NIGHTLIFE", Vector3(100, 0, 154))
 
 ## West End: rowhouses, lofts and corner shops where Lantern Row used to stand, between the
@@ -2943,9 +2943,9 @@ func _build_slip_side() -> void:
 		_district_block(Rect2(column.x, 68, column.y, 60), "warehouse", Color(0.44, 0.44, 0.42))
 	# Boats hauled out on the quay.
 	for index: int in range(5):
-		var at: Vector3 = Vector3(-380 + index * 34, 0.16, 57)
-		_box(at + Vector3(0, 0.6, 0), Vector3(2.6, 1.2, 7.0), Color(0.9, 0.9, 0.88), true, "panel")
-		_box(at + Vector3(0, 1.5, -0.6), Vector3(1.8, 0.8, 2.6), Color(0.2, 0.34, 0.45))
+		var at: Vector3 = Vector3(-380 + index * 34, 0.16, 54.5)
+		_box(at + Vector3(0, 0.6, 0), Vector3(7.0, 1.2, 2.6), Color(0.9, 0.9, 0.88), true, "panel")
+		_box(at + Vector3(-0.6, 1.5, 0), Vector3(2.6, 0.8, 1.8), Color(0.2, 0.34, 0.45))
 	_landmark("SLIP SIDE", Vector3(-290, 0, 62))
 
 ## The Old Wharf (north-west): a working shipyard and cannery west of the Canal Market.
@@ -2963,12 +2963,13 @@ func _build_old_wharf() -> void:
 				continue
 			for level: int in range(1 + (row + column) % 3):
 				_container(Vector3(-374 + column * 8.2, level * 2.7, -184 + row * 3.2 * 1.0), colors[(row * 2 + column + level) % colors.size()], false)
-	_fence(Vector3(-382, 0.16, -156), Vector3(-320, 0.16, -156))
-	_fence(Vector3(-320, 0.16, -156), Vector3(-320, 0.16, -190))
+	# The yard fence ends at the kerb of the wharf spine (x -326) and of Wharf North (z -189), not across them.
+	_fence(Vector3(-382, 0.16, -156), Vector3(-327, 0.16, -156))
+	_fence(Vector3(-327, 0.16, -156), Vector3(-327, 0.16, -188.5))
 	for at: Vector3 in [Vector3(-360, 0, -170), Vector3(-296, 0, -170), Vector3(-296, 0, -215)]:
 		_box(at + Vector3(0, 8, 0), Vector3(0.5, 16, 0.5), Color(0.3, 0.3, 0.32), true)
 		_box_with(at + Vector3(0, 16.3, 0), Vector3(2.2, 0.8, 0.5), _glow(Color(1.0, 0.85, 0.6), 2.4))
-	_pylon(Vector3(-326, 0.16, -199), "OLD WHARF", Color(0.6, 0.9, 1.0), PI * 0.5, 9.0)
+	_pylon(Vector3(-327.6, 0.16, -203.6), "OLD WHARF", Color(0.6, 0.9, 1.0), PI * 0.5, 9.0)
 	_landmark("OLD WHARF", Vector3(-320, 0, -200))
 
 ## South Docks: quays, container stacks and cold stores between Kingsway and the Strip.
@@ -3006,7 +3007,7 @@ func _build_east_shore() -> void:
 	for index: int in range(10):
 		var angle: float = 0.6 + index * 0.25
 		_fence(Vector3(284 + cos(angle) * 30.0, 0.16, 72 - sin(angle) * 34.0 + 6.0), Vector3(284 + cos(angle + 0.25) * 30.0, 0.16, 72 - sin(angle + 0.25) * 34.0 + 6.0), 2.4)
-	for at: Vector2 in [Vector2(244, 30), Vector2(252, 90), Vector2(324, 30), Vector2(324, 90), Vector2(264, 28), Vector2(304, 92)]:
+	for at: Vector2 in [Vector2(244, 27), Vector2(252, 90), Vector2(324, 27), Vector2(324, 90), Vector2(264, 28), Vector2(304, 92)]:
 		_tree(Vector3(at.x, 0.0, at.y))
 	_bench(Vector3(262, 0.0, 60), PI * 0.5)
 	_bench(Vector3(306, 0.0, 58), -PI * 0.5)

@@ -1051,8 +1051,8 @@ func _site_ok(center: Vector2, reach: float) -> bool:
 	return true
 
 
-## Geometry and ground tests for a corner cluster (its walkway is the 2 m behind it, toward the buildings).
-func _corner_ok(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> bool:
+## Geometry and ground tests for a cluster; a corner's walkway is the 2 m behind it, toward the buildings.
+func _corner_ok(center: Vector2, u: Vector2, v: Vector2, half: Vector2, walkway: bool = true) -> bool:
 	var reach: float = half.length()
 	if not _site_ok(center, reach):
 		return false
@@ -1097,9 +1097,11 @@ func _corner_ok(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> bool:
 						if _obb_pair(center, u, v, half.x + 0.5, half.y + 0.5, other):
 							_why("p-lot")
 							return false
-	# Walkway: the prop plus 2 m behind it (and 0.5 m each end) is clear of buildings, walls and tall props.
+	if not walkway:
+		return true
+	# Walkway: the prop plus 2 m behind it (and 0.5 m, at least 2 m in all, each end) is clear of buildings, walls and tall props.
 	var walk_center: Vector2 = center + v * CORNER_WALK * 0.5
-	var walk_half: Vector2 = Vector2(half.x + 0.5, half.y + CORNER_WALK * 0.5)
+	var walk_half: Vector2 = Vector2(maxf(half.x + 0.5, CORNER_WALK), half.y + CORNER_WALK * 0.5)
 	var walk_box: Rect2 = _bounds(_corners(walk_center, u, v, walk_half.x, walk_half.y)).grow(0.5)
 	for cx: int in range(_key(walk_box.position).x, _key(walk_box.end).x + 1):
 		for cy: int in range(_key(walk_box.position).y, _key(walk_box.end).y + 1):
@@ -1109,6 +1111,17 @@ func _corner_ok(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> bool:
 					if walk_box.intersects(rect) and _obb_hits(walk_center, u, v, walk_half.x, walk_half.y, rect):
 						_why("p-walk")
 						return false
+			# Lots built by this pass (their footprints are not in the eye index).
+			if _obbs.has(key):
+				for other: Array in _obbs[key]:
+					if _obb_pair(walk_center, u, v, walk_half.x, walk_half.y, other):
+						_why("p-walk")
+						return false
+	# Every registered footprint (porches and wings included).
+	for rect: Rect2 in w.footprints:
+		if walk_box.intersects(rect) and _obb_hits(walk_center, u, v, walk_half.x, walk_half.y, rect):
+			_why("p-walk")
+			return false
 	return true
 
 
@@ -1197,10 +1210,10 @@ func _prop_node(at: Vector2) -> Node3D:
 
 ## The longest 2D sightlines down the streets are found first (a ray along every street every 30 m, blocked
 ## by lots, footprints, props and the clusters already placed). Where such a view runs on over open ground
-## (past a bend, or off a street's end) a hoarding, hedge row or billboard goes across it ~50-130 m along, on
-## ground that passes the full clear-lot test (so never on a carriageway), in three passes.
+## (past a bend, or off a street's end) a hoarding, hedge row or billboard goes across it, on ground that
+## passes the full clear-lot test (so never on a carriageway), in five passes.
 func _sightline_clusters() -> void:
-	for pass_index: int in range(3):
+	for pass_index: int in range(5):
 		_hot.clear()
 		for road_index: int in range(w.roads.size()):
 			var road: Dictionary = w.roads[road_index]
@@ -1243,19 +1256,28 @@ func _sightline_clusters() -> void:
 				placed_here.append(spot)
 
 
-## Tries to close the line from `origin` along `dir` with one prop across it, on clear ground off every road.
-## Returns where it stood (null if nothing fits).
+## Tries to close the line from `origin` along `dir` with one prop across it, on clear ground off every road:
+## the view only counts once it leaves the carriageway, so the spots are measured from where it does (past a
+## bend or off a street's end). Returns where the prop stood (null if nothing fits).
 func _try_cluster(origin: Vector2, dir: Vector2, reach: float) -> Variant:
 	var across: Vector2 = Vector2(-dir.y, dir.x)
-	for distance: float in [100.0, 90.0, 110.0, 80.0, 120.0, 70.0, 60.0, 130.0, 50.0]:
-		if distance > reach - 12.0:
+	var leave: float = 8.0
+	while leave < reach and _on_road(origin + dir * leave, 1.0):
+		leave += 4.0
+	if leave >= reach - 20.0:
+		return null
+	for offset: float in [14.0, 24.0, 34.0, 48.0, 62.0, 80.0, 100.0, 8.0]:
+		var distance: float = leave + offset
+		if distance > reach - 10.0:
 			continue
 		var spot: Vector2 = origin + dir * distance
 		if _on_road(spot, 6.0):
 			continue
 		var kind: int = [HOARD, HEDGE, BOARD][_prop_index % 3]
 		var half: Vector2 = HALF[kind]
-		if not _clear(spot, across, dir, half.x * 2.0 + 0.4, half.y * 2.0 + 0.4) or not _site_ok(spot, half.x + 1.0):
+		# Paved block plinths count as free ground here (unlike for lots): only tall solids, buildings, lots, parks
+		# and the carriageway (1 m clear) rule a spot out.
+		if not _outline_off_roads(spot, across, dir, half + Vector2(1.0, 1.0)) or not _corner_ok(spot, across, dir, half, false):
 			continue
 		_register_cluster(kind, spot, across, dir, half, false)
 		if kind == HOARD:
