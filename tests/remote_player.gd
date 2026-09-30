@@ -170,6 +170,12 @@ func _run() -> void:
 	_check(absf(remote.ledger_prop.position.z - remote.cash_prop.position.z) >= 0.5, "both carry props sit apart when both are held")
 	_settle(Vector3(50, 0, 0), 0)
 	_check(not remote.ledger_prop.visible and not remote.cash_prop.visible, "carry props hide again")
+	# The crew phone rides on the belt, banded in the owning crew's colour (online.gd calls set_phone).
+	_check(not remote.phone_prop.visible, "no phone on the belt by default")
+	remote.set_phone(true, Color(0.8, 0.2, 0.2))
+	_check(remote.phone_prop.visible, "set_phone(true) shows the phone on the belt")
+	remote.set_phone(false)
+	_check(not remote.phone_prop.visible, "set_phone(false) hides it again")
 	# --- Hands-up gesture (state flag 128) ----------------------------------------------------
 	_settle(Vector3(50, 0, 0), FastRemote.FLAG_HANDS_UP | FastRemote.FLAG_AIMING)
 	_check(remote.model.get("hands_up") == true, "hands-up flag raises the remote's hands")

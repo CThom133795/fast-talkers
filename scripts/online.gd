@@ -270,6 +270,7 @@ func _spawn_remote(id: int) -> void:
 	_remote_root.add_child(remote)
 	remote.struck.connect(_on_remote_struck.bind(id))
 	remotes[id] = remote
+	_update_remote_phones()
 
 
 func _on_peer_joined(id: int) -> void:
@@ -737,9 +738,20 @@ func _on_item_update(item: int, data: Dictionary) -> void:
 			game._message("You have %s. Open chat, TAB to a crew and call. %s drops it." % [whose, game._glyph("drop_phone")], 7.0)
 		else:
 			game._message("You have %s: sidearm only while you carry it. Bank it at your HQ (teal), trade it, or hide it. %s drops it." % [_item_name(item), game._glyph("drop")], 6.0)
+	if is_phone(item):
+		_update_remote_phones()
 	# Our own phone just walked off with a rival: the crew should know.
 	if is_phone(item) and phone_crew(item) == game.crew and holder != 0 and holder != int(before.get("holder", 0)) and net.crew_of(holder) != game.crew:
 		game._message("A rival has your crew's phone. Their calls will sound like you.", 6.0)
+
+
+## Rivals see a phone on the carrier's belt, banded in the owning crew's colour (never a map marker).
+func _update_remote_phones() -> void:
+	for id: int in remotes.keys():
+		var owner_crew: String = _phone_of(id)
+		var remote: Node = remotes[id]
+		if remote.has_method("set_phone"):
+			remote.call("set_phone", not owner_crew.is_empty(), Factions.color(owner_crew) if not owner_crew.is_empty() else Color.WHITE)
 
 
 func _update_item_visuals() -> void:
