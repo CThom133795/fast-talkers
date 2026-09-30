@@ -1300,7 +1300,7 @@ static func _row_shop(c: Ctx) -> void:
 	if two:
 		c.partz(0, z_back, z_front, x_p)
 		var steel: StandardMaterial3D = c.mat(Color(0.34, 0.3, 0.26), "planks", 0.8)
-		var flight: Dictionary = c.kit.stairs_straight(Vector3(x_hc, c.f0, z_s), Vector3.FORWARD, FH, 1.2, steel)
+		var flight: Dictionary = c.kit.stairs_straight(Vector3(x_hc, c.f0, z_s), Vector3.FORWARD, FH, hall_w, steel)
 		var top: Vector3 = flight["top"]
 		c.stairs.append({"from": 0, "to": 1, "bottom": Vector3(x_hc, c.f0, z_s), "top": top, "kind": "straight"})
 		var z_a: float = z_e - 1.4
@@ -1411,7 +1411,7 @@ static func _warehouse(c: Ctx) -> void:
 	var mezz_d: float = 6.4
 	var z_m: float = z_back + mezz_d
 	var x_mz1: float = x_left + mezz_w
-	var x_st: float = x_left + 0.9
+	var x_st: float = x_left + 0.6  # the 1.2 m flight stands flush against the left wall
 	var z_s: float = z_m + 19 * Kit.STEP_RUN
 	var y1: float = c.fy(1)
 	c.extra_floors.append(y1)
