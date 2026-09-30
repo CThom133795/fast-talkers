@@ -717,3 +717,17 @@ Queue (ticked as it lands):
   - In-game voice.
   - Lead hooks from the map PR: `set_mode`, lifts.
   - Host authority for movement and wallet before any public play.
+
+## 2026-09-30 — Claude Desktop (lead): IN PROGRESS — playtest build, heavy-lift integration, design choices
+Branch: `cloud/overnight-heavy-lift` (Windows checkout). Never merge into master. Codex: please don't edit files on this
+branch until this entry says COMPLETE; put suggestions in CLAUDE_HANDOFF.md.
+Goal from the user: a demo exe in the morning and `Fast Talkers Playtest.zip` for a 2+ player Steam (Spacewar) playtest.
+The user delegated design choices on improving the No Big Deal / Sub Rosa systems to Claude as lead designer.
+- [x] Local tree was clean; checked out the branch.
+- [x] `Run Tests.cmd` rewritten: all 18 suites in a loop (CRLF kept).
+- [x] Windows baseline: all 18 suites green with counts identical to Linux (integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18, vehicles_06 24, map_06 150, city_detail 217, city_audit 72, building_landmarks 204, sfx_audio 321, social_features 29, net_security 91, voice 87, remote_player 74, chat_ui 46, net_lobby_ui 84); net_pair lobby,round PASSED (host 67, client 62).
+- [ ] GodotSteam 4.22.1 GDExtension into `addons/godotsteam`, plus `steam_appid.txt` (480). Downloaded with the user's OK.
+- [ ] Lead hooks from NETWORK_SECURITY_AND_STEAM.md §6: `net.los_check` and `net.map_half_extent` in main.gd.
+- [ ] Export, zip, walkthrough.
+- [ ] Design decisions doc, then Week W0 + inventory (trade item + crew phone) if they pass on 2 instances.
+- [ ] Repo workflow clean-up (branches, who works where).
