@@ -128,6 +128,9 @@ var seat_owner: Callable = Callable()
 ## Optional `los_check(from: Vector3, to: Vector3) -> bool` (host): a hit claim whose ray is blocked by
 ## world geometry is dropped. Unset = no line-of-sight test (range, position and weapon checks still run).
 var los_check: Callable = Callable()
+## Optional `call_gate(sender: int) -> bool` (host): may this peer phone another crew ("call:<crew>")?
+## online.gd sets it so only whoever holds a crew phone can call (docs/LEAD_DESIGN_DECISIONS.md §2).
+var call_gate: Callable = Callable()
 ## Last reason a peer was kicked for flooding (for tests / logs).
 var last_kick: String = ""
 ## Handshake tag; peers with a different one are refused. Defaults to "<protocol>|<config/version>".
@@ -1489,6 +1492,8 @@ func _h_chat(sender: int, channel: String, text: String) -> void:
 		return
 	var clean: String = clean_text(text, CHAT_MAX)
 	if clean.is_empty() or not _rate_ok(sender, "chat", LIMIT_CHAT):
+		return
+	if channel.begins_with("call:") and call_gate.is_valid() and not bool(call_gate.call(sender)):
 		return
 	var sender_crew: String = crew_of(sender)
 	for id: int in players.keys():

@@ -506,11 +506,11 @@ func _round_ledger() -> void:
 		_check(bool(online.interact()), "buyer interact() handled the bank request")
 	var banked: bool = await _wait_until(func() -> bool: return str(_item(0).get("banked", "")) == _buyer_crew, 5.0)
 	_check(banked, "Ledger banked by the buyer crew '%s' (saw '%s')" % [_buyer_crew, str(_item(0).get("banked", ""))])
-	var bank_ok: bool = await _wait_until(func() -> bool: return int(online.bank.get(_buyer_crew, 0)) == 9000, 3.0)
-	_check(bank_ok, "round bank shows $9000 for the buyer crew (got %d)" % int(online.bank.get(_buyer_crew, 0)))
+	var bank_ok: bool = await _wait_until(func() -> bool: return int(online.bank.get(_buyer_crew, 0)) == int(online.contract_value(0)), 3.0)
+	_check(bank_ok, "day bank shows $%d for the buyer crew (got %d)" % [int(online.contract_value(0)), int(online.bank.get(_buyer_crew, 0))])
 	if i_buy:
-		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + 9000, 5.0)
-		_check(paid, "buyer's cash rose by 9000 (%d -> %d)" % [cash_before, int(game.cash)])
+		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + int(online.contract_value(0)), 5.0)
+		_check(paid, "buyer's cash rose by the Ledger value (%d -> %d)" % [cash_before, int(game.cash)])
 	else:
 		await _wait_seconds(0.5)
 		_check(int(game.cash) == cash_before, "the seller's cash did not change (%d -> %d)" % [cash_before, int(game.cash)])
@@ -644,8 +644,8 @@ func _round_cash_and_settle() -> void:
 	var banked: bool = await _wait_until(func() -> bool: return str(_item(1).get("banked", "")) == _seller_crew, 5.0)
 	_check(banked, "cash case banked by the seller crew '%s' (saw '%s')" % [_seller_crew, str(_item(1).get("banked", ""))])
 	if i_sell:
-		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + 6000, 5.0)
-		_check(paid, "seller's cash rose by 6000 (%d -> %d)" % [cash_before, int(game.cash)])
+		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + int(_online().contract_value(1)), 5.0)
+		_check(paid, "seller's cash rose by the cash value (%d -> %d)" % [cash_before, int(game.cash)])
 	# Both items banked: the round settles. A kill happened, so there is no clean-deal bonus.
 	var settled: bool = await _wait_until(func() -> bool: return str(online.phase) == "settle" and game.phase == game.Phase.RESULT, 8.0)
 	_check(settled, "round settled once both items were banked (online '%s')" % str(online.phase))
