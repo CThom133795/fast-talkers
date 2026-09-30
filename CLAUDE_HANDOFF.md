@@ -384,3 +384,101 @@ metrics. **Design only; the user decides before any code.**
    tests) first, then the approved trust proposals in T0–T5 order.
 7. Only after local validation: export, smoke-test, and decide whether to merge into `cloud/map-integration`. Never merge into `master`
    from here.
+
+---
+
+## 2026-09-29 — Design direction from live discussion: MATCH = WEEK, ROUND = DAY, SOLO CONTRACT TEST HARNESS
+
+This section records current **design intent**, not implemented behavior. Preserve the distinction when planning work.
+
+### Match structure
+- **The match is one work week.**
+- **Each day (Monday–Friday) is one round.**
+- Target round length: roughly **6–8 minutes**, with **10 minutes as a hard cap**, not the expected duration.
+- A full five-day match should usually land around **35–45 minutes**, with roughly **50 minutes as an upper bound before transitions/loading**.
+- Individual rounds should be able to end early when their objective state resolves. Avoid forcing every day to run the full timer.
+- The week gives player behavior history: betrayals, deals, grudges, and reputation can matter across several rounds, while the end-of-week reset prevents grudges from becoming permanent server culture.
+
+### Core social design thesis
+Fast Talkers should not reward negotiation with a generic “deal completed” XP bonus. The intended direction is **deal surplus**: cooperation should sometimes create more value or safer outcomes than immediate violence, while violence remains a valid shortcut.
+
+The desired player tension is:
+- One crew begins a contract/day holding or controlling the valuable project/package/objective.
+- Other crews want that value and can obtain it through negotiation, purchase/split arrangements, theft, interception, or force.
+- When Crew A cuts a deal with Crew B, Crew C is naturally excluded and becomes a spoiler, counter-offer, ambush, or disruption threat.
+- Deals should therefore **change the payoff landscape**, not merely tick a “cooperated” box.
+- Mechanical skill should decide many fights, but social skill should heavily influence **which fights happen, when, and with whom**.
+- Avoid polishing combat into a state where negotiation becomes irrelevant; also avoid Sub Rosa-style mastery of deliberately awkward/janky weapon handling becoming the dominant skill test. Fast Talkers should reward aim, driving, planning, positioning, teamwork, and deception more directly.
+
+### Desired weekly behavioral arc
+Do not hard-script player morality by weekday, but let the week create changing incentives:
+- Early week can tolerate more chaos/risk while crews establish cash, grudges and reputations.
+- Midweek should create opportunities to recover, bargain, cooperate or exploit previous behavior.
+- Late week should increase the value of strategic deals and accumulated money/position.
+- Friday should feel like the payoff/consequence point for decisions made earlier in the match.
+This should emerge primarily from economy/contracts and accumulated context, not arbitrary “Monday = violence / Thursday = diplomacy” rules.
+
+### Testing modes: Armory vs actual game-loop testing
+The current Armory/free-roam space is useful and should remain a **systems sandbox** for weapons, vehicles, movement, interactions, world geometry and quick experimentation.
+
+However, the user explicitly needs a second solo-accessible test path that exercises **the game itself**, not only “drive to the same contract spot.” Add or design a **Contract Test / Week Simulation mode** that can run the real match/round state machine:
+- Monday → Friday progression.
+- Contract/objective selection and spawning.
+- Crew/objective ownership.
+- Pickup, carrying, transfer, sale/extraction, theft, loss and round resolution.
+- Cash/economy changes across days.
+- Deal/contest outcomes where possible.
+- Early round completion and hard timer expiry.
+- End-of-week winner/result/reset.
+- HUD/state transitions used by the eventual multiplayer game.
+
+### Bots: keep them intentionally dumb at first
+Do **not** spend significant time building sophisticated combat/social AI before human multiplayer playtests. Tomorrow's two-player test is higher-value evidence for movement, combat, driving, pacing, interaction friction and whether the social loop is understandable.
+
+For solo testing, implement only the cheapest useful bot/test harness needed to exercise contracts:
+- Simple navigation or scripted waypoint movement is acceptable.
+- Bots may use explicit state-machine actions such as go-to-objective, pick-up, carry, deliver, chase/contest, shoot-if-hostile, or wait.
+- Bots do not need humanlike negotiation, advanced tactics, believable personalities or polished aim.
+- Prefer deterministic/debuggable behavior over “smart” AI.
+- Where social behavior is impossible to simulate cheaply, allow debug controls to force a deal, betrayal, transfer, robbery, contract success/failure, or crew elimination so every state can be tested solo.
+
+### Priority call for the next implementation pass
+1. Keep improving the real player-facing systems needed for the next human test.
+2. Build the **smallest viable Contract Test / Week Simulation harness** that proves the Monday–Friday state machine and contract/economy plumbing.
+3. Do **not** let bot sophistication delay two-player/network testing.
+4. Use human tests to decide what bot behavior, if any, is actually worth building later.
+
+### Acceptance criteria for the solo test harness
+A single developer should be able to launch a test week without another human and:
+- Start Monday and progress through Friday.
+- See at least one meaningful contract/objective variation rather than repeating one fixed drive-to point.
+- Complete, fail, steal/intercept or forcibly resolve a contract using bots and/or debug controls.
+- Verify money/objective ownership changes correctly.
+- Verify early completion and 10-minute hard-cap paths.
+- Reach a Friday/week result and clean reset.
+- Re-enter the Armory separately for unconstrained free-roam systems testing.
+
+
+
+### Explicit test ladder — three required paths
+
+The user wants three distinct but compatible ways to test the same core game loop:
+
+1. **Solo contract test**
+   - One developer/player can run the Monday–Friday game loop alone.
+   - Bots and/or debug controls fill missing crews.
+   - Purpose: validate contract logic, economy, ownership, round transitions, fail/success states, and pacing without waiting for other people.
+   - Bots should remain simple and deterministic.
+
+2. **Human + bot mixed test**
+   - One or more real players can join while bots fill remaining crew slots.
+   - Purpose: test real movement/combat/driving/social decisions while still guaranteeing enough actors exist to exercise the contract loop.
+   - Human players should use the same systems and rules as a future full match; bots are just seat-fillers.
+   - Avoid building a separate ruleset for this mode.
+
+3. **Full human multiplayer match**
+   - Multiple real players fill the crews with bots disabled or optional.
+   - Purpose: validate the actual social game: negotiation, betrayal, exclusion, ambushes, team coordination, pacing, economy, and week-long grudges/consequences.
+   - This is the highest-value test for the core design thesis and should ultimately be the source of truth for balance decisions.
+
+Architect these as different population configurations of the **same match/round/contract state machine**, not three separate game modes with duplicated logic. The ideal flow is that the developer changes only the player/bot population and debug affordances, while Monday–Friday progression, objectives, economy, scoring, round resolution and week reset remain identical.
