@@ -9,6 +9,7 @@ const Hotel = preload("res://scripts/buildings/hotel.gd")
 const Burger = preload("res://scripts/buildings/burger.gd")
 const Glass = preload("res://scripts/breakable_glass.gd")
 const Garage = preload("res://scripts/buildings/garage.gd")
+const Motel = preload("res://scripts/buildings/motel.gd")
 const Car = preload("res://scripts/car.gd")
 var checks: int = 0
 var failures: int = 0
@@ -179,6 +180,22 @@ func _run() -> void:
 	var pole: Vector3 = burger.global_transform * Vector3(-13.6, 0, 11.8)
 	var pole_hit: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(pole + Vector3(3, 1.0, 0) + (burger.global_transform.basis * Vector3(0, 0, 0)), pole + Vector3(-3, 1.0, 0)))
 	_check(not pole_hit.is_empty(), "Burger pole sign has a solid pole where it is drawn")
+	# Motel upper storey: both exterior stairs reach the walkway and a room, four upper room doors.
+	var upper: Node3D = null
+	for child: Node in world.get_children():
+		if child.name.begins_with("MotelUpper"):
+			upper = child
+	_check(upper != null and int(upper.get_meta("upper_rooms", 0)) == 4, "Motel has a furnished upper storey with four rooms")
+	if upper != null:
+		for route_name: String in upper.get_meta("routes"):
+			_check(_route_ok(upper, upper.get_meta("routes")[route_name], "motel " + route_name), "Motel %s reaches the walkway and a room" % route_name)
+	var upper_doors: int = 0
+	for door: Dictionary in world.interactable_doors:
+		if str(door["label"]).begins_with("Sea Breeze room 20"):
+			upper_doors += 1
+	_check(upper_doors == 4, "Motel rooms 201-204 have doors (%d)" % upper_doors)
+	var walkway_rail: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(upper.global_transform * Vector3(0, Motel.DECK_Y + 0.2, 8.0), upper.global_transform * Vector3(0, Motel.DECK_Y + 0.2, 12.5)))
+	_check(not walkway_rail.is_empty(), "Motel walkway edge has a solid kick board")
 	# Garage: ramps within the 12 degree limit, and a sedan actually drives up each one.
 	var garage: Node3D = world.plot_nodes["garage"]
 	for ramp: Dictionary in garage.get_meta("ramps"):
