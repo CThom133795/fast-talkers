@@ -66,8 +66,29 @@ Each drops **independently**:
   `docs/MULTIPLAYER_DESIGN.md` §5 swaps two players' trade items atomically.
 - **HUD:** show both slots (for example "CASE" and "PHONE"), so everyone knows what they're holding. What a rival
   holds stays visible on their model (a briefcase in hand, the phone at the ear during a call), never as a map marker.
-- **Open question for the user:** should carrying a trade item limit you, e.g. sidearm only (one hand on the case)
-  or no sprinting? The weapons system itself stays as is.
+- **Decided:** carrying a trade item limits you to the sidearm (see the user's decisions below). The weapons system
+  itself stays as is.
+
+## The user's decisions (2026-09-30, binding)
+
+1. **Carrying a trade item limits you to your sidearm.** While holding a briefcase, the Project or a cash bundle you can
+   draw and fire only the sidearm slot; the primary is slung. Dropping the item (G) restores the primary.
+2. **Build all trust systems that make logical sense and keep players engaged.** In `docs/DESIGN_WEEK_TRUST.md` terms,
+   that means all of them:
+   - W0, the Week foundation, first;
+   - then A (Sit-Down call), B (overnight collateral), C (noise is news), D (the comeback lifeline), E (the audit call),
+     F (honour pays on Friday), G (Broker joint jobs), H (readable intent: handshake, caller ID, deals board) and
+     I (conduct floor);
+   - in the T0–T5 order after the playtest zip is stable;
+   - each host-validated, with a `week_flow` or trust test, and with abuse counters as written.
+3. **Friday is always a bloodbath.** The Dead Drop has no truce rules. Trust systems pay out on Friday (F gives early
+   intel; collateral from Thursday settles Friday morning) but never restrain Friday's violence.
+4. **The comeback lifeline (D)** was an open choice between two versions:
+   - a **Loan Shark** phone call: borrow cash mid-week, repay with interest on Friday;
+   - a **Pawn Shop**: sell your carried gear for quick cash.
+
+   The user wasn't sure what was being asked, so the default is the **Loan Shark**, because it fits the phone-driven
+   crime tone. Confirm with the user when D is built.
 
 ## The core loop
 

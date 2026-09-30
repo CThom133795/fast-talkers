@@ -344,6 +344,27 @@ a second is refused until the first is dropped) and, separately, the **crew phon
 **G** for the trade item (already today's drop key) and **K** for the phone. Both are server-owned objects and fall
 on death. Details are in `docs/GAME_VISION.md` ("Inventory").
 
+### The user's decisions (2026-09-30, binding)
+
+1. **Carrying a trade item limits you to your sidearm.** While holding a briefcase, the Project or a cash bundle you can
+   draw and fire only the sidearm slot; the primary is slung. Dropping the item (G) restores the primary.
+2. **Build all trust systems that make logical sense and keep players engaged.** In `docs/DESIGN_WEEK_TRUST.md` terms,
+   that means all of them:
+   - W0, the Week foundation, first;
+   - then A (Sit-Down call), B (overnight collateral), C (noise is news), D (the comeback lifeline), E (the audit call),
+     F (honour pays on Friday), G (Broker joint jobs), H (readable intent: handshake, caller ID, deals board) and
+     I (conduct floor);
+   - in the T0–T5 order after the playtest zip is stable;
+   - each host-validated, with a `week_flow` or trust test, and with abuse counters as written.
+3. **Friday is always a bloodbath.** The Dead Drop has no truce rules. Trust systems pay out on Friday (F gives early
+   intel; collateral from Thursday settles Friday morning) but never restrain Friday's violence.
+4. **The comeback lifeline (D)** was an open choice between two versions:
+   - a **Loan Shark** phone call: borrow cash mid-week, repay with interest on Friday;
+   - a **Pawn Shop**: sell your carried gear for quick cash.
+
+   The user wasn't sure what was being asked, so the default is the **Loan Shark**, because it fits the phone-driven
+   crime tone. Confirm with the user when D is built.
+
 ### Interim-lead design proposal: trust and the Week
 `docs/DESIGN_WEEK_TRUST.md` diagnoses why Sub Rosa and No Big Deal weeks collapse mid-week, and proposes phone-driven
 tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire rumours on payphones,

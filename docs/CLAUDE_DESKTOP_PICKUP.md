@@ -33,6 +33,13 @@ merge debugging. Run sub-agents on Sonnet 5.5 (`model: "sonnet"`) for scoped wor
 tuning, props and dressing, docs, and the zip and walkthrough. Keep B (Steam/voice/net security) and any host-authority
 code on Opus, or review it yourself before committing.
 
+USER DECISIONS (binding; details in CLAUDE_HANDOFF.md "The user's decisions"):
+- Carrying a trade item (briefcase, Project or cash) limits you to the SIDEARM until you drop it (G).
+- BUILD ALL the trust systems in docs/DESIGN_WEEK_TRUST.md (W0 Week foundation first, then A-I in T0-T5 order) once
+  the playtest zip is stable. Host-validated, tested, with the abuse counters as written.
+- FRIDAY IS ALWAYS A BLOODBATH: the Dead Drop has no truce rules; trust only pays out on Friday.
+- Comeback lifeline D defaults to the Loan Shark phone call (not a pawn shop); confirm with the user when building it.
+
 SETUP (do these yourself, in order):
 1. Preserve local Windows-only changes: run `git status`; commit or stash anything local before switching branches.
 2. `git fetch origin` then `git checkout cloud/overnight-heavy-lift` (draft PR #2 targets cloud/map-integration).
