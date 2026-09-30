@@ -684,3 +684,17 @@ Queue (ticked as it lands):
 - The user asked Claude to act as tech lead with Sonnet subagents (`.claude/agents/` in the session dir) and to put a
   **minimum playable multiplayer round** first. Map and interior expansion waits until that works. Agent brief:
   `docs/AGENT_BRIEF.md`.
+
+### 19:40 update — multiplayer slice in progress; git + GitHub + cloud
+- **The project is now a git repo, pushed to a PRIVATE GitHub repo `CThom133795/fast-talkers`.** Commit to branches.
+  Cloud Claude sessions work on `cloud/<task>` branches and open PRs; see `docs/CLOUD.md`.
+- **Online (M1 slice):**
+  - `docs/NET_M1_SPEC.md` is the contract.
+  - `scripts/net.gd` covers ENet, the lobby, RPCs and the security rules.
+  - `scripts/lobby_ui.gd`, `scripts/remote_player.gd` and `scripts/chat_ui.gd`.
+  - `scripts/online.gd` holds the match: remotes, seats, car puppets, items (Ledger, cash case), host round rules and
+    payouts. Hooks are in main.gd.
+  - The two-process test `tests/run_net_pair.sh` passes the lobby steps. Round steps are being added.
+- **Map 0.6:** the plan is `docs/tasks/MAP_0_6_PLAN.md`. M1 (layout, plots, gun store) is running as a cloud task.
+  Don't edit `world.gd`, `interiors.gd` or `armory.gd` locally until its PR merges.
+- **All suites:** `bash tests/run_all.sh`.
