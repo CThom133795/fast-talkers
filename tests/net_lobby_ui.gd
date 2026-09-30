@@ -74,6 +74,8 @@ func _run() -> void:
 	_check(String(net.players[1]["name"]) == "Tester", "host name is stored")
 	_check(lobby_events[0] > 0, "lobby_changed fired when hosting")
 	_check(lobby.showing_lobby() and lobby.get("_lobby_box").visible, "lobby UI switched to the lobby screen")
+	_check((lobby.get("_lobby_status") as Label).text.contains(str(port)), "host screen shows the actual port %d" % port)
+	_check((lobby.get("_info_label") as Label).text.contains("port %d" % port) and not (lobby.get("_info_label") as Label).text.contains("24650"), "host info shows the actual port, not the default")
 	var start: Button = lobby.get("_start_button")
 	_check(start.visible and not start.disabled, "START MATCH is visible and enabled for the host")
 	_check((lobby.get("_player_list") as Control).get_child_count() == 1, "lobby lists one player")

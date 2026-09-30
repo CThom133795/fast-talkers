@@ -35,6 +35,8 @@ const CROUCH_HEIGHT: float = 1.3
 const SEATED_HEIGHT: float = 1.1
 const SEATED_CENTER: float = 0.85
 const CROUCH_DROP: float = 0.35
+## How far (m, outward from the body) the carried cases hang from the left hand bone.
+const CARRY_OUT: float = -0.12
 const LAYER_BODY: int = 4
 const LAYER_SEATED: int = 8
 
@@ -169,41 +171,48 @@ func _build_longgun() -> Node3D:
 	return attachment
 
 
-## Briefcase props hung from the left hand: dark leather with a gold clasp (the Ledger) and a
-## brushed-aluminium case (the cash).
+## Briefcase props hung from the left hand, held ~0.12 m out from the leg so they do not clip it and
+## sized/coloured to read at 10-20 m: a warm oxblood leather Ledger with a bright brass clasp band, and a
+## bright brushed-aluminium cash case with a dark edge band and a gold tag stripe.
 func _build_carry_props() -> void:
 	var attachment: BoneAttachment3D = BoneAttachment3D.new()
 	attachment.bone_name = "hand_l"
 	model.skeleton.add_child(attachment)
 	var leather: StandardMaterial3D = StandardMaterial3D.new()
-	leather.albedo_color = Color(0.12, 0.065, 0.04)
-	leather.roughness = 0.7
-	var gold: StandardMaterial3D = StandardMaterial3D.new()
-	gold.albedo_color = Color(0.85, 0.66, 0.2)
-	gold.metallic = 0.9
-	gold.roughness = 0.3
+	leather.albedo_color = Color(0.45, 0.18, 0.1)
+	leather.roughness = 0.6
+	var strap: StandardMaterial3D = StandardMaterial3D.new()
+	strap.albedo_color = Color(0.3, 0.11, 0.06)
+	strap.roughness = 0.65
+	var brass: StandardMaterial3D = StandardMaterial3D.new()
+	brass.albedo_color = Color(0.95, 0.76, 0.28)
+	brass.metallic = 0.5
+	brass.roughness = 0.35
 	var aluminium: StandardMaterial3D = StandardMaterial3D.new()
-	aluminium.albedo_color = Color(0.72, 0.74, 0.77)
-	aluminium.metallic = 0.85
-	aluminium.roughness = 0.35
+	aluminium.albedo_color = Color(0.86, 0.88, 0.91)
+	aluminium.metallic = 0.5
+	aluminium.roughness = 0.4
 	var edge: StandardMaterial3D = StandardMaterial3D.new()
-	edge.albedo_color = Color(0.2, 0.21, 0.23)
-	edge.metallic = 0.6
+	edge.albedo_color = Color(0.22, 0.23, 0.26)
+	edge.metallic = 0.4
 	edge.roughness = 0.5
 	ledger_prop = Node3D.new()
 	ledger_prop.name = "LedgerCase"
 	attachment.add_child(ledger_prop)
-	ledger_prop.position = Vector3(0.0, -0.3, 0.0)
-	_add_box(ledger_prop, Vector3(0.09, 0.3, 0.42), Vector3.ZERO, leather)
-	_add_box(ledger_prop, Vector3(0.1, 0.03, 0.1), Vector3(0.0, 0.1, 0.0), gold)
-	_add_box(ledger_prop, Vector3(0.05, 0.05, 0.16), Vector3(0.0, 0.17, 0.0), leather)
+	ledger_prop.position = Vector3(CARRY_OUT, -0.32, 0.0)
+	_add_box(ledger_prop, Vector3(0.12, 0.36, 0.5), Vector3.ZERO, leather)
+	_add_box(ledger_prop, Vector3(0.13, 0.05, 0.5), Vector3(0.0, 0.1, 0.0), brass)
+	_add_box(ledger_prop, Vector3(0.13, 0.09, 0.11), Vector3(0.0, 0.1, 0.0), brass)
+	_add_box(ledger_prop, Vector3(0.13, 0.05, 0.5), Vector3(0.0, -0.16, 0.0), strap)
+	_add_box(ledger_prop, Vector3(0.05, 0.14, 0.18), Vector3(0.0, 0.24, 0.0), strap)
 	cash_prop = Node3D.new()
 	cash_prop.name = "CashCase"
 	attachment.add_child(cash_prop)
-	cash_prop.position = Vector3(0.0, -0.32, 0.0)
-	_add_box(cash_prop, Vector3(0.11, 0.32, 0.46), Vector3.ZERO, aluminium)
-	_add_box(cash_prop, Vector3(0.115, 0.02, 0.46), Vector3(0.0, 0.0, 0.0), edge)
-	_add_box(cash_prop, Vector3(0.05, 0.05, 0.16), Vector3(0.0, 0.18, 0.0), edge)
+	cash_prop.position = Vector3(CARRY_OUT, -0.32, 0.0)
+	_add_box(cash_prop, Vector3(0.12, 0.36, 0.5), Vector3.ZERO, aluminium)
+	_add_box(cash_prop, Vector3(0.13, 0.03, 0.5), Vector3.ZERO, edge)
+	_add_box(cash_prop, Vector3(0.13, 0.04, 0.5), Vector3(0.0, -0.13, 0.0), brass)
+	_add_box(cash_prop, Vector3(0.05, 0.14, 0.18), Vector3(0.0, 0.24, 0.0), edge)
 	ledger_prop.visible = false
 	cash_prop.visible = false
 
@@ -402,7 +411,9 @@ func _refresh(force: bool) -> void:
 		ledger_prop.visible = not dead and (_flags & FLAG_LEDGER) != 0
 		cash_prop.visible = not dead and (_flags & FLAG_CASH) != 0
 		# Both at once: keep the cases from overlapping.
-		cash_prop.position.z = 0.0 if not ledger_prop.visible else 0.2
+		var both: bool = ledger_prop.visible and cash_prop.visible
+		ledger_prop.position.z = -0.29 if both else 0.0
+		cash_prop.position.z = 0.29 if both else 0.0
 	if name_tag != null:
 		name_tag.visible = not dead
 

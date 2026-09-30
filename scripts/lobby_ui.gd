@@ -53,7 +53,7 @@ func setup(net_node: FastNet) -> void:
 		_build()
 	net.lobby_changed.connect(_refresh)
 	net.upnp_done.connect(_on_upnp_done)
-	net.connected.connect(_refresh)
+	net.connected.connect(_on_connected)
 	net.connection_failed.connect(_on_connection_failed)
 	net.server_closed.connect(_on_server_closed)
 	net.peer_joined.connect(_on_peer_changed)
@@ -245,6 +245,8 @@ func _refresh_connect() -> void:
 	_name_edit.editable = not connecting
 	_address_edit.editable = not connecting
 	_join_button.text = "CONNECTING..." if connecting else "JOIN"
+	if not connecting and not status_is_error and status_text.begins_with("Connected to"):
+		status_text = ""
 	if connecting and status_text.is_empty():
 		status_text = "Connecting..."
 	_connect_status.text = status_text
@@ -256,7 +258,7 @@ func _refresh_lobby() -> void:
 	var hosting: bool = net.is_host()
 	var me: int = net.my_id()
 	_lobby_title.text = "LOBBY" if not net.in_match else "MATCH IN PROGRESS"
-	_lobby_status.text = "You are hosting on port %d." % FastNet.PORT if hosting else "Connected to the host."
+	_lobby_status.text = "You are hosting on port %d." % _net_port() if hosting else "Connected to the host."
 	if not status_text.is_empty():
 		_lobby_status.text = status_text
 	# Players list.
@@ -303,10 +305,10 @@ func _refresh_lobby() -> void:
 		if addresses.is_empty():
 			lines.append("Tell friends your address (none found on this PC).")
 		else:
-			lines.append("Friends join: " + ",  ".join(addresses) + "   (port %d)" % FastNet.PORT)
+			lines.append("Friends join: " + ",  ".join(addresses) + "   (port %d)" % _net_port())
 		if not net.upnp_status.is_empty():
 			lines.append(net.upnp_status)
-		lines.append("Playing over the internet? Both install Tailscale and join the host's 100.x address, or forward UDP %d." % FastNet.PORT)
+		lines.append("Playing over the internet? Both install Tailscale and join the host's 100.x address, or forward UDP %d." % _net_port())
 		_info_label.text = "\n".join(lines)
 
 
@@ -335,6 +337,23 @@ func _on_visibility_changed() -> void:
 
 
 func _on_upnp_done(_status: String) -> void:
+	_refresh()
+
+
+## The port the network node is actually using (host or client), falling back to the default.
+func _net_port() -> int:
+	if net != null:
+		var used: int = int(net.get("_port"))
+		if used > 0:
+			return used
+	return FastNet.PORT
+
+
+## The connect-screen "Connecting..." line is replaced once we are in the lobby.
+func _on_connected() -> void:
+	if net != null and not net.is_host() and not status_is_error:
+		var address: String = String(net.get("_address"))
+		_set_status("Connected to %s." % address if not address.is_empty() else "Connected to the host.")
 	_refresh()
 
 

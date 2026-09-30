@@ -709,8 +709,9 @@ func _enter_buy() -> void:
 		ride.enabled = false
 	g.buy_tab = "rifle" if g._current_primary().is_empty() else "mods"
 	if phase == "buy":
+		# The objective board sits in the buy panel (read the board, then buy).
 		g._show_buy()
-	g._message(briefing(), 14.0)
+	g._message(role_line(), 8.0)
 
 
 func _enter_live() -> void:

@@ -60,11 +60,15 @@ func _run() -> void:
 	_check(chat.feed_label.bbcode_enabled, "Feed uses bbcode")
 	_check(not chat.line_edit.visible, "Input hidden while closed")
 	_check(chat.line_edit.max_length == 160, "Input max length is 160")
+	var block: Rect2 = chat.get_node("ChatPanel").get_global_rect()
+	_check(block.end.y <= 540.0 and block.position.x <= 12.0, "Chat block ends above main's message line (y %.0f) at the left edge" % block.end.y)
 
 	# Open / close.
 	_check(not chat.is_typing(), "Starts closed")
 	chat.open_chat()
 	_check(chat.is_typing() and chat.line_edit.visible, "open_chat opens the box")
+	await process_frame
+	_check(chat.line_edit.get_global_rect().end.y <= 530.0, "Input row stays clear of y 530 (ends %.0f)" % chat.line_edit.get_global_rect().end.y)
 	_check(chat.line_edit.has_focus(), "Input box gets focus")
 	chat.close_chat()
 	_check(not chat.is_typing() and not chat.line_edit.visible, "close_chat closes the box")

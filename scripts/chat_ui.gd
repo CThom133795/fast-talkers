@@ -302,7 +302,8 @@ func _build() -> void:
 	_style_idle = StyleBoxEmpty.new()
 	_style_idle.set_content_margin_all(8)
 
-	# Bottom-left block: ~x 8..544, feed lines end near y 600 in a 1280x720 canvas, input row below.
+	# Left block: ~x 8..544. In a 1280x720 canvas the newest feed line ends near y 500 and the input row
+	# sits just below it (clear of main's message line at y 540-600 and the vitals at y 615+).
 	_panel = PanelContainer.new()
 	_panel.name = "ChatPanel"
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -312,8 +313,8 @@ func _build() -> void:
 	_panel.anchor_bottom = 1.0
 	_panel.offset_left = 8.0
 	_panel.offset_right = 544.0
-	_panel.offset_top = -288.0
-	_panel.offset_bottom = -80.0
+	_panel.offset_top = -420.0
+	_panel.offset_bottom = -184.0
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	add_child(_panel)
 

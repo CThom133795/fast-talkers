@@ -1389,6 +1389,8 @@ func _render_buy() -> void:
 	buy_buttons = list
 	buy_detail = _text("", 13, MUTED)
 	_button("CLOSE MENU  (%s)" % _glyph("buy"), _close_buy_menu)
+	if online.active:
+		_text(online.briefing(), 13, GOLD)
 	_text("%s tabs   ·   %s buy%s   ·   %s close.\nOne primary and one sidearm. Survive to keep what you carry." % [_glyph("tabs"), _glyph("accept"), " / sell back" if phase == Phase.BUY else " · no refunds after the doors open", _glyph("back")], 12, MUTED)
 	_update_buy_status()
 	if not list.is_empty():
