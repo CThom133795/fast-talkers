@@ -41,6 +41,7 @@ func _run() -> void:
 	await _frames(5)
 	var world: Variant = game.world
 	var player: Variant = game.player
+	_check(world.mode == "free_roam" and game.armory.is_open(), "Free roam opens Halcyon Arms' practice range")
 	# Shop doors: prompt, E to shut, E to open.
 	var door: Dictionary = world.interactable_doors[7]
 	player.global_position = (door["outside"] as Vector3) + Vector3(0, 0.1, 0)
@@ -69,6 +70,16 @@ func _run() -> void:
 	await _frames(5)
 	_check(not pane.broken and pane.collision_layer == 1, "A new round reglazes shot-out shop windows")
 	_check(bool(world.interactable_doors[3]["open"]), "A new round reopens shut shop doors")
+	var range_closed: bool = world.mode == "contract" and not game.armory.is_open()
+	for index: int in world.gun_doors:
+		range_closed = range_closed and world.is_door_locked(index) and not bool(world.interactable_doors[index]["open"])
+	for target: StaticBody3D in game.armory.targets:
+		range_closed = range_closed and not bool(target.get("active")) and target.collision_layer == 0
+	_check(range_closed, "An actual contract closes and locks the range while leaving shops open")
+	game._reset_world_state()
+	_check(not game.armory.is_open() and world.is_door_locked(world.gun_doors[0]), "A match reset cannot reopen the practice range")
+	game._resume()
+	_check(not bool(game.armory.targets[0].get("active")), "Resuming a match cannot reactivate hidden practice targets")
 	# GPS: after the buy phase, the radar line routes to the Exchange case.
 	game._start_live()
 	await _frames(5)
@@ -86,6 +97,7 @@ func _run() -> void:
 	# Wheelman from a crew HQ far from downtown: streets first, no cutting through buildings.
 	game._start_free_roam()
 	await _frames(5)
+	_check(world.mode == "free_roam" and game.armory.is_open() and not world.is_door_locked(world.gun_doors[0]), "Returning to free roam restores the range")
 	var bike: Variant = null
 	for ride: Variant in game.cars:
 		if ride.vehicle_type == "motorcycle":

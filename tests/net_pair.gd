@@ -415,6 +415,12 @@ func _round_begin() -> bool:
 	var buy: bool = await _wait_until(func() -> bool: return str(online.phase) == "buy", 15.0)
 	_check(buy, "round_state phase 'buy' arrived (got '%s')" % str(online.phase))
 	_check(game.phase == game.Phase.BUY, "game.phase is BUY")
+	var range_closed: bool = game.world.mode == "online" and not game.armory.is_open()
+	for index: int in game.world.gun_doors:
+		range_closed = range_closed and game.world.is_door_locked(index) and not bool(game.world.interactable_doors[index]["open"])
+	for target: StaticBody3D in game.armory.targets:
+		range_closed = range_closed and not bool(target.get("active")) and target.collision_layer == 0
+	_check(range_closed, "The online round hides practice targets and locks the range on this peer")
 
 	var crews: Array[String] = []
 	for crew_id: String in Factions.ORDER:
@@ -444,6 +450,7 @@ func _round_begin() -> bool:
 		online.call("_host_set_phase", "live", 600.0)
 	var live: bool = await _wait_until(func() -> bool: return str(online.phase) == "live" and game.phase == game.Phase.LIVE, 8.0)
 	_check(live, "phase is live and game.phase is LIVE (online '%s')" % str(online.phase))
+	_check(not bool(game.armory.targets[0].get("active")), "Going live cannot reactivate the practice range")
 	await _sync("live")
 	return live
 

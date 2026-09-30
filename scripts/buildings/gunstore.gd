@@ -155,18 +155,26 @@ static func _shop_interior(kit: BuildingKit) -> void:
 	var mid_z: float = (z0 + z1) * 0.5
 	kit.box(Vector3(0, 0.04, mid_z), Vector3(HALF_W * 2.0 - 0.6, 0.06, z1 - z0), floor_mat)
 	kit.box(Vector3(0, HEIGHT - 0.06, mid_z), Vector3(HALF_W * 2.0 - 0.6, 0.1, z1 - z0), kit.mat(Color(0.86, 0.85, 0.8), "", 0.95))
-	kit.box(Vector3(0, 1.2, z1 - 0.02), Vector3(HALF_W * 2.0 - 0.6, 2.4, 0.04), wall_mat)
+	# Interior lining respects the storefront's door and windows; no painted-over openings.
+	kit.wall(Vector2(-HALF_W, z1 - 0.02), Vector2(HALF_W, z1 - 0.02), HEIGHT, wall_mat, [
+		BuildingKit.opening(HALF_W, 1.9, 0.0, 2.6, "door"),
+		BuildingKit.opening(HALF_W - 7.5, 4.6, 0.9, 2.9, "gap"),
+		BuildingKit.opening(HALF_W + 7.5, 4.6, 0.9, 2.9, "gap")])
 	for side: float in [-1.0, 1.0]:
 		kit.box(Vector3(side * (HALF_W - 0.32), 2.2, mid_z), Vector3(0.04, 4.3, z1 - z0), wall_mat)
-	kit.box(Vector3(0, 2.2, z0 + 0.2), Vector3(HALF_W * 2.0 - 0.6, 4.3, 0.04), wall_mat)
+	kit.wall(Vector2(-HALF_W, z0 + 0.2), Vector2(HALF_W, z0 + 0.2), HEIGHT, wall_mat,
+		[BuildingKit.opening(HALF_W + RANGE_DOOR_X, 1.9, 0.0, 2.6, "door")])
 	# The gun wall: pegboard behind the counter with rifles and shotguns on hooks, three rows.
 	var board: StandardMaterial3D = kit.mat(Color(0.18, 0.14, 0.11), "planks", 0.8)
-	kit.box(Vector3(0, 2.1, z0 + 0.26), Vector3(HALF_W * 2.0 - 4.2, 2.2, 0.06), board)
+	for span: Vector2 in [Vector2(-10.9, RANGE_DOOR_X - 1.1), Vector2(RANGE_DOOR_X + 1.1, 10.9)]:
+		kit.box(Vector3((span.x + span.y) * 0.5, 2.1, z0 + 0.26), Vector3(span.y - span.x, 2.2, 0.06), board)
 	var stock_mat: StandardMaterial3D = kit.mat(Color(0.34, 0.2, 0.1), "planks", 0.6)
 	var barrel_mat: StandardMaterial3D = kit.mat(Color(0.07, 0.07, 0.08), "", 0.4)
 	for row: int in range(3):
 		for column: int in range(8):
 			var gx: float = -9.0 + column * 2.4 + (0.6 if row == 1 else 0.0)
+			if absf(gx - RANGE_DOOR_X) < 1.8:
+				continue
 			var gy: float = 2.9 - row * 0.65
 			kit.box(Vector3(gx, gy, z0 + 0.34), Vector3(1.05 if row == 0 else 0.85, 0.06, 0.06), barrel_mat)
 			kit.box(Vector3(gx - (0.7 if row == 0 else 0.55), gy - 0.02, z0 + 0.34), Vector3(0.42, 0.13, 0.07), stock_mat)
@@ -220,7 +228,10 @@ static func _range_interior(kit: BuildingKit) -> void:
 	kit.box(Vector3(0, HEIGHT - 0.06, mid_z), Vector3(HALF_W * 2.0 - 0.6, 0.1, length), kit.mat(Color(0.3, 0.3, 0.32), "", 0.95))
 	for side: float in [-1.0, 1.0]:
 		kit.box(Vector3(side * (HALF_W - 0.32), 2.2, mid_z), Vector3(0.04, 4.3, length), wall_mat)
-	kit.box(Vector3(0, 2.2, z_back + 0.02), Vector3(HALF_W * 2.0 - 0.6, 4.3, 0.04), wall_mat)
+	# Leave the back-wall lining and bullet trap clear of the yard-door escape aisle.
+	var trap_spans: Array[Vector2] = [Vector2(-HALF_W + 0.3, 5.8), Vector2(8.2, HALF_W - 0.3)]
+	for span: Vector2 in trap_spans:
+		kit.box(Vector3((span.x + span.y) * 0.5, 2.2, z_back + 0.02), Vector3(span.y - span.x, 4.3, 0.04), wall_mat)
 	# Eight lanes: a booth (two low dividers and a bench) at the firing line, a paper-target carrier
 	# hanging at the far end, and the bullet trap behind it.
 	var lane_width: float = 2.6
@@ -243,8 +254,10 @@ static func _range_interior(kit: BuildingKit) -> void:
 		var bz: float = lerpf(line_z - 4.0, z_back + 6.0, (baffle + 0.5) / 3.0)
 		kit.box(Vector3(0, HEIGHT - 0.9, bz), Vector3(HALF_W * 2.0 - 0.8, 1.2, 0.12), steel, true)
 	# Bullet trap: a dark rubber and steel wall with a sloped deflector.
-	kit.box(Vector3(0, 1.6, z_back + 0.5), Vector3(HALF_W * 2.0 - 0.6, 3.2, 0.9), rubber, true)
-	kit.box(Vector3(0, 0.3, z_back + 1.3), Vector3(HALF_W * 2.0 - 0.6, 0.6, 0.8), steel, true)
+	for span: Vector2 in trap_spans:
+		var center_x: float = (span.x + span.y) * 0.5
+		kit.box(Vector3(center_x, 1.6, z_back + 0.5), Vector3(span.y - span.x, 3.2, 0.9), rubber, true)
+		kit.box(Vector3(center_x, 0.3, z_back + 1.3), Vector3(span.y - span.x, 0.6, 0.8), steel, true)
 	kit.sign_label("INDOOR  RANGE  -  25 YARDS", Vector3(0, 3.7, z_front - 0.15), 44, Color(0.95, 0.85, 0.5), PI)
 	kit.sign_label("HOLD FIRE  -  RANGE OFFICER ON DUTY", Vector3(0, 3.1, z_front - 0.15), 26, Color(0.9, 0.9, 0.85), PI)
 	for x: float in [-6.0, 0.0, 6.0]:

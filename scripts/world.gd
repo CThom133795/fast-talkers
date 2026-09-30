@@ -36,7 +36,7 @@ const INTERIOR_LAYER: int = 2
 ## `yaw` (radians about +Y). Their outer frame is `from` ± `half`.
 const KITS: Dictionary = {
 	"lantern": {"from": Vector2(-147, -147), "to": Vector2(-300, -70), "yaw": PI * 0.5 + 0.1, "half": Vector2(53, 53)},
-	"solana": {"from": Vector2(147, -147), "to": Vector2(291, -182), "yaw": -PI * 0.5 - 0.16, "half": Vector2(53, 53)},
+	"solana": {"from": Vector2(147, -147), "to": Vector2(309, -174), "yaw": -PI * 0.5 - 0.16, "half": Vector2(53, 53)},
 	"kingsway": {"from": Vector2(147, 147), "to": Vector2(240, 190), "yaw": PI * 0.5 + 0.08, "half": Vector2(53, 53)},
 	"morris": {"from": Vector2(-147, 147), "to": Vector2(-90, 253), "yaw": -PI * 0.5 - 0.12, "half": Vector2(53, 53)},
 	"strip": {"from": Vector2(147, 0), "to": Vector2(115, 338), "yaw": -PI * 0.5, "half": Vector2(53, 82)},
@@ -1235,7 +1235,7 @@ func _define_roads() -> void:
 	_road("FOUNTAIN SQUARE", ring, 10.0)
 	_road("UPTOWN SOUTH", [Vector2(100, -98), Vector2(227, -98)])
 	_road("SOLANA BOULEVARD", [FOUNTAIN + Vector2(cos(-0.7), sin(-0.7)) * 16.0, Vector2(227, -98), Vector2(262, -108), _ring_snap("solana", Vector2(285, -120))])
-	_road("EAST SHORE DRIVE", [Vector2(227, -150), Vector2(227, 102)])
+	_road("EAST SHORE DRIVE", [Vector2(227, -150), Vector2(227, 102)], 14.0)
 	_road("PARK ROAD", [Vector2(166, -56), Vector2(227, -58)])
 	_road("BAYSIDE AVENUE", [Vector2(88, 88), Vector2(100, 99), Vector2(118, 102), Vector2(227, 102)])
 	# Kingsway Boulevard: the diagonal from Midtown's east ring at Canal Street through Motor Mile.
@@ -2776,4 +2776,3 @@ func _build_beach() -> void:
 		leg.rotation.x = side * 0.28
 	_neon("HALCYON PIER", Vector3(240, 4.2, 4.3), 0.0, Color(0.3, 0.9, 1.0), 70, true)
 	_landmark("HALCYON PIER", Vector3(262, 0, 0))
-

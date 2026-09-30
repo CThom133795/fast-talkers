@@ -11,8 +11,8 @@ if ($Steps -match "(^|,)round(,|$)") { $limit = 140 }
 
 function Start-Role([string]$role, [string]$log) {
 	$errLog = $log + ".err"
-	$argList = @("--headless", "--path", "`"$project`"", "--script", "res://tests/net_pair.gd", "--", "--role=$role", "--port=$Port", "--steps=$Steps")
-	return Start-Process -FilePath $godot -ArgumentList $argList -PassThru -NoNewWindow -RedirectStandardOutput $log -RedirectStandardError $errLog
+	$argList = @("--headless", "--path", "`"$project`"", "--log-file", "`"$log.engine`"", "--script", "res://tests/net_pair.gd", "--", "--role=$role", "--port=$Port", "--steps=$Steps")
+	return Start-Process -FilePath $godot -ArgumentList $argList -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $errLog
 }
 function Stop-Tree($proc) {
 	if ($proc -and -not $proc.HasExited) { & taskkill /PID $proc.Id /T /F 2>&1 | Out-Null }

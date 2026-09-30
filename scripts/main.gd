@@ -1100,11 +1100,12 @@ func _reset_world_state() -> void:
 	_guard_respawns.clear()
 	armory.call("reset_targets")
 	effects.call("clear")
-	# Shops reopen and shot-out windows are reglazed every round.
+	# Shops reopen; the range follows the selected mode instead of reopening in matches.
 	world.reset_glass()
 	for door: Dictionary in world.interactable_doors:
-		if not bool(door["open"]):
+		if not world.gun_doors.has(int(door["index"])) and not bool(door["open"]):
 			world.set_door_open(int(door["index"]), true)
+	_sync_world_mode()
 	gps_path = PackedVector3Array()
 	_gps_timer = 0.0
 	respawn_timer = -1.0
@@ -1112,6 +1113,12 @@ func _reset_world_state() -> void:
 	damage_flash = 0.0
 	hit_timer = 0.0
 	_stop_loops()
+
+## Used by offline and online round resets, and by the title after leaving a match.
+func _sync_world_mode() -> void:
+	var mode: String = "free_roam" if free_roam else ("online" if online.active else "contract")
+	world.set_mode(mode)
+	armory.set_mode(mode)
 
 func _hide_title_set() -> void:
 	for model: Node3D in lineup:
@@ -1195,7 +1202,7 @@ func _start_free_roam() -> void:
 	shots_fired = 0
 	shots_hit = 0
 	_resume()
-	_message("Armory range. Keys 1-5 pick a class; press the same key again for the next model (M4 → KV-47...). Vehicles of every type wait at the motor pool on the main road: %s to drive, %s to ride as a gunner." % [_glyph("interact"), _glyph("seat")], 10.0)
+	_message("Welcome to Halcyon Arms, East Shore. Try the range, take a car from the customer lot, or explore Port Halcyon. M opens the city map. Keys 1-5 cycle weapon classes; %s drives, %s rides as a gunner." % [_glyph("interact"), _glyph("seat")], 10.0)
 
 func _rearm() -> void:
 	player.refill()
@@ -1714,6 +1721,7 @@ func _finish(won: bool, title: String, detail: String) -> void:
 func _show_title() -> void:
 	phase = Phase.MENU
 	free_roam = false
+	_sync_world_mode()
 	_carry_gear = false
 	buy_menu_open = false
 	if vehicle != null:
@@ -1981,7 +1989,7 @@ func _lock_controls(lock: bool) -> void:
 		ride.set_physics_process(not lock or online.active)
 	for guard: FastGuard in _all_guards(): guard.active = not lock and phase == Phase.LIVE and guard.visible
 	for target: StaticBody3D in armory.get("targets"):
-		target.set("active", not lock)
+		target.set("active", not lock and free_roam and armory.is_open())
 	if lock:
 		_stop_loops()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if lock else Input.MOUSE_MODE_CAPTURED
@@ -2508,7 +2516,7 @@ func _update_hud() -> void:
 		top_center.add_theme_color_override("font_color", TEAL)
 		top_right.text = "NO CLOCK  /  NO WALLET"
 		objective_label.text = "FREE ROAM  /  EXPLORE & TEST THE ARSENAL"
-		marker_label.text = "ARMORY  ·  %dm       LONG RANGE  ·  %dm       EXCHANGE  ·  %dm" % [_flat_distance(player.position, ArmoryScript.RACK), _flat_distance(player.position, Vector3(ArmoryScript.LONG_LINE_X, 0, -15)), _flat_distance(player.position, DEAL)]
+		marker_label.text = "ARMORY  ·  %dm       LONG RANGE  ·  %dm       EXCHANGE  ·  %dm" % [_flat_distance(player.position, ArmoryScript.RACK), _flat_distance(player.position, ArmoryScript.LONG_LINE), _flat_distance(player.position, DEAL)]
 		var accuracy: int = int(round(100.0 * shots_hit / maxf(shots_fired, 1)))
 		var best: String = "    RACK BEST %.2fs" % rack_best if rack_best > 0.0 else "    PLATE RACK: DROP ALL 5 FAST"
 		stats_label.text = "SHOTS %d    HITS %d    ACCURACY %d%%%s%s" % [shots_fired, shots_hit, accuracy, best, "    INVULNERABLE" if player.invulnerable else ""]
@@ -2600,6 +2608,8 @@ func _prompt_text() -> String:
 	var shop_door: int = _shop_door_in_reach()
 	if shop_door >= 0:
 		var door: Dictionary = world.interactable_doors[shop_door]
+		if world.is_door_locked(shop_door):
+			return "RANGE CLOSED DURING MATCHES  /  %s" % str(door["label"]).replace("  ", " ")
 		var verb: String = ("CLOSE THE SHUTTER" if bool(door["open"]) else "RAISE THE SHUTTER") if str(door["kind"]) == "garage" else ("CLOSE THE DOOR" if bool(door["open"]) else "OPEN THE DOOR")
 		return "[%s]  %s  /  %s" % [_glyph("interact"), verb, str(door["label"]).replace("  ", " ")]
 	var nearest: FastCar = _nearest_car(CENTRE_REACH)
@@ -2758,7 +2768,7 @@ func _draw_map() -> void:
 	var center: Vector2 = mini_map.size * 0.5
 	if free_roam:
 		_radar_marker(ArmoryScript.RACK, TEAL)
-		_radar_marker(Vector3(ArmoryScript.LONG_LINE_X, 0, -15), GOLD)
+		_radar_marker(ArmoryScript.LONG_LINE, GOLD)
 	else:
 		_radar_marker(HOME, TEAL)
 		if not carrying and case_mesh.visible:
@@ -3101,4 +3111,3 @@ func _capture_views() -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(folder + "/freeroam.png")
 	get_tree().quit()
-
