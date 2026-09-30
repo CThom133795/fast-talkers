@@ -9,7 +9,7 @@ if not exist "%FAST_TALKERS_EDITOR%" (
 set "FAST_TALKERS_FAILED="
 set "FAST_TALKERS_SUMMARY="
 set /a FAST_TALKERS_N=0
-for %%S in (integration free_roam soak map_interiors vehicle_art wiring_05 vehicles_06 map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security voice remote_player chat_ui net_lobby_ui week_flow stair_walk prefabs city_fill) do (
+for %%S in (integration free_roam soak map_interiors vehicle_art wiring_05 vehicles_06 map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security voice remote_player chat_ui net_lobby_ui week_flow stair_walk prefabs city_fill crew_hq) do (
   set /a FAST_TALKERS_N+=1
   echo [!FAST_TALKERS_N!/22] %%S...
   set "FAST_TALKERS_EXTRA="

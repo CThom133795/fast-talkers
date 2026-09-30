@@ -10,7 +10,9 @@ extends RefCounted
 ## Frame (BuildingKit): +Z = out of the front door, +X along the facade; the plot is the old tower's
 ## footprint. `world._crew_compound` builds one from inside a district and returns the world-space spawn
 ## data: {hq, spawn, phone, door}. The spawn line: online.gd spreads up to eight crewmates across the
-## room sideways from `spawn` (0, +-1.4, +-2.8, +-4.2, +-5.6 m), so that strip is always open floor.
+## room sideways from `spawn` (0, +-1.4, +-2.8, +-4.2, +-5.6 m), so that strip is always open floor. The crew
+## phone is placed by online.gd 3.2 m along that line and 0.3 m above `spawn`, so each compound has a
+## narrow phone table exactly there (see `_phone_table`) and its spawn point is lifted to match.
 ##
 ## Collision is only what you see for furniture that can be cover (tables, counters, sofas, lockers,
 ## machines); chairs, stools, cushions and small dressing are visual, and the dressing is merged into
@@ -66,7 +68,7 @@ static func build(world: Node3D, crew: String, plot: Dictionary) -> Dictionary:
 	kit.node.set_meta("crew_hq", crew)
 	kit.node.set_meta("routes", info["routes"])
 	var out: Vector3 = (kit.node.transform.basis * Vector3.BACK).normalized()
-	return {"hq": kit.to_world(info["hq"]), "spawn": kit.to_world(info["spawn"]), "phone": kit.to_world(info["phone"]), "door": out}
+	return {"hq": kit.to_world(info["hq"]), "spawn": kit.to_world(info["spawn"]), "phone": kit.to_world(info["phone"]), "door": out, "node": kit.node}
 
 
 # --- Palette --------------------------------------------------------------------------------------
@@ -445,19 +447,94 @@ static func _text(kit: Kit, words: String, x: float, y: float, z: float, yaw: fl
 
 # --- Shared dressing --------------------------------------------------------------------------------
 
-## A phone desk's dressing: a cradle with a crew-coloured stripe at `phone_at` (the published spot sits on
-## it) and a beige desk phone and blotter beside it; needs begin_props().
-static func _phone_dressing(kit: Kit, p: Dictionary, desk_top: Vector3, yaw: float, side: float = 0.55) -> Vector3:
+## A desk's dressing: a blotter and a beige landline (the crew phone itself rests on the phone table, see
+## `_phone_table`); needs begin_props().
+static func _phone_dressing(kit: Kit, p: Dictionary, desk_top: Vector3, yaw: float, side: float = 0.55) -> void:
 	var basis: Basis = Basis(Vector3.UP, yaw)
-	var cradle: Vector3 = desk_top + basis * Vector3(-side * 0.3, 0.0, 0.05)
-	kit.prop(Vector3(cradle.x, desk_top.y + 0.008, cradle.z), Vector3(0.16, 0.016, 0.16), p["black"], yaw)
-	kit.prop(Vector3(cradle.x, desk_top.y + 0.019, cradle.z), Vector3(0.16, 0.006, 0.03), p["accent"], yaw)
 	var landline: Vector3 = desk_top + basis * Vector3(side, 0.0, 0.05)
 	var beige: Material = kit.mat(Color(0.8, 0.77, 0.66), "", 0.6)
 	kit.prop(Vector3(landline.x, desk_top.y + 0.05, landline.z), Vector3(0.24, 0.1, 0.22), beige, yaw)
 	kit.prop(Vector3(landline.x, desk_top.y + 0.115, landline.z), Vector3(0.22, 0.03, 0.07), beige, yaw)
 	kit.prop(Vector3(desk_top.x, desk_top.y + 0.006, desk_top.z), Vector3(0.5, 0.012, 0.36), p["black"], yaw)
-	return Vector3(cradle.x, desk_top.y + 0.14, cradle.z)
+
+
+# --- The crew phone's table -------------------------------------------------------------------------
+# online.gd `_host_place_phones` stands each crew's phone PHONE_SIDE m along the spawn line's right-hand side
+# (footprint -X, the crew faces +Z) and PHONE_LIFT m above the spawn point, so the table is built under that
+# spot and the spawn point is lifted to suit (a player drops the last few decimetres onto the floor). The
+# table sits in the gap between spawn slots 3 (2.8 m) and 5 (4.2 m), which is why it is this narrow.
+
+const PHONE_SIDE: float = 3.2
+const PHONE_LIFT: float = 0.3
+## The handset stands on its base: its centre is this high above the surface it rests on.
+const PHONE_HALF: float = 0.13
+const PHONE_TABLE_W: float = 0.72
+const PHONE_TABLE_CENTER: float = 3.5
+
+
+## The phone table for a door at `door_x`/`door_z`: a solid top `height` m above the floor with an apron,
+## legs and a lower shelf (palette keys `tone`, `leg`), a cradle and a notepad on it. Returns the top
+## surface's absolute height.
+static func _phone_table(kit: Kit, p: Dictionary, door_x: float, door_z: float, height: float, depth: float, tone: String, leg: String) -> float:
+	var z: float = door_z - SPAWN_IN
+	var x: float = door_x - PHONE_TABLE_CENTER
+	var at: Vector2 = Vector2(x, z)
+	var w: float = PHONE_TABLE_W
+	_o(kit, at, 0.0, 0, 0, height - 0.05, w, 0.05, depth, p[tone], true)
+	_o(kit, at, 0.0, 0, 0, height - 0.15, w - 0.1, 0.1, depth - 0.1, p[leg])
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			_o(kit, at, 0.0, sx * (w * 0.5 - 0.06), sz * (depth * 0.5 - 0.06), 0.0, 0.05, height - 0.15, 0.05, p[leg])
+	_o(kit, at, 0.0, 0, 0, 0.18, w - 0.1, 0.03, depth - 0.1, p[leg])
+	var top: float = F + height
+	kit.begin_props()
+	var phone_x: float = door_x - PHONE_SIDE
+	kit.prop(Vector3(phone_x, top + 0.006, z), Vector3(0.15, 0.012, 0.15), p["black"])
+	kit.prop(Vector3(phone_x, top + 0.0135, z), Vector3(0.15, 0.003, 0.03), p["accent"])
+	kit.prop(Vector3(x - 0.05, top + 0.004, z - depth * 0.25), Vector3(0.22, 0.008, 0.3), p["paper"], 0.2)
+	kit.prop(Vector3(x - 0.2, top + 0.012, z - depth * 0.25), Vector3(0.01, 0.012, 0.14), p["black"], 0.5)
+	kit.end_props()
+	return top
+
+
+## The build() result for a compound: the delivery point just inside the front door, the spawn point 4.2 m in
+## (lifted so the phone online.gd puts beside it rests on the phone table's top) and that phone spot.
+static func _info(door_x: float, door_z: float, top_y: float, routes: Dictionary, hq_shift: Vector2 = Vector2.ZERO) -> Dictionary:
+	var spawn_y: float = top_y + PHONE_HALF - PHONE_LIFT
+	var z: float = door_z - SPAWN_IN
+	return {"hq": Vector3(door_x + hq_shift.x, F, door_z - HQ_IN + hq_shift.y), "spawn": Vector3(door_x, spawn_y, z),
+		"phone": Vector3(door_x - PHONE_SIDE, spawn_y + PHONE_LIFT, z), "routes": routes}
+
+
+## A crate (solid) with slats, for the import rooms.
+static func _crate(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, w: float, h: float, d: float, tone: String = "wood") -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, w, h, d, p[tone], true)
+	for level: float in [0.3, 0.62]:
+		if level < h - 0.1:
+			_o(kit, at, yaw, 0, 0, level, w + 0.03, 0.06, d + 0.03, p["dark"])
+
+
+## A pillow or cushion on the floor or a seat (visual).
+static func _cushion(kit: Kit, at: Vector2, yaw: float, y0: float, w: float, d: float, material: Material) -> void:
+	_o(kit, at, yaw, 0, 0, y0, w, 0.08, d, material)
+
+
+## A bookcase against a wall (solid), facing the piece's +Z: a carcase, shelves and rows of book spines.
+static func _bookcase(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, length: float, tall: float = 2.1) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, length, tall, 0.4, p["dark"], true)
+	var tints: Array[Material] = [kit.mat(Color(0.35, 0.12, 0.1), "", 0.8), kit.mat(Color(0.12, 0.2, 0.3), "", 0.8), kit.mat(Color(0.3, 0.3, 0.18), "", 0.8), kit.mat(Color(0.75, 0.7, 0.58), "", 0.8)]
+	for shelf: int in range(5):
+		var y: float = 0.25 + shelf * 0.38
+		_o(kit, at, yaw, 0, 0.05, y, length - 0.08, 0.03, 0.34, p["wood"])
+		var cursor: float = -length * 0.5 + 0.12
+		var index: int = shelf
+		while cursor < length * 0.5 - 0.2:
+			var thick: float = 0.05 + float((index * 7 + shelf * 3) % 4) * 0.012
+			_o(kit, at, yaw, cursor + thick * 0.5, 0.2, y + 0.03, thick, 0.22 + float((index * 5) % 3) * 0.03, 0.02, tints[(index + shelf) % 4])
+			cursor += thick + 0.012
+			index += 1
 
 
 ## Footprint-local waypoints of a flat route (y = floor).
@@ -540,12 +617,13 @@ static func _morris(kit: Kit, p: Dictionary) -> Dictionary:
 	_lockers(kit, p, 4.65, 8.345, PI, 6)
 	_o(kit, Vector2(-4.7, 8.37), 0.0, 0.0, 0.0, 0.0, 3.0, 0.9, 0.5, p["dark"], true)
 	_o(kit, Vector2(-4.7, 8.37), 0.0, 0.0, 0.0, 0.9, 3.1, 0.05, 0.56, p["wood"])
-	# Command desk (the crew phone) and the chair behind it, two visitors' chairs.
+	# Command desk and the chair behind it, two visitors' chairs; the crew phone rests on the telephone table.
 	var desk_at: Vector2 = Vector2(0.0, 1.65)
 	var desk_top: Vector3 = _desk(kit, p, desk_at.x, desk_at.y, 0.0)
 	_chair(kit, p, 0.0, 0.85, 0.0, "leather")
 	_chair(kit, p, -0.55, 2.8, PI)
 	_chair(kit, p, 0.55, 2.8, PI)
+	var table_top: float = _phone_table(kit, p, 0.0, 8.85, 0.74, 0.8, "marble", "dark")
 	# --- Card room: a felt poker table and the planning table with the city map.
 	_table(kit, p, -2.2, -5.0, 0.0, 2.1, 1.5, 0.76, "felt", "dark")
 	for chair: Array in [[-2.2, -3.75, PI], [-2.2, -6.25, 0.0], [-3.65, -5.0, PI * 0.5], [-0.75, -5.0, -PI * 0.5], [-3.1, -6.1, 0.4], [-1.3, -3.9, PI + 0.4]]:
@@ -591,7 +669,7 @@ static func _morris(kit: Kit, p: Dictionary) -> Dictionary:
 	# --- Dressing.
 	kit.begin_props()
 	_gun_rack(kit, p, 8.62, -1.0, -4.7, 3.0)
-	var phone_at: Vector3 = _phone_dressing(kit, p, desk_top, 0.0)
+	_phone_dressing(kit, p, desk_top, 0.0)
 	_morris_props(kit, p)
 	_fan(kit, p, -4.5, 4.0)
 	_fan(kit, p, 4.5, 4.0, 0.8)
@@ -602,9 +680,11 @@ static func _morris(kit: Kit, p: Dictionary) -> Dictionary:
 	_text(kit, "ESPRESSO 1.50  CAPPUCCINO 2.00\nSAMBUCA 4.00  COGNAC 6.00", 12.5, 3.0, 8.6, PI, 22, cream)
 	kit.end_props()
 	kit.end_interior()
-	var door_z: float = kit.size.y * 0.5 - 0.15
-	return {"hq": Vector3(0, F, door_z - HQ_IN), "spawn": Vector3(0, F + 0.13, door_z - SPAWN_IN), "phone": phone_at,
-		"routes": {"to_street": _path([Vector2(0, 4.65), Vector2(0, 7.15), Vector2(0, 10.5), Vector2(0, 14.0), Vector2(-26.0, 14.0), Vector2(-30.0, 10.0), Vector2(-30.0, -6.0), Vector2(-32.6, -6.0)])}}
+	var routes: Dictionary = {
+		"to_street": _path([Vector2(0, 4.65), Vector2(0, 7.15), Vector2(0, 10.5), Vector2(0, 12.2), Vector2(-26.0, 12.2), Vector2(-34.4, 11.0), Vector2(-34.4, -6.0)]),
+		"side_door": _path([Vector2(0, 4.65), Vector2(-2.0, 3.4), Vector2(-2.0, 0.8), Vector2(-13.0, 0.8), Vector2(-13.4, -0.2), Vector2(-14.85, -0.2), Vector2(-18.0, -0.2)]),
+		"kitchen_door": _path([Vector2(0, 4.65), Vector2(2.0, 3.4), Vector2(8.0, 0.6), Vector2(9.8, 0.6), Vector2(9.8, -2.0), Vector2(9.6, -8.0), Vector2(9.5, -8.85), Vector2(9.5, -11.5)])}
+	return _info(0.0, 8.85, table_top, routes)
 
 
 static func _morris_booth(kit: Kit, p: Dictionary, x: float, z: float) -> void:
@@ -671,38 +751,570 @@ static func _morris_props(kit: Kit, p: Dictionary) -> void:
 		_picture(kit, p, x, -1.0, 0.0, 0.5, 0.65, 1.7, sepia)
 
 
+
+
 # =====================================================================================================
-# Placeholder builders for the other three compounds (replaced below).
+# Shared furniture for the other three compounds.
+# =====================================================================================================
+
+## A solid counter run facing the piece's +Z: a body, and a top slab with a little overhang.
+static func _counter(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, length: float, depth: float, height: float, body: String, top: String) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, length, height - 0.05, depth, p[body], true)
+	_o(kit, at, yaw, 0, 0.02, height - 0.05, length + 0.06, 0.05, depth + 0.06, p[top], true)
+
+
+## Thin lattice bars over a window (visual): `along_z` for windows in a wall that runs along Z.
+static func _lattice(kit: Kit, p: Dictionary, x: float, z: float, along_z: bool, w: float, y0: float, h: float, tone: String = "trim") -> void:
+	var at: Vector2 = Vector2(x, z)
+	var yaw: float = PI * 0.5 if along_z else 0.0
+	for level: float in [0.0, 0.5, 1.0]:
+		_o(kit, at, yaw, 0, 0, y0 + level * (h - 0.04), w, 0.04, 0.05, p[tone])
+	for index: int in range(4):
+		_o(kit, at, yaw, -w * 0.5 + 0.02 + float(index) * (w - 0.04) / 3.0, 0, y0, 0.04, h, 0.05, p[tone])
+
+
+## A standing folding screen (visual): dark frame, paper panels and two feet.
+static func _shoji(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, w: float, h: float) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, w, h, 0.04, p["shoji"])
+	for index: int in range(4):
+		_o(kit, at, yaw, -w * 0.5 + float(index) * w / 3.0, 0, 0.0, 0.05, h + 0.03, 0.06, p["trim"])
+	for level: float in [0.0, 0.5, 1.0]:
+		_o(kit, at, yaw, 0, 0, level * (h - 0.05), w, 0.05, 0.06, p["trim"])
+	for side: float in [-1.0, 1.0]:
+		_o(kit, at, yaw, side * w * 0.42, 0, 0.0, 0.05, 0.05, 0.5, p["trim"])
+
+
+## A vending machine facing the piece's +Z (solid): lit selection panel, keypad and a dispenser flap.
+static func _vending(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, body: Material) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, 0.95, 1.85, 0.85, body, true)
+	_o(kit, at, yaw, -0.12, 0.43, 0.4, 0.62, 1.25, 0.03, p["glow_accent"])
+	_o(kit, at, yaw, 0.35, 0.43, 0.9, 0.16, 0.4, 0.03, p["black"])
+	_o(kit, at, yaw, -0.12, 0.43, 0.08, 0.62, 0.22, 0.03, p["black"])
+
+
+## An upright arcade cabinet facing the piece's +Z (solid) with a lit screen and marquee.
+static func _arcade(kit: Kit, p: Dictionary, x: float, z: float, yaw: float, body: Material, screen: Material) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, 0.72, 1.75, 0.8, body, true)
+	_o(kit, at, yaw, 0, 0.4, 0.95, 0.66, 0.08, 0.3, p["black"])
+	_o(kit, at, yaw, 0, 0.405, 1.05, 0.54, 0.44, 0.02, screen)
+	_o(kit, at, yaw, 0, 0.405, 1.55, 0.66, 0.18, 0.03, p["glow_accent"])
+	for side: float in [-1.0, 1.0]:
+		_o(kit, at, yaw, side * 0.14, 0.52, 1.03, 0.05, 0.05, 0.05, p["accent"])
+
+
+## A pool table (solid body and rails), its long side along the piece's X.
+static func _pool(kit: Kit, p: Dictionary, x: float, z: float, yaw: float) -> void:
+	var at: Vector2 = Vector2(x, z)
+	_o(kit, at, yaw, 0, 0, 0.0, 2.7, 0.86, 1.4, p["dark"], true)
+	_o(kit, at, yaw, 0, 0, 0.86, 2.34, 0.02, 1.0, p["felt"])
+	for end: float in [-1.0, 1.0]:
+		_o(kit, at, yaw, end * 1.26, 0, 0.86, 0.18, 0.06, 1.4, p["dark"])
+	for side: float in [-1.0, 1.0]:
+		_o(kit, at, yaw, 0, side * 0.61, 0.86, 2.7, 0.06, 0.18, p["dark"])
+	for corner_x: float in [-1.14, 0.0, 1.14]:
+		for side: float in [-1.0, 1.0]:
+			_o(kit, at, yaw, corner_x, side * 0.56, 0.875, 0.12, 0.01, 0.12, p["black"])
+
+
+# =====================================================================================================
+# KOJIMOTO BUILDING. A karaoke-bar front on Lantern Row over an oyabun's house: a dark-timber lounge with
+# black lacquer, violet and pink neon coves and a koi tank by the door, a tatami room with a tokonoma
+# alcove, the lacquer war table under paper lanterns and a steel izakaya kitchen at the back. 28 x 22,
+# front faces +Z (the walled garden and its timber gate lie beyond the door).
 # =====================================================================================================
 
 static func _kojimoto(kit: Kit, p: Dictionary) -> Dictionary:
-	return _stub(kit, p, "kojimoto", 5.0)
-
-
-static func _solnegro(kit: Kit, p: Dictionary) -> Dictionary:
-	return _stub(kit, p, "solnegro", 0.0)
-
-
-static func _kingsway(kit: Kit, p: Dictionary) -> Dictionary:
-	return _stub(kit, p, "kingsway", 7.0)
-
-
-static func _stub(kit: Kit, p: Dictionary, crew: String, door_x: float) -> Dictionary:
-	var half: Vector2 = kit.size * 0.5
-	p["plaster"] = kit.mat(Color(0.8, 0.72, 0.56), "stucco", 0.9)
-	p["trim"] = kit.mat(Color(0.16, 0.09, 0.06), "planks", 0.6)
-	p["ceiling"] = kit.mat(Color(0.7, 0.64, 0.5), "", 0.95)
-	var cfg: Dictionary = {"outer": kit.mat(Color(0.6, 0.6, 0.58), "panel"), "roof": kit.mat(Color(0.3, 0.3, 0.3), "roof"),
-		"plaster": p["plaster"], "trim": p["trim"], "ceiling": p["ceiling"], "lit": 0.4,
-		"front": [_op(door_x, 2.4)], "back": [_op(-6.0, 1.4)], "west": [], "east": [_op(0.0, 1.4)]}
+	var violet: Color = Factions.color("kojimoto")
+	var pink: Color = Color(0.95, 0.35, 0.85)
+	p["plaster"] = kit.mat(Color(0.72, 0.68, 0.6), "stucco", 0.9)
+	p["trim"] = kit.mat(Color(0.12, 0.08, 0.06), "planks", 0.55)
+	p["ceiling"] = kit.mat(Color(0.2, 0.17, 0.2), "", 0.95)
+	p["tatami"] = kit.mat(Color(0.6, 0.58, 0.36), "tatami", 0.95)
+	p["carpet"] = kit.mat(Color(0.17, 0.1, 0.24), "tatami", 0.95)
+	p["parquet"] = kit.mat(Color(0.22, 0.13, 0.08), "planks", 0.5)
+	p["tile"] = kit.mat(Color(0.56, 0.56, 0.54), "tiles", 0.6)
+	p["lacquer"] = kit.mat(Color(0.05, 0.04, 0.06), "", 0.18)
+	p["red_lacquer"] = kit.mat(Color(0.5, 0.06, 0.07), "", 0.2)
+	p["shoji"] = kit.mat(Color(0.9, 0.87, 0.74), "", 0.9)
+	p["leather"] = kit.mat(Color(0.09, 0.08, 0.11), "", 0.45)
+	p["sofa"] = p["leather"]
+	p["zabuton"] = kit.mat(violet.darkened(0.4), "", 0.9)
+	p["water"] = kit.glow(Color(0.2, 0.7, 0.85), 0.9)
+	p["screen"] = kit.glow(Color(0.55, 0.4, 0.95), 1.0)
+	p["pink_neon"] = kit.glow(pink, 1.5)
+	p["violet_neon"] = kit.glow(violet.lightened(0.15), 1.5)
+	p["lantern"] = kit.mat(Color(0.88, 0.3, 0.2), "", 0.6)
+	var cfg: Dictionary = {
+		"outer": kit.mat(Color(0.17, 0.16, 0.2), "panel"), "roof": kit.mat(Color(0.16, 0.16, 0.2), "roof"),
+		"plaster": p["plaster"], "trim": p["trim"], "ceiling": p["ceiling"], "lit": 0.5,
+		"front": [_op(5.0, 2.4), _win(-4.0, 2.0)],
+		"back": [_op(11.0, 1.4), _win(-9.0, 1.8), _win(-1.0, 1.8)],
+		"west": [_win(8.5, 1.8), _win(-6.0, 1.8)],
+		"east": [_op(3.0, 1.4), _win(-5.0, 1.8)]}
 	_shell(kit, p, cfg)
-	var door_z: float = half.y - 0.15
-	_door(kit, p, Vector3(door_x, 0, door_z), 2.4, Vector3.BACK, "%s entrance" % crew)
-	_door(kit, p, Vector3(-6.0, 0, -door_z), 1.4, Vector3.FORWARD, "%s back door" % crew)
-	_door(kit, p, Vector3(half.x - 0.15, 0, 0), 1.4, Vector3.RIGHT, "%s side door" % crew)
+	_door(kit, p, Vector3(5.0, 0, 10.85), 2.4, Vector3.BACK, "Kojimoto Building entrance")
+	_door(kit, p, Vector3(13.85, 0, 3.0), 1.4, Vector3.RIGHT, "Kojimoto Building side door", "door_steel")
+	_door(kit, p, Vector3(11.0, 0, -10.85), 1.4, Vector3.FORWARD, "Kojimoto Building kitchen door", "door_steel")
 	kit.begin_interior()
 	_lining(kit, p, cfg)
-	_floor(kit, Rect2(-half + Vector2(0.4, 0.4), kit.size - Vector2(0.8, 0.8)), p["concrete"])
-	kit.interior_light(Vector3(0, 3.8, 0), Color(1.0, 0.85, 0.6), 2.0, 16.0)
+	var plaster: Material = p["plaster"]
+	# Floors: stone in the entrance hall, plum carpet in the lounge, tatami, parquet and kitchen tile behind.
+	_floor(kit, Rect2(-1.0, -0.8, 14.6, 11.4), p["tile"])
+	_floor(kit, Rect2(-13.6, -0.8, 12.6, 11.4), p["carpet"])
+	_floor(kit, Rect2(-13.6, -10.6, 8.5, 9.6), p["tatami"])
+	_floor(kit, Rect2(-4.9, -10.6, 9.8, 9.6), p["parquet"])
+	_floor(kit, Rect2(5.1, -10.6, 8.5, 9.6), p["tile"])
+	# Partitions: hall | back rooms, and the two side walls of the war room.
+	_part(kit, Vector2(-13.6, -1.0), Vector2(13.6, -1.0), plaster, [_op(-9.3, 1.6, 0.0, 2.7, "gap"), _op(0.0, 3.0, 0.0, 3.0, "gap"), _op(9.3, 1.4, 0.0, 2.7, "gap")])
+	_part(kit, Vector2(-5.0, -10.6), Vector2(-5.0, -1.1), plaster, [_op(-7.0, 1.2, 0.0, 2.7, "gap")])
+	_part(kit, Vector2(5.0, -10.6), Vector2(5.0, -1.1), plaster, [_op(-7.0, 1.2, 0.0, 2.7, "gap")])
+	# Ceiling: timber beams over the hall and neon coves round the lounge.
+	for z: float in [2.0, 8.0]:
+		_o(kit, Vector2(0.0, z), 0.0, 0, 0, CEIL - F - 0.3, 27.0, 0.22, 0.22, p["trim"])
+	_o(kit, Vector2(-7.3, 10.45), 0.0, 0, 0, CEIL - F - 0.13, 12.0, 0.05, 0.08, p["pink_neon"])
+	_o(kit, Vector2(-13.45, 4.5), 0.0, 0, 0, CEIL - F - 0.13, 0.08, 0.05, 10.6, p["pink_neon"])
+	_o(kit, Vector2(-7.3, -0.6), 0.0, 0, 0, CEIL - F - 0.13, 12.0, 0.05, 0.08, p["violet_neon"])
+	for arch: Array in [[-9.3, 1.6], [0.0, 3.0], [9.3, 1.4]]:
+		_o(kit, Vector2(float(arch[0]), -1.0), 0.0, 0, 0, 2.7, float(arch[1]) + 0.4, 0.16, 0.3, p["trim"])
+	# --- Lounge (west hall): TV wall, two sofas, the lacquer table, the bar under the front wall.
+	_o(kit, Vector2(-13.2, 4.2), 0.0, 0, 0, 0.0, 0.7, 0.5, 2.4, p["lacquer"], true)
+	_sofa(kit, p, -6.4, 2.2, -PI * 0.5, 2.2, "sofa")
+	_sofa(kit, p, -6.4, 6.2, -PI * 0.5, 2.2, "sofa")
+	_table(kit, p, -9.4, 4.2, PI * 0.5, 1.6, 0.8, 0.42, "lacquer", "lacquer")
+	_sofa(kit, p, -4.3, -0.25, 0.0, 2.3, "sofa")
+	_table(kit, p, -4.3, 1.3, 0.0, 1.1, 0.5, 0.42, "lacquer", "lacquer")
+	_counter(kit, p, -10.4, 8.9, 0.0, 5.4, 0.7, 1.05, "lacquer", "red_lacquer")
+	for x: float in [-12.6, -11.4, -10.2, -9.0, -7.8]:
+		_stool(kit, p, x, 8.05, "leather", 0.72)
+	_o(kit, Vector2(-10.4, 10.36), 0.0, 0, 0, 0.0, 5.4, 0.92, 0.5, p["dark"], true)
+	for y: float in [1.35, 1.8, 2.25]:
+		_o(kit, Vector2(-10.4, 10.5), 0.0, 0, 0, y, 5.4, 0.03, 0.25, p["wood"])
+	_plant(kit, p, -13.0, 0.3, 1.1)
+	# --- Entrance hall (east): lockers and the gun rack flanking the door, the koi tank on the partition.
+	_lockers(kit, p, 9.6, 10.345, PI, 6)
+	_o(kit, Vector2(1.9, 10.37), 0.0, 0, 0, 0.0, 3.0, 0.9, 0.5, p["dark"], true)
+	_o(kit, Vector2(1.9, 10.37), 0.0, 0, 0, 0.9, 3.1, 0.05, 0.56, p["wood"])
+	var table_top: float = _phone_table(kit, p, 5.0, 10.85, 0.76, 0.8, "lacquer", "lacquer")
+	_o(kit, Vector2(5.0, -0.45), 0.0, 0, 0, 0.0, 3.4, 0.8, 0.6, p["lacquer"], true)
+	_o(kit, Vector2(5.0, -0.45), 0.0, 0, 0, 0.8, 3.3, 0.85, 0.52, p["water"])
+	_o(kit, Vector2(5.0, -0.45), 0.0, 0, 0, 1.65, 3.4, 0.05, 0.6, p["lacquer"])
+	_sofa(kit, p, 11.3, 0.3, 0.0, 2.2, "sofa")
+	_table(kit, p, 11.3, 1.7, 0.0, 1.1, 0.5, 0.42, "lacquer", "lacquer")
+	_o(kit, Vector2(13.3, 6.6), 0.0, 0, 0, 0.0, 0.5, 1.1, 2.4, p["dark"], true)
+	_plant(kit, p, 13.0, 9.9, 1.0)
+	# --- Tatami room (west back): the low table and cushions, the tokonoma alcove, the futon closet.
+	_table(kit, p, -9.3, -5.7, 0.0, 2.2, 1.0, 0.38, "lacquer", "lacquer")
+	for seat: Array in [[-10.2, -4.75, PI], [-8.4, -4.75, PI], [-10.2, -6.65, 0.0], [-8.4, -6.65, 0.0], [-11.4, -5.7, PI * 0.5], [-7.2, -5.7, -PI * 0.5]]:
+		_cushion(kit, Vector2(float(seat[0]), float(seat[1])), float(seat[2]), 0.0, 0.6, 0.6, p["zabuton"])
+	_o(kit, Vector2(-13.2, -5.7), 0.0, 0, 0, 0.0, 0.8, 0.14, 2.2, p["trim"])
+	_picture(kit, p, -13.55, -5.7, PI * 0.5, 0.7, 1.5, 0.9, p["paper"])
+	_plant(kit, p, -13.2, -3.9, 0.8)
+	_o(kit, Vector2(-11.8, -9.9), 0.0, 0, 0, 0.0, 3.2, 2.1, 1.0, p["shoji"], true)
+	for dx: float in [-1.6, -0.53, 0.53, 1.6]:
+		_o(kit, Vector2(-11.8, -9.9), 0.0, dx, 0.51, 0.0, 0.03, 2.1, 0.02, p["trim"])
+	_shoji(kit, p, -7.0, -2.3, 0.0, 1.8, 1.7)
+	_hanging(kit, p, -9.3, -5.7, 1.1, "lantern", 0.5)
+	# --- War room (centre): the lacquer table with the map, eight chairs, the big wall map.
+	_table(kit, p, 0.0, -5.8, 0.0, 4.4, 1.4, 0.76, "lacquer", "lacquer")
+	_map_sheet(kit, p, 0.0, -5.8, 0.76, 1.15)
+	for x: float in [-1.6, -0.55, 0.55, 1.6]:
+		_chair(kit, p, x, -4.7, PI, "leather")
+		_chair(kit, p, x, -6.9, 0.0, "leather")
+	_chair(kit, p, -2.75, -5.8, PI * 0.5, "leather")
+	_chair(kit, p, 2.75, -5.8, -PI * 0.5, "leather")
+	_wall_map(kit, p, 0.0, -10.5, 0.0, 3.0, 1.6, 1.2)
+	_hanging(kit, p, -1.4, -5.8, 1.0, "lantern", 0.5)
+	_hanging(kit, p, 1.4, -5.8, 1.0, "lantern", 0.5)
+	# --- Kitchen and strongroom (east back): range and hood, prep table, sink run, fridge, safe, dry goods.
+	_counter(kit, p, 7.4, -10.25, 0.0, 3.2, 0.7, 0.92, "steel", "steel")
+	_o(kit, Vector2(7.4, -10.3), 0.0, 0, 0, 1.95, 3.0, 0.6, 0.7, p["steel"])
+	_o(kit, Vector2(7.4, -10.4), 0.0, 0, 0, 2.5, 0.5, 1.6, 0.5, p["steel"])
+	_table(kit, p, 8.6, -5.4, 0.0, 2.6, 0.9, 0.92, "steel", "steel")
+	_counter(kit, p, 13.25, -6.9, -PI * 0.5, 2.6, 0.6, 0.92, "steel", "steel")
+	_o(kit, Vector2(13.1, -2.5), 0.0, 0, 0, 0.0, 0.85, 1.95, 0.8, p["steel"], true)
+	_o(kit, Vector2(13.0, -9.4), 0.0, 0, 0, 0.0, 1.0, 1.2, 0.9, p["black"], true)
+	_o(kit, Vector2(13.0, -9.4), 0.0, -0.3, 0.45, 0.6, 0.2, 0.2, 0.03, p["brass"])
+	_o(kit, Vector2(5.45, -3.2), 0.0, 0, 0, 0.0, 0.5, 1.9, 2.8, p["wood"], true)
+	_hanging(kit, p, 8.6, -5.4, 1.2, "steel", 0.6)
+	# Lamps: one per room group (hall and lounge, tatami and war room, kitchen).
+	kit.interior_light(Vector3(0, 3.9, 4.5), Color(1.0, 0.86, 0.78), 2.4, 22.0)
+	kit.interior_light(Vector3(-4.5, 3.7, -5.8), Color(1.0, 0.78, 0.6), 1.8, 13.0)
+	kit.interior_light(Vector3(9.0, 3.7, -5.8), Color(0.96, 0.98, 1.0), 1.7, 12.0)
+	# --- Dressing.
+	kit.begin_props()
+	_gun_rack(kit, p, 10.62, -1.0, 1.9, 3.0)
+	var black: Material = p["black"]
+	kit.prop(Vector3(-13.2, F + 0.92, 4.2), Vector3(0.55, 0.84, 1.5), black)
+	kit.prop(Vector3(-12.9, F + 0.92, 4.2), Vector3(0.02, 0.68, 1.3), p["screen"])
+	for z: float in [2.3, 6.1]:
+		kit.prop(Vector3(-13.2, F + 0.85, z), Vector3(0.4, 1.3, 0.4), black)
+	for z: float in [3.6, 4.0, 4.5]:
+		kit.prop(Vector3(-9.4, F + 0.45, z), Vector3(0.05, 0.14, 0.05), p["white"])
+	kit.prop(Vector3(-9.3, F + 0.43, 4.9), Vector3(0.2, 0.03, 0.26), p["pink_neon"])
+	kit.prop(Vector3(-9.6, F + 0.44, 3.7), Vector3(0.06, 0.03, 0.2), black)
+	var tints: Array[Color] = [Color(0.45, 0.25, 0.08), Color(0.12, 0.35, 0.15), Color(0.75, 0.6, 0.2), Color(0.5, 0.08, 0.12), Color(0.8, 0.82, 0.85)]
+	for shelf: int in range(3):
+		for index: int in range(12):
+			kit.prop_bottle(Vector3(-12.9 + index * 0.45, F + 1.38 + shelf * 0.45, 10.5), tints[(index + shelf) % tints.size()], 0.3)
+	for x: float in [-12.0, -10.8, -9.2]:
+		kit.prop(Vector3(x, F + 1.08, 8.85), Vector3(0.07, 0.12, 0.07), p["glass"])
+	for fish: int in range(7):
+		kit.prop(Vector3(3.7 + fish * 0.45, F + 1.05 + float(fish % 3) * 0.2, -0.45 + float(fish % 2) * 0.1), Vector3(0.12, 0.05, 0.04), kit.mat(Color(0.95, 0.45, 0.15), "", 0.5))
+	kit.prop(Vector3(5.0, F + 0.88, -0.45), Vector3(3.1, 0.06, 0.4), kit.mat(Color(0.78, 0.7, 0.55), "", 0.9))
+	for z: float in [-4.6, -5.1, -5.7, -6.3]:
+		kit.prop(Vector3(-9.3 + (z + 5.4) * 0.3, F + 0.4, z), Vector3(0.14, 0.05, 0.14), p["white"])
+	kit.prop(Vector3(-13.15, F + 0.25, -5.7), Vector3(0.3, 0.1, 0.5), black)
+	kit.prop(Vector3(-13.15, F + 0.4, -5.85), Vector3(0.05, 0.05, 0.8), black)
+	kit.prop(Vector3(-13.15, F + 0.4, -5.55), Vector3(0.05, 0.05, 0.7), p["brass"])
+	for x: float in [-1.0, -0.3, 0.4, 1.1]:
+		kit.prop(Vector3(x, F + 0.775, -5.6 - x * 0.1), Vector3(0.08, 0.03, 0.08), p["white"])
+	for x: float in [6.2, 7.4, 8.6]:
+		kit.prop(Vector3(x, F + 1.08, -10.25), Vector3(0.3, 0.2, 0.3), p["steel"])
+	kit.prop(Vector3(8.6, F + 0.96, -5.4), Vector3(0.8, 0.04, 0.5), p["wood"])
+	for index: int in range(6):
+		kit.prop(Vector3(5.45, F + 0.4 + (index % 3) * 0.6, -2.0 - index * 0.4), Vector3(0.3, 0.3, 0.3), kit.mat(Color(0.7, 0.66, 0.55), "", 0.7))
+	_lattice(kit, p, -4.0, 10.6, false, 2.0, F + 0.9, 1.55)
+	_lattice(kit, p, -9.0, -10.6, false, 1.8, F + 0.9, 1.55)
+	_lattice(kit, p, -1.0, -10.6, false, 1.8, F + 0.9, 1.55)
+	_lattice(kit, p, -13.6, 8.5, true, 1.8, F + 0.9, 1.55)
+	_lattice(kit, p, -13.6, -6.0, true, 1.8, F + 0.9, 1.55)
+	_lattice(kit, p, 13.6, -5.0, true, 1.8, F + 0.9, 1.55)
+	_fan(kit, p, 6.0, 5.0)
+	var white: Color = Color(0.96, 0.94, 1.0)
+	_text(kit, "KOJIMOTO893  -  MEMBERS  ONLY", 5.0, 3.35, 10.6, PI, 26, white)
+	_text(kit, "MEMBERS'  LOCKERS", 9.6, 2.35, 10.6, PI, 22, white)
+	_text(kit, "DUTY  IS  THE  ONLY  DEBT", 0.0, 3.3, -10.55, 0.0, 34, white)
+	_text(kit, "TATAMI  ROOM  -  SHOES  OFF", -9.3, 2.85, -0.85, 0.0, 22, white)
+	kit.neon_sign("KARAOKE  MURASAKI", Vector3(-10.4, 3.35, 10.56), PI, pink, 44)
+	kit.end_props()
 	kit.end_interior()
-	return {"hq": Vector3(door_x, F, door_z - HQ_IN), "spawn": Vector3(door_x, F + 0.13, door_z - SPAWN_IN), "phone": Vector3(door_x + 3.0, F + 0.9, door_z - SPAWN_IN), "routes": {}}
+	var routes: Dictionary = {
+		"to_street": _path([Vector2(5.0, 6.65), Vector2(5.0, 10.85), Vector2(5.0, 14.0), Vector2(5.0, 22.5), Vector2(6.6, 24.5), Vector2(6.6, 29.5), Vector2(31.0, 30.0), Vector2(31.0, 15.5)]),
+		"side_door": _path([Vector2(5.0, 6.65), Vector2(9.0, 5.0), Vector2(12.0, 3.0), Vector2(13.85, 3.0), Vector2(16.8, 3.0), Vector2(20.0, 3.0)]),
+		"kitchen_door": _path([Vector2(5.0, 6.65), Vector2(7.0, 3.0), Vector2(9.3, 0.5), Vector2(9.3, -2.4), Vector2(11.0, -4.0), Vector2(11.0, -10.0), Vector2(11.0, -10.85), Vector2(11.0, -13.5)])}
+	return _info(5.0, 10.85, table_top, routes)
+
+
+# =====================================================================================================
+# SOL NEGRO HACIENDA. A whitewashed ranch house behind the gated courtyard: saltillo tile and dark
+# vigas, a sala with leather equipales, a carved dining table under wrought-iron lamps, the patron's
+# study, and a cantina with crates of "imports" stacked beside the cash table. 30 x 14, front faces +Z
+# onto the fountain courtyard; both ends open onto the side yards of the walled compound.
+# =====================================================================================================
+
+static func _solnegro(kit: Kit, p: Dictionary) -> Dictionary:
+	var gold: Color = Factions.color("solnegro")
+	p["plaster"] = kit.mat(Color(0.86, 0.72, 0.5), "stucco", 0.9)
+	p["trim"] = kit.mat(Color(0.25, 0.14, 0.08), "planks", 0.6)
+	p["ceiling"] = kit.mat(Color(0.8, 0.72, 0.58), "", 0.95)
+	p["saltillo"] = kit.mat(Color(0.64, 0.36, 0.2), "tiles", 0.7)
+	p["talavera"] = kit.mat(Color(0.2, 0.38, 0.6), "tiles", 0.4)
+	p["parquet"] = kit.mat(Color(0.3, 0.18, 0.1), "planks", 0.55)
+	p["leather"] = kit.mat(Color(0.5, 0.3, 0.15), "", 0.5)
+	p["sofa"] = p["leather"]
+	p["equipale"] = kit.mat(Color(0.55, 0.36, 0.2), "planks", 0.6)
+	p["iron"] = kit.mat(Color(0.08, 0.08, 0.09), "metal", 0.5)
+	p["rug"] = kit.mat(Color(0.55, 0.12, 0.1), "tatami", 0.95)
+	p["rug_dark"] = kit.mat(Color(0.12, 0.11, 0.13), "tatami", 0.95)
+	p["candle"] = kit.glow(Color(1.0, 0.75, 0.4), 1.4)
+	p["sack"] = kit.mat(Color(0.62, 0.52, 0.36), "", 0.9)
+	p["gold"] = kit.mat(gold, "metal", 0.3)
+	var cfg: Dictionary = {
+		"outer": kit.mat(Color(0.93, 0.85, 0.7), "stucco"), "roof": kit.mat(Color(0.72, 0.36, 0.22), "roof"),
+		"plaster": p["plaster"], "trim": p["trim"], "ceiling": p["ceiling"], "lit": 0.55,
+		"front": [_op(0.0, 2.6), _win(-4.2, 1.6), _win(4.2, 1.6), _win(-12.4, 1.6), _win(12.4, 1.6)],
+		"back": [_win(-3.0, 1.4), _win(3.0, 1.4), _win(10.5, 1.6)],
+		"west": [_op(2.0, 1.4), _win(-3.5, 1.6)],
+		"east": [_op(2.0, 1.4)]}
+	_shell(kit, p, cfg)
+	_door(kit, p, Vector3(0.0, 0, 6.85), 2.6, Vector3.BACK, "Sol Negro Hacienda entrance")
+	_door(kit, p, Vector3(-14.85, 0, 2.0), 1.4, Vector3.LEFT, "Sol Negro Hacienda west door", "door_steel")
+	_door(kit, p, Vector3(14.85, 0, 2.0), 1.4, Vector3.RIGHT, "Sol Negro Hacienda east door", "door_steel")
+	kit.begin_interior()
+	_lining(kit, p, cfg)
+	var plaster: Material = p["plaster"]
+	# Floors: saltillo in the hall, planks in the study, dark tile in the dining room, talavera in the cantina.
+	_floor(kit, Rect2(-14.6, -0.4, 29.2, 7.1), p["saltillo"])
+	_floor(kit, Rect2(-14.6, -6.6, 9.5, 5.9), p["parquet"])
+	_floor(kit, Rect2(-4.9, -6.6, 9.8, 5.9), p["rug_dark"])
+	_floor(kit, Rect2(5.1, -6.6, 9.5, 5.9), p["talavera"])
+	_floor(kit, Rect2(-10.6, 0.0, 4.4, 3.4), p["rug"], 0.006)
+	_part(kit, Vector2(-14.6, -0.6), Vector2(14.6, -0.6), plaster, [_op(-9.8, 2.0, 0.0, 2.7, "gap"), _op(0.0, 3.6, 0.0, 3.0, "gap"), _op(9.8, 2.0, 0.0, 2.7, "gap")])
+	_part(kit, Vector2(-5.0, -6.6), Vector2(-5.0, -0.7), plaster, [_op(-3.5, 1.4, 0.0, 2.7, "gap")])
+	_part(kit, Vector2(5.0, -6.6), Vector2(5.0, -0.7), plaster, [_op(-3.5, 1.4, 0.0, 2.7, "gap")])
+	# Vigas over the hall, lintels over the arches.
+	for x: float in [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0]:
+		_o(kit, Vector2(x, 3.0), 0.0, 0, 0, CEIL - F - 0.3, 0.25, 0.25, 7.2, p["trim"])
+	for arch: Array in [[-9.8, 2.0], [0.0, 3.6], [9.8, 2.0]]:
+		_o(kit, Vector2(float(arch[0]), -0.6), 0.0, 0, 0, 2.7, float(arch[1]) + 0.5, 0.2, 0.32, p["trim"])
+	# --- Sala (west hall): leather sofa and equipales round the low table, palms.
+	_sofa(kit, p, -8.5, 0.15, 0.0, 2.6, "sofa")
+	_table(kit, p, -8.5, 1.6, 0.0, 1.6, 0.8, 0.45, "equipale", "dark")
+	_sofa(kit, p, -11.3, 1.5, PI * 0.5, 0.95, "sofa")
+	_sofa(kit, p, -5.9, 1.5, -PI * 0.5, 0.95, "sofa")
+	_plant(kit, p, -13.9, 5.9, 1.6)
+	_plant(kit, p, -13.9, 0.2, 1.2)
+	_o(kit, Vector2(-4.0, 6.3), 0.0, 0, 0, 0.0, 2.4, 0.45, 0.45, p["equipale"], true)
+	# --- Front wall flank: the gun rack cabinet and the lockers either side of the door.
+	_o(kit, Vector2(-8.0, 6.37), 0.0, 0, 0, 0.0, 3.0, 0.9, 0.5, p["dark"], true)
+	_o(kit, Vector2(-8.0, 6.37), 0.0, 0, 0, 0.9, 3.1, 0.05, 0.56, p["wood"])
+	_lockers(kit, p, 8.5, 6.345, PI, 6)
+	var table_top: float = _phone_table(kit, p, 0.0, 6.85, 0.76, 0.8, "talavera", "iron")
+	# --- East hall: a round table with four chairs, a saddle on its stand by the east door.
+	_table(kit, p, 9.5, 3.9, 0.0, 1.3, 1.3, 0.75, "equipale", "dark")
+	for chair: Array in [[9.5, 2.85, 0.0], [9.5, 4.95, PI], [8.4, 3.9, PI * 0.5], [10.6, 3.9, -PI * 0.5]]:
+		_chair(kit, p, float(chair[0]), float(chair[1]), float(chair[2]), "equipale")
+	_plant(kit, p, 13.9, 5.9, 1.6)
+	_o(kit, Vector2(13.9, 0.3), 0.0, 0, 0, 0.0, 0.5, 0.9, 1.0, p["equipale"], true)
+	_o(kit, Vector2(13.9, 0.3), 0.0, 0, 0, 0.9, 0.4, 0.22, 0.85, p["leather"])
+	_hanging(kit, p, -8.5, 1.6, 1.0, "iron", 0.9)
+	_hanging(kit, p, 9.5, 3.9, 1.0, "iron", 0.9)
+	# --- Study (west back): the patron's desk, a bookcase, the safe, a map, a leather chair.
+	_desk(kit, p, -10.0, -3.6, 0.0, 2.4, 1.0)
+	_chair(kit, p, -10.0, -4.8, 0.0, "leather")
+	_chair(kit, p, -10.9, -2.3, PI)
+	_chair(kit, p, -9.1, -2.3, PI)
+	_bookcase(kit, p, -9.7, -6.35, 0.0, 4.4)
+	_o(kit, Vector2(-13.8, -6.0), 0.0, 0, 0, 0.0, 0.95, 1.15, 0.85, p["black"], true)
+	_o(kit, Vector2(-13.8, -6.0), 0.0, 0.0, 0.43, 0.6, 0.2, 0.2, 0.03, p["brass"])
+	_wall_map(kit, p, -5.12, -5.6, -PI * 0.5, 1.6, 1.1, 1.3)
+	_hanging(kit, p, -10.0, -3.6, 1.1, "iron", 0.8)
+	# --- Dining room (centre): the carved table with the map, ten chairs, the shrine on the back wall.
+	_table(kit, p, 0.0, -3.4, 0.0, 4.8, 1.3, 0.76, "equipale", "dark")
+	_map_sheet(kit, p, 0.0, -3.4, 0.76, 1.1)
+	for x: float in [-1.8, -0.6, 0.6, 1.8]:
+		_chair(kit, p, x, -2.3, PI, "equipale")
+		_chair(kit, p, x, -4.5, 0.0, "equipale")
+	_chair(kit, p, -3.0, -3.4, PI * 0.5, "equipale")
+	_chair(kit, p, 3.0, -3.4, -PI * 0.5, "equipale")
+	_o(kit, Vector2(0.0, -6.25), 0.0, 0, 0, 0.0, 1.8, 0.9, 0.4, p["dark"], true)
+	_hanging(kit, p, 0.0, -3.4, 0.9, "iron", 1.1)
+	# --- Cantina and import store (east back): the bar under the east wall, crates, sacks, the cash table.
+	_counter(kit, p, 12.6, -3.6, -PI * 0.5, 4.4, 0.7, 1.08, "dark", "wood")
+	_o(kit, Vector2(14.35, -3.6), 0.0, 0, 0, 0.0, 0.5, 0.92, 4.4, p["dark"], true)
+	for y: float in [1.35, 1.8, 2.25]:
+		_o(kit, Vector2(14.45, -3.6), 0.0, 0, 0, y, 0.25, 0.03, 4.4, p["wood"])
+	for z: float in [-5.2, -4.4, -3.6, -2.8, -2.0]:
+		_stool(kit, p, 11.45, z, "leather", 0.72)
+	_crate(kit, p, 6.4, -5.7, 0.05, 1.0, 0.8, 0.8)
+	_crate(kit, p, 6.4, -4.6, 0.0, 1.0, 0.8, 0.8)
+	_o(kit, Vector2(6.4, -5.2), 0.0, 0, 0, 0.8, 0.9, 0.7, 0.9, p["wood"], true)
+	_crate(kit, p, 8.0, -6.0, 0.3, 0.8, 0.6, 0.6)
+	for index: int in range(3):
+		_o(kit, Vector2(7.7 + index * 0.75, -5.0), 0.3 + index * 0.4, 0, 0, 0.0, 0.6, 0.45, 0.9, p["sack"], true)
+	_table(kit, p, 8.6, -2.0, 0.0, 1.8, 0.8, 0.76, "wood", "dark")
+	_hanging(kit, p, 9.8, -3.6, 1.1, "iron", 0.8)
+	# Lamps.
+	kit.interior_light(Vector3(0, 3.9, 2.8), Color(1.0, 0.84, 0.6), 2.4, 22.0)
+	kit.interior_light(Vector3(-9.8, 3.7, -3.6), Color(1.0, 0.8, 0.55), 1.8, 13.0)
+	kit.interior_light(Vector3(9.8, 3.7, -3.6), Color(1.0, 0.86, 0.66), 1.8, 13.0)
+	# --- Dressing.
+	kit.begin_props()
+	_gun_rack(kit, p, 6.62, -1.0, -8.0, 3.0)
+	for x: float in [-0.6, -0.2, 0.2, 0.6]:
+		kit.prop(Vector3(x, F + 0.92, -6.25), Vector3(0.05, 0.14, 0.05), p["candle"])
+	kit.prop(Vector3(0.0, F + 1.95, -6.6), Vector3(0.1, 1.0, 0.04), p["wood"])
+	kit.prop(Vector3(0.0, F + 2.15, -6.6), Vector3(0.6, 0.1, 0.04), p["wood"])
+	kit.prop(Vector3(0.0, F + 1.4, -6.62), Vector3(1.8, 0.8, 0.02), kit.mat(Color(0.3, 0.12, 0.1), "", 0.9))
+	kit.prop(Vector3(-0.5, F + 0.775, -3.4), Vector3(0.1, 0.4, 0.1), p["brass"])
+	kit.prop(Vector3(0.5, F + 0.775, -3.4), Vector3(0.1, 0.4, 0.1), p["brass"])
+	kit.prop(Vector3(-0.5, F + 1.0, -3.4), Vector3(0.05, 0.1, 0.05), p["candle"])
+	kit.prop(Vector3(0.5, F + 1.0, -3.4), Vector3(0.05, 0.1, 0.05), p["candle"])
+	var agave: Array[Color] = [Color(0.85, 0.75, 0.4), Color(0.25, 0.35, 0.15), Color(0.7, 0.45, 0.15), Color(0.85, 0.85, 0.8), Color(0.45, 0.1, 0.1)]
+	for shelf: int in range(3):
+		for index: int in range(11):
+			kit.prop_bottle(Vector3(14.42, F + 1.38 + shelf * 0.45, -5.6 + index * 0.4), agave[(index + shelf) % agave.size()], 0.3)
+	for z: float in [-5.0, -4.2, -3.4, -2.6, -1.8]:
+		kit.prop(Vector3(12.45, F + 1.11, z), Vector3(0.07, 0.12, 0.07), p["glass"])
+	var cash: Material = kit.mat(Color(0.45, 0.6, 0.4), "", 0.9)
+	for index: int in range(6):
+		kit.prop(Vector3(8.1 + (index % 3) * 0.3, F + 0.81 + (index / 3) * 0.06, -2.0 + (index / 3) * 0.12), Vector3(0.22, 0.05, 0.1), cash)
+	kit.prop(Vector3(9.2, F + 0.84, -1.9), Vector3(0.3, 0.12, 0.22), p["black"])
+	kit.prop(Vector3(-10.0, F + 0.76, -3.7), Vector3(0.7, 0.012, 0.45), p["leather"])
+	kit.prop(Vector3(-10.7, F + 0.88, -3.8), Vector3(0.14, 0.2, 0.14), kit.mat(Color(0.3, 0.17, 0.08), "planks", 0.5))
+	kit.prop(Vector3(-9.4, F + 0.79, -3.5), Vector3(0.2, 0.06, 0.12), cash)
+	for x: float in [-1.5, 0.0, 1.5]:
+		kit.prop(Vector3(x, F + 0.8, -2.85), Vector3(0.1, 0.06, 0.1), p["white"])
+	var canvas: Material = kit.mat(Color(0.75, 0.45, 0.25), "", 0.9)
+	var sky: Material = kit.mat(Color(0.3, 0.5, 0.65), "", 0.9)
+	for x: float in [-7.0, -3.0, 3.0, 7.0]:
+		_picture(kit, p, x, -0.45, 0.0, 0.8, 0.6, 1.6, canvas if int(x) % 2 == 0 else sky)
+	_phone_dressing(kit, p, Vector3(-10.0, F + 0.77, -3.6), 0.0)
+	for window: Array in [[-4.2, 6.6, false], [4.2, 6.6, false], [-12.4, 6.6, false], [12.4, 6.6, false], [-3.0, -6.6, false], [3.0, -6.6, false], [10.5, -6.6, false], [-14.6, -3.5, true]]:
+		_lattice(kit, p, float(window[0]), float(window[1]), bool(window[2]), 1.5, F + 0.9, 1.55, "iron")
+	_fan(kit, p, -4.5, 4.5)
+	_fan(kit, p, 4.5, 4.5, 0.8)
+	var cream: Color = Color(0.98, 0.93, 0.8)
+	_text(kit, "SOL  NEGRO  IMPORTS  -  TODO  TIENE  PRECIO", 0.0, 3.4, 6.6, PI, 26, cream)
+	_text(kit, "CASILLEROS", 8.5, 2.35, 6.6, PI, 22, cream)
+	_text(kit, "CANTINA  -  TEQUILA  MEZCAL  CERVEZA", 14.5, 3.0, -3.6, -PI * 0.5, 22, cream)
+	_text(kit, "NUESTRA  SENORA  DEL  SOL", 0.0, 2.75, -6.6, 0.0, 22, cream)
+	kit.end_props()
+	kit.end_interior()
+	var routes: Dictionary = {
+		"to_street": _path([Vector2(0, 2.65), Vector2(0, 6.85), Vector2(0, 10.0), Vector2(5.0, 13.0), Vector2(5.0, 22.0), Vector2(1.8, 27.0), Vector2(1.8, 33.0), Vector2(1.8, 37.2)]),
+		"west_door": _path([Vector2(0, 2.65), Vector2(-2.0, 4.6), Vector2(-13.0, 4.6), Vector2(-13.0, 2.0), Vector2(-14.85, 2.0), Vector2(-18.0, 2.0)]),
+		"east_door": _path([Vector2(0, 2.65), Vector2(2.0, 1.0), Vector2(12.0, 1.0), Vector2(13.0, 2.0), Vector2(14.85, 2.0), Vector2(18.0, 2.0)])}
+	# The delivery point is nudged so that the spot 2.5 m from it towards the map centre (tests/map_interiors.gd's
+	# reading of main.gd's old spawn rule) is clear floor.
+	return _info(0.0, 6.85, table_top, routes, Vector2(-0.25, 0.0))
+
+
+# =====================================================================================================
+# KINGSWAY COURTS. The tenants' community room at the foot of the tallest slab: cream-and-mint cinder
+# block under fluorescent tubes, linoleum, folding tables and stacking chairs, a vending machine and a
+# church-hall kitchen, with the Royals' rec room at the west end (pool table, a couch round the TV, arcade
+# cabinets, a trophy case, the crown mural). 36 x 12, front faces +Z onto the courtyard; the north end
+# and the back wall have their own doors.
+# =====================================================================================================
+
+static func _kingsway(kit: Kit, p: Dictionary) -> Dictionary:
+	var teal: Color = Factions.color("kingsway")
+	var pink: Color = Color(0.95, 0.3, 0.7)
+	var yellow: Color = Color(0.98, 0.82, 0.2)
+	var blue: Color = Color(0.35, 0.55, 1.0)
+	p["plaster"] = kit.mat(Color(0.78, 0.86, 0.82), "stucco", 0.9)
+	p["trim"] = kit.mat(Color(0.3, 0.3, 0.3), "", 0.6)
+	p["ceiling"] = kit.mat(Color(0.86, 0.86, 0.82), "", 0.95)
+	p["linoleum"] = kit.mat(Color(0.74, 0.72, 0.62), "tiles", 0.6)
+	p["carpet"] = kit.mat(Color(0.16, 0.26, 0.3), "tatami", 0.95)
+	p["felt"] = kit.mat(Color(0.05, 0.36, 0.3), "", 0.95)
+	p["leather"] = kit.mat(Color(0.3, 0.19, 0.12), "", 0.5)
+	p["sofa"] = kit.mat(Color(0.14, 0.4, 0.42), "", 0.85)
+	p["plastic"] = kit.mat(Color(0.12, 0.3, 0.34), "", 0.5)
+	p["formica"] = kit.mat(Color(0.78, 0.74, 0.6), "", 0.55)
+	p["cab"] = kit.mat(Color(0.82, 0.83, 0.76), "", 0.6)
+	p["vend"] = kit.mat(Color(0.72, 0.12, 0.12), "", 0.4)
+	p["tube"] = kit.glow(Color(0.95, 0.98, 1.0), 1.3)
+	p["paint_teal"] = kit.mat(teal, "", 0.7)
+	p["paint_pink"] = kit.mat(pink, "", 0.7)
+	p["paint_yellow"] = kit.mat(yellow, "", 0.7)
+	p["paint_blue"] = kit.mat(blue, "", 0.7)
+	p["cork"] = kit.mat(Color(0.6, 0.45, 0.28), "", 0.95)
+	p["gold"] = kit.mat(Color(0.85, 0.7, 0.25), "metal", 0.3)
+	p["cabinet"] = kit.mat(Color(0.3, 0.12, 0.35), "", 0.5)
+	var cfg: Dictionary = {
+		"outer": kit.mat(Color(0.58, 0.58, 0.56), "panel"), "roof": kit.mat(Color(0.3, 0.3, 0.3), "roof"),
+		"plaster": p["plaster"], "trim": p["trim"], "ceiling": p["ceiling"], "lit": 0.4,
+		"front": [_op(7.0, 2.4), _win(-8.5, 1.8), _win(-5.0, 1.4), _win(15.2, 1.6)],
+		"back": [_op(-10.0, 1.4), _win(-6.0, 1.4)],
+		"west": [_win(-3.5, 2.0)],
+		"east": [_op(0.0, 1.4)]}
+	_shell(kit, p, cfg)
+	_door(kit, p, Vector3(7.0, 0, 5.85), 2.4, Vector3.BACK, "Kingsway Courts community room entrance")
+	_door(kit, p, Vector3(17.85, 0, 0.0), 1.4, Vector3.RIGHT, "Kingsway Courts north door", "door_steel")
+	_door(kit, p, Vector3(-10.0, 0, -5.85), 1.4, Vector3.FORWARD, "Kingsway Courts rear door", "door_steel")
+	kit.begin_interior()
+	_lining(kit, p, cfg)
+	var plaster: Material = p["plaster"]
+	_floor(kit, Rect2(-2.9, -5.6, 20.5, 11.2), p["linoleum"])
+	_floor(kit, Rect2(-17.6, -5.6, 14.4, 11.2), p["carpet"])
+	# The rec room's east wall, open at the middle (a wide doorway) and by the back.
+	_part(kit, Vector2(-3.0, -5.6), Vector2(-3.0, 5.6), plaster, [_op(1.0, 3.2, 0.0, 2.7, "gap"), _op(-3.6, 1.2, 0.0, 2.7, "gap")])
+	# Fluorescent tubes.
+	for line: float in [-2.6, 2.6]:
+		for x: float in [-14.0, -9.0, -4.5, 0.5, 4.5, 8.5, 12.5, 16.0]:
+			_o(kit, Vector2(x, line), 0.0, 0, 0, CEIL - F - 0.06, 1.3, 0.05, 0.14, p["tube"])
+	# --- Rec room (west).
+	_pool(kit, p, -8.5, -1.3, 0.0)
+	_hanging(kit, p, -8.5, -1.3, 0.85, "felt", 1.5)
+	_o(kit, Vector2(-17.2, 0.0), 0.0, 0, 0, 0.0, 0.7, 0.5, 2.2, p["dark"], true)
+	_sofa(kit, p, -14.2, 0.0, -PI * 0.5, 2.6, "sofa")
+	_sofa(kit, p, -14.2, 3.4, -PI * 0.5, 1.7, "sofa")
+	_sofa(kit, p, -14.2, -3.4, -PI * 0.5, 1.7, "sofa")
+	_table(kit, p, -12.0, 0.0, PI * 0.5, 1.3, 0.7, 0.42, "formica", "steel")
+	_arcade(kit, p, -16.0, 5.25, PI, kit.mat(Color(0.12, 0.12, 0.3), "", 0.5), kit.glow(Color(0.3, 0.85, 0.5), 0.9))
+	_arcade(kit, p, -14.9, 5.25, PI, kit.mat(Color(0.3, 0.1, 0.12), "", 0.5), kit.glow(Color(0.9, 0.5, 0.25), 0.9))
+	_o(kit, Vector2(-11.5, 5.3), PI, 0, 0, 0.0, 2.2, 1.9, 0.5, p["dark"], true)
+	_o(kit, Vector2(-11.5, 5.3), PI, 0, 0.26, 0.3, 1.9, 1.4, 0.02, p["glass"])
+	_o(kit, Vector2(-4.4, 5.25), PI, 0, 0, 0.0, 0.9, 1.5, 0.6, p["cabinet"], true)
+	_o(kit, Vector2(-4.4, 5.25), PI, 0, 0.31, 0.55, 0.78, 0.8, 0.02, p["glow_accent"])
+	for stool_x: float in [-8.0, -7.0]:
+		_stool(kit, p, stool_x, 1.3, "leather", 0.72)
+	# --- Community hall (east): front flank, phone table, kitchen run, tables, vending, manager's corner.
+	_o(kit, Vector2(1.5, 5.37), 0.0, 0, 0, 0.0, 3.0, 0.9, 0.5, p["dark"], true)
+	_o(kit, Vector2(1.5, 5.37), 0.0, 0, 0, 0.9, 3.1, 0.05, 0.56, p["wood"])
+	_lockers(kit, p, 11.0, 5.345, PI, 6)
+	var table_top: float = _phone_table(kit, p, 7.0, 5.85, 0.76, 0.8, "formica", "steel")
+	_counter(kit, p, 7.0, -5.3, 0.0, 6.4, 0.65, 0.92, "cab", "formica")
+	_o(kit, Vector2(7.0, -5.45), 0.0, 0, 0, 1.5, 6.4, 0.7, 0.35, p["cab"])
+	_o(kit, Vector2(11.2, -5.2), 0.0, 0, 0, 0.0, 0.85, 1.9, 0.8, p["steel"], true)
+	_counter(kit, p, 14.0, -5.3, 0.0, 4.8, 0.65, 0.92, "cab", "formica")
+	_o(kit, Vector2(14.0, -5.45), 0.0, 0, 0, 1.5, 4.8, 0.7, 0.35, p["cab"])
+	_o(kit, Vector2(17.05, -5.2), 0.0, 0, 0, 0.0, 0.9, 1.9, 0.8, p["steel"], true)
+	_table(kit, p, 4.5, -2.0, 0.0, 3.6, 0.8, 0.74, "formica", "steel")
+	_map_sheet(kit, p, 4.5, -2.0, 0.74, 0.7)
+	for x: float in [3.3, 4.5, 5.7]:
+		_chair(kit, p, x, -1.05, PI, "plastic")
+		_chair(kit, p, x, -2.95, 0.0, "plastic")
+	_table(kit, p, 12.0, -2.4, 0.0, 1.8, 0.8, 0.74, "formica", "steel")
+	_table(kit, p, 15.3, -2.4, 0.0, 1.8, 0.8, 0.74, "formica", "steel")
+	for x: float in [11.4, 12.6, 14.7, 15.9]:
+		_chair(kit, p, x, -3.3, 0.0, "plastic")
+		_chair(kit, p, x, -1.5, PI, "plastic")
+	_vending(kit, p, 17.1, 3.4, -PI * 0.5, p["vend"])
+	_vending(kit, p, 17.1, 4.5, -PI * 0.5, kit.mat(Color(0.15, 0.3, 0.6), "", 0.4))
+	_desk(kit, p, 0.6, -4.45, 0.0, 1.6, 0.8, "wood")
+	_chair(kit, p, 0.6, -5.25, 0.0, "plastic")
+	_o(kit, Vector2(2.6, -5.3), 0.0, 0, 0, 0.0, 0.5, 1.35, 0.6, p["steel"], true)
+	_o(kit, Vector2(-2.1, -5.1), 0.0, 0, 0, 0.0, 0.9, 1.1, 0.9, p["black"], true)
+	_o(kit, Vector2(-2.1, -5.1), 0.0, 0.0, 0.46, 0.6, 0.2, 0.2, 0.03, p["brass"])
+	# Bulletin board on the rec room wall.
+	_o(kit, Vector2(-2.87, -1.8), PI * 0.5, 0, 0, 1.1, 1.6, 1.0, 0.04, p["cork"])
+	# Lamps: rec room, west hall, east hall.
+	kit.interior_light(Vector3(-10.0, 3.7, 0.0), Color(1.0, 0.92, 0.8), 1.9, 14.0)
+	kit.interior_light(Vector3(2.0, 3.9, 0.0), Color(0.96, 0.98, 0.94), 2.0, 14.0)
+	kit.interior_light(Vector3(12.0, 3.9, 0.0), Color(0.96, 0.98, 0.94), 2.0, 14.0)
+	# --- Dressing.
+	kit.begin_props()
+	_gun_rack(kit, p, 5.62, -1.0, 1.5, 3.0)
+	_phone_dressing(kit, p, Vector3(0.6, F + 0.77, -4.45), 0.0)
+	kit.prop(Vector3(-17.2, F + 0.92, 0.0), Vector3(0.55, 0.84, 1.5), p["black"])
+	kit.prop(Vector3(-16.9, F + 0.92, 0.0), Vector3(0.02, 0.68, 1.3), kit.glow(Color(0.4, 0.7, 0.9), 0.9))
+	var balls: Array[Material] = [kit.mat(Color(0.9, 0.85, 0.2), "", 0.3), kit.mat(Color(0.75, 0.1, 0.1), "", 0.3), kit.mat(Color(0.1, 0.1, 0.6), "", 0.3), kit.mat(Color(0.95, 0.95, 0.9), "", 0.3)]
+	for index: int in range(8):
+		kit.prop(Vector3(-8.0 + (index % 4) * 0.1 + (index / 4) * 0.06, F + 0.9, -1.35 + (index / 4) * 0.1), Vector3(0.055, 0.055, 0.055), balls[index % 4])
+	for index: int in range(4):
+		kit.prop(Vector3(-3.2, F + 1.1 + index * 0.0, -2.6 + index * 0.18), Vector3(0.03, 1.4, 0.03), p["wood"], 0.0)
+	kit.prop(Vector3(-3.17, F + 0.8, -2.25), Vector3(0.05, 0.05, 0.9), p["dark"])
+	for index: int in range(6):
+		kit.prop(Vector3(-12.2 + (index % 3) * 0.6, F + 0.95 + (index / 3) * 0.6, 5.0), Vector3(0.12, 0.26 + (index % 2) * 0.06, 0.1), p["gold"] if index % 2 == 0 else p["brass"])
+	var chip: Material = kit.mat(Color(0.9, 0.55, 0.2), "", 0.6)
+	var cup: Material = kit.mat(Color(0.95, 0.95, 0.92), "", 0.4)
+	for table_x: float in [4.5, 12.0, 15.3]:
+		kit.prop(Vector3(table_x - 0.5, F + 0.77, -2.2 if table_x == 4.5 else -2.4), Vector3(0.08, 0.1, 0.08), cup)
+		kit.prop(Vector3(table_x + 0.6, F + 0.76, -2.5), Vector3(0.28, 0.03, 0.2), chip)
+	kit.prop(Vector3(13.2, F + 1.05, -5.25), Vector3(0.45, 0.25, 0.35), p["steel"])
+	kit.prop(Vector3(9.8, F + 1.05, -5.3), Vector3(0.3, 0.3, 0.3), p["steel"])
+	kit.prop(Vector3(16.2, F + 1.05, -5.3), Vector3(0.16, 0.36, 0.16), p["steel"])
+	# Mural: the Royals' crown across the rec room's back wall, tags beside it.
+	var crown_x: float = -14.4
+	kit.prop(Vector3(crown_x, F + 2.0, -5.6), Vector3(3.2, 0.5, 0.03), p["paint_teal"])
+	for index: int in range(5):
+		var spike: float = -1.4 + float(index) * 0.7
+		kit.prop(Vector3(crown_x + spike, F + 2.65 + (0.25 if index % 2 == 0 else 0.0), -5.6), Vector3(0.3, 0.75 + (0.5 if index % 2 == 0 else 0.0), 0.03), p["paint_teal"])
+		kit.prop(Vector3(crown_x + spike, F + 3.0 + (0.5 if index % 2 == 0 else 0.0), -5.59), Vector3(0.16, 0.16, 0.03), p["paint_yellow"])
+	kit.prop(Vector3(crown_x, F + 2.0, -5.59), Vector3(2.9, 0.12, 0.03), p["paint_yellow"])
+	kit.prop(Vector3(crown_x, F + 1.2, -5.6), Vector3(3.4, 0.7, 0.02), p["paint_pink"])
+	kit.prop(Vector3(crown_x - 2.2, F + 1.6, -5.6), Vector3(0.12, 1.6, 0.02), p["paint_blue"], 0.3)
+	kit.prop(Vector3(crown_x + 2.3, F + 2.4, -5.6), Vector3(0.12, 1.9, 0.02), p["paint_blue"], -0.25)
+	for window: Array in [[-8.5, 5.6, false], [-5.0, 5.6, false], [15.2, 5.6, false], [-6.0, -5.6, false], [-17.6, -3.5, true]]:
+		_lattice(kit, p, float(window[0]), float(window[1]), bool(window[2]), 1.4, F + 0.9, 1.55, "steel")
+	var white: Color = Color(0.97, 0.98, 0.95)
+	_text(kit, "KINGSWAY  COURTS  TENANTS'  ASSOCIATION", 4.0, 3.3, 5.6, PI, 26, white)
+	_text(kit, "TENANTS'  LOCKERS", 11.0, 2.35, 5.6, PI, 22, white)
+	_text(kit, "ROYALS", crown_x, 1.05, -5.55, 0.0, 70, white)
+	_text(kit, "HOLD  THE  BLOCK.", 9.0, 3.2, -5.6, 0.0, 34, white)
+	_text(kit, "COMMUNITY  ROOM  -  PLEASE  KEEP  IT  CLEAN", 14.0, 2.75, -5.6, 0.0, 20, white)
+	_text(kit, "NOTICES", -2.85, 2.3, -1.8, PI * 0.5, 22, white)
+	kit.end_props()
+	kit.end_interior()
+	var routes: Dictionary = {
+		"to_street": _path([Vector2(7.0, 1.65), Vector2(7.0, 5.85), Vector2(7.0, 8.0), Vector2(14.0, 8.0), Vector2(20.0, 8.0), Vector2(22.4, 12.5)]),
+		"north_door": _path([Vector2(7.0, 1.65), Vector2(9.0, 0.4), Vector2(17.85, 0.0), Vector2(21.0, 0.0), Vector2(23.5, 0.0)]),
+		"rear_door": _path([Vector2(7.0, 1.65), Vector2(5.0, 0.0), Vector2(2.0, 0.0), Vector2(-3.0, 1.0), Vector2(-6.0, 1.0), Vector2(-6.0, -3.8), Vector2(-10.0, -3.8), Vector2(-10.0, -5.85), Vector2(-10.0, -8.5)])}
+	return _info(7.0, 5.85, table_top, routes, Vector2(0.0, -0.5))

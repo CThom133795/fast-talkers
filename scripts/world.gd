@@ -611,6 +611,12 @@ func _weave_islands(path: PackedVector3Array) -> PackedVector3Array:
 ## there is no way through).
 func route_length(from: Vector3, to: Vector3) -> float:
 	# The street-graph distance (the crews' fairness metric); `route()` adds a few metres of chicane weave.
+	# A crew's delivery point is inside its walk-in compound, so its fairness routes start at the compound's
+	# gate (the old doorstep on the street side), not deep inside the building.
+	for base: Dictionary in crew_spawns.values():
+		if base.has("gate") and from.is_equal_approx(base["hq"]):
+			from = base["gate"]
+			break
 	var path: PackedVector3Array = _route_raw(from, to)
 	if path.is_empty():
 		return INF
@@ -2151,14 +2157,26 @@ func _crew_compound(crew: String, center: Vector2, size: Vector3, front: Vector3
 	var saved_xf: Transform3D = _xf
 	var saved_yaw: float = _xf_yaw
 	var saved_target: Node3D = _target
+	var rng_state: int = _rng.state
 	_roofs.append({"center": _w2(center), "size": size, "yaw": _xf_yaw, "top": size.y + 0.32, "front": _xf.basis * front, "business": false})
 	_begin_building("crew_hq", true, CrewHQ.title(crew))
 	var info: Dictionary = CrewHQ.build(self, crew, {"center": _w2(center), "size": Vector2(frontage, depth), "height": size.y,
 		"front": world_front, "district": str(Factions.get_crew(crew)["district"])})
 	_end_building()
+	# The rest of the city must come out the same as when this plot held a solid `_tower`: put the shared
+	# random stream back where it was and skip the draws that tower's window grid used to take.
+	_rng.state = rng_state
+	for face: Vector3 in [Vector3.BACK, Vector3.FORWARD, Vector3.RIGHT, Vector3.LEFT]:
+		var span: float = size.x if absf(face.z) > 0.5 else size.z
+		for floor_index: int in range(int((size.y - 1.2) / 3.1)):
+			if 2.4 + float(floor_index) * 3.1 + 1.0 > size.y:
+				continue
+			for column: int in range(maxi(1, int(span / 3.4))):
+				_rng.randf()
 	_xf = saved_xf
 	_xf_yaw = saved_yaw
 	_target = saved_target
+	plot_nodes["crew_hq_" + crew] = info["node"]
 	return info
 
 ## Registers a crew base whose HQ is a walk-in compound: `info` is what `_crew_compound` returned, `car`
