@@ -19,7 +19,7 @@ extends RefCounted
 
 const Kit = preload("res://scripts/buildings/building_kit.gd")
 
-const KIND_LIST: PackedStringArray = ["row_shop", "walkup", "warehouse"]
+const KIND_LIST: PackedStringArray = ["corner_store", "row_shop", "walkup", "warehouse", "office", "bar", "auto_shop", "church_hall", "diner_small"]
 ## Storey height, floor slab, exterior wall, partition and parapet thickness/height (metres).
 const FH: float = 3.4
 const SLAB: float = 0.3
@@ -68,7 +68,7 @@ static func min_size(kind: String) -> Vector2:
 		"warehouse":
 			return Vector2(16, 20)
 		"office":
-			return Vector2(14, 16)
+			return Vector2(16, 16)
 		"bar":
 			return Vector2(12, 14)
 		"auto_shop":
@@ -83,7 +83,7 @@ static func min_size(kind: String) -> Vector2:
 ## Tallest storey count a kind supports (the ground floor counts). walkup and office need at least 2.
 static func max_floors(kind: String) -> int:
 	match kind:
-		"corner_store", "bar":
+		"corner_store":
 			return 2
 		"row_shop":
 			return 2
@@ -94,6 +94,9 @@ static func max_floors(kind: String) -> int:
 		"warehouse":
 			return 2
 	return 1
+
+
+const MORE_KINDS: Array[String] = ["cooler", "case", "cubicle", "conf", "pool", "booth", "stove", "tires", "drum", "workbench", "lectern", "safe"]
 
 
 static func min_floors(kind: String) -> int:
@@ -126,8 +129,18 @@ static func build(world: Node3D, kind: String, center: Vector2, size: Vector2, y
 	var saved_yaw: float = world._xf_yaw
 	var c: Ctx = Ctx.new(world, kind, center, clamped, yaw, storeys, seed, style)
 	match kind:
-		"walkup":
+		"walkup", "office":
 			_walkup(c)
+		"corner_store":
+			_row_shop(c)
+		"bar":
+			_bar(c)
+		"auto_shop":
+			_auto_shop(c)
+		"diner_small":
+			_diner_small(c)
+		"church_hall":
+			_church_hall(c)
 		"row_shop":
 			_row_shop(c)
 		"warehouse":
@@ -186,6 +199,7 @@ class Ctx extends RefCounted:
 	var zones: Dictionary = {}
 	var props: Array = []
 	var lamps: int = 0
+	var blinds: bool = false
 	var extra_floors: Array[float] = []
 
 	func _init(w: Node3D, kind_name: String, center: Vector2, sz: Vector2, yaw: float, storeys: int, seed_value: int, style_in: Dictionary) -> void:
@@ -459,9 +473,13 @@ class Ctx extends RefCounted:
 
 	## A painted window on an outer wall: frame, glass (dark, or lit warm), sill and a pale pane on the inside.
 	## `pos` is the window centre on the wall's outer face; `normal` is the outward unit vector.
-	func window(pos: Vector3, normal: Vector3, w: float, h: float, is_lit: bool, with_ac: bool = false) -> void:
+	func window(pos: Vector3, normal: Vector3, w: float, h: float, is_lit: bool, with_ac: bool = false, tint: Material = null) -> void:
 		var angle: float = atan2(normal.x, normal.z)
-		var glass: StandardMaterial3D = kit.glow(Color(1.0, 0.78, 0.46), 1.3) if is_lit else m_dark
+		var glass: Material = kit.glow(Color(1.0, 0.78, 0.46), 1.3) if is_lit else m_dark
+		if tint != null:
+			glass = tint
+		if blinds:
+			deco(pos - normal * (WALL_T + 0.05) + Vector3(0, h * 0.22, 0), Vector3(w * 0.95, h * 0.56, 0.03), m_ceil)
 		kit.box(pos + normal * 0.03, Vector3(w + 0.26, h + 0.26, 0.06), m_trim, false, angle)
 		kit.box(pos + normal * 0.05, Vector3(w, h, 0.04), glass, false, angle)
 		kit.box(pos + normal * 0.09 - Vector3(0, h * 0.5 + 0.17, 0), Vector3(w + 0.4, 0.07, 0.24), m_trim, false, angle)
@@ -471,7 +489,7 @@ class Ctx extends RefCounted:
 
 	## Rows of windows along one outer wall. side: "front", "back", "left" or "right". `avoid` holds Vector2(min, max)
 	## ranges along the wall (local x or z) that stay clear (doors, storefronts). `storeys` lists the storeys.
-	func windows_on(side: String, storeys: Array, spacing: float = 3.2, avoid: Array = [], w: float = 1.3, h: float = 1.5, sill: float = 0.95) -> void:
+	func windows_on(side: String, storeys: Array, spacing: float = 3.2, avoid: Array = [], w: float = 1.3, h: float = 1.5, sill: float = 0.95, tint: Material = null) -> void:
 		var length: float = W if side == "front" or side == "back" else D
 		var count: int = maxi(1, floori((length - 1.6) / spacing))
 		for s: int in storeys:
@@ -501,7 +519,7 @@ class Ctx extends RefCounted:
 						normal = Vector3.RIGHT
 				var is_lit: bool = rng.randf() < lit
 				var with_ac: bool = s > 0 and not is_lit and rng.randf() < 0.22
-				window(pos, normal, w, h, is_lit, with_ac)
+				window(pos, normal, w, h, is_lit, with_ac, tint)
 
 	## A sign board with painted text over the front, centred at local x.
 	func fascia(at_x: float, y: float, width: float, height: float = 0.7, font: int = 42) -> void:
@@ -698,6 +716,7 @@ const U_DEPTH: float = 3.9
 
 
 static func _walkup(c: Ctx) -> void:
+	c.blinds = c.kind == "office"
 	var hx: float = c.hx
 	var hz: float = c.hz
 	var z_back: float = -hz + WALL_T
@@ -759,7 +778,11 @@ static func _walkup_storey(c: Ctx, s: int, z_s: float, bays: Array[Rect2]) -> vo
 		var x: float = side * CORE_HALF
 		c.partz(s, z_back, z_front, x, [c.gap(door_z, 1.1, DOOR_H)])
 		var facing: Vector3 = Vector3.RIGHT if side < 0.0 else Vector3.LEFT
-		c.door(Vector3(x, y, door_z), 1.1, DOOR_H, facing, "%s flat %d%s" % [c.sign_text, s * 2 + (1 if side < 0.0 else 2), ""], "door", true, null, PART_T)
+		if c.kind == "office":
+			c.frame(Vector3(x, y, door_z), 1.1, DOOR_H, false, PART_T)
+			c.reserve(s, Rect2(x - 1.7, door_z - 0.8, 3.4, 1.6))
+		else:
+			c.door(Vector3(x, y, door_z), 1.1, DOOR_H, facing, "%s flat %d" % [c.sign_text, s * 2 + (1 if side < 0.0 else 2)], "door", true, null, PART_T)
 		var flat: Rect2
 		if side < 0.0:
 			flat = Rect2(-hx + WALL_T, z_back, hx - WALL_T - CORE_HALF - PART_T * 0.5, z_front - z_back)
@@ -773,6 +796,8 @@ static func _walkup_storey(c: Ctx, s: int, z_s: float, bays: Array[Rect2]) -> vo
 		_hole_rail(c, (s - 1) % 2, y, z_s)
 	if s == 0:
 		_lobby(c, z_s)
+		if c.kind == "office":
+			_reception(c, door_z)
 
 
 ## A rail across the flight-one half of the arrival edge of a stairwell hole at floor height `y`.
@@ -887,6 +912,9 @@ static func _flat(c: Ctx, s: int, rect: Rect2, entry_x: float, entry_z: float) -
 	var door_x: float = rect.position.x + 1.5 if min_edge else rect.end.x - 1.5
 	c.partx(s, rect.position.x, rect.end.x, z_p, [c.gap(door_x, 1.0, 2.4)])
 	c.reserve(s, Rect2(door_x - 0.8, z_p - 0.9, 1.6, 1.8))
+	if c.kind == "office":
+		_office_fill(c, s, living, bedroom, min_edge, back_entry)
+		return
 	# Bathroom in the bedroom's far corner: two walls, a doorway from the bedroom, and three fixtures.
 	var bath_w: float = 2.2
 	var bath_d: float = 2.4
@@ -1094,13 +1122,16 @@ static func _dims_extra(kind: String, length: float) -> Vector2:
 			return Vector2(1.2, 2.5)
 		"pallet_rack":
 			return Vector2(length if length > 0.0 else 4.0, 0.75)
-	return Vector2(1.0, 1.0)
+	return _dims_more(kind, length)
 
 
 static func _furn_extra(c: Ctx, s: int, kind: String, o: Vector3, angle: float, dims: Vector2) -> void:
 	var wood: StandardMaterial3D = c.m_wood
 	var pale: StandardMaterial3D = c.m_pale
 	var goods: Array[Color] = [Color(0.8, 0.3, 0.2), Color(0.25, 0.5, 0.7), Color(0.85, 0.75, 0.3), Color(0.9, 0.9, 0.85)]
+	if MORE_KINDS.has(kind):
+		_furn_more(c, kind, o, angle, dims)
+		return
 	match kind:
 		"shelf":
 			var board: StandardMaterial3D = c.mat(Color(0.55, 0.55, 0.52), "metal", 0.6)
@@ -1202,6 +1233,7 @@ static func _furn_extra(c: Ctx, s: int, kind: String, o: Vector3, angle: float, 
 # --- ROW SHOP: a narrow shop with a separate street door and stair to a walk-up flat ------------------
 
 const TRADES: Array[String] = ["barber", "tailor", "tv_repair", "records", "laundromat", "laundromat"]
+const STORE_TRADES: Array[String] = ["deli", "pharmacy", "market", "liquor", "pawn", "market"]
 
 
 static func _row_shop(c: Ctx) -> void:
@@ -1221,7 +1253,9 @@ static func _row_shop(c: Ctx) -> void:
 	var back_x: float = sd_x
 	var z_s: float = z_front - 1.7
 	var z_e: float = z_s - 19 * Kit.STEP_RUN
-	var trade: String = TRADES[c.sign_index % TRADES.size()] if c.sign_index >= 0 else TRADES[c.rng.randi() % TRADES.size()]
+	var store: bool = c.kind == "corner_store"
+	var trades: Array[String] = STORE_TRADES if store else TRADES
+	var trade: String = trades[c.sign_index % trades.size()] if c.sign_index >= 0 else trades[c.rng.randi() % trades.size()]
 	# --- exterior ---
 	var front: Array = [Kit.opening(sd_x, door_w, 0.0, DOOR_H, "door")]
 	var win0: float = sd_x + door_w * 0.5 + 0.35
@@ -1246,7 +1280,7 @@ static func _row_shop(c: Ctx) -> void:
 		c.door(Vector3(x_hc, c.f0, hz - WALL_T * 0.5), 1.2, DOOR_H, Vector3.BACK, c.sign_text + " upstairs entrance")
 	var shop_mid: float = (xs0 + xs1) * 0.5
 	c.awning(shop_mid, c.f0 + 2.85, xs1 - xs0 + 0.2, 1.2)
-	c.fascia(shop_mid, c.f0 + 3.5, minf(xs1 - xs0, 4.6), 0.6, 30)
+	c.fascia(shop_mid, c.f0 + 3.5, minf(xs1 - xs0, 6.4 if store else 4.6), 0.6, 34 if store else 30)
 	if trade == "barber":
 		c.kit.box(Vector3(xs1 - 0.2, c.f0 + 1.2, hz + 0.25), Vector3(0.18, 0.7, 0.18), c.mat(Color(0.9, 0.9, 0.9), "", 0.4))
 		c.kit.box(Vector3(xs1 - 0.2, c.f0 + 1.2, hz + 0.25), Vector3(0.2, 0.16, 0.2), c.mat(Color(0.75, 0.1, 0.1), "", 0.4))
@@ -1280,7 +1314,10 @@ static func _row_shop(c: Ctx) -> void:
 	c.partx(0, xs0, xs1, z_bk, [c.gap(back_x, 1.2, DOOR_H)])
 	c.reserve(0, Rect2(sd_x - 0.8, z_back, 1.6, D_of(c)))
 	var shop: Rect2 = Rect2(xs0, z_bk + 0.08, xs1 - xs0, z_front - z_bk - 0.08)
-	_trade_fixtures(c, trade, shop)
+	if store:
+		_store_fixtures(c, trade, shop, sd_x + 0.8)
+	else:
+		_trade_fixtures(c, trade, shop)
 	var back_room: Rect2 = Rect2(xs0, z_back, xs1 - xs0, z_bk - z_back - 0.08)
 	_put_any(c, 0, back_room, "shelf", [["w", 0.3], ["e", 0.3]], 1.8)
 	_put_any(c, 0, back_room, "shelf", [["e", 0.3], ["w", 2.4]], 1.8)
@@ -1454,3 +1491,503 @@ static func _pallet_pair(c: Ctx, x: float, z: float, length: float) -> void:
 		var rect: Rect2 = Rect2(x + side * 0.4 - 0.375, z - length * 0.5, 0.75, length)
 		if c.claim(0, rect):
 			_furn(c, 0, "pallet_rack", rect, PI * 0.5 if side < 0.0 else -PI * 0.5, Vector2(length, 0.75))
+
+
+# --- Even more furniture ---------------------------------------------------------------------------
+
+static func _dims_more(kind: String, length: float) -> Vector2:
+	match kind:
+		"cooler":
+			return Vector2(1.2, 0.7)
+		"case":
+			return Vector2(length if length > 0.0 else 1.6, 0.65)
+		"cubicle":
+			return Vector2(1.9, 1.8)
+		"conf":
+			return Vector2(3.0, 1.3)
+		"pool":
+			return Vector2(2.7, 1.5)
+		"booth":
+			return Vector2(2.3, 1.6)
+		"stove":
+			return Vector2(1.2, 0.8)
+		"tires":
+			return Vector2(0.8, 0.8)
+		"drum":
+			return Vector2(0.6, 0.6)
+		"workbench":
+			return Vector2(2.4, 0.75)
+		"lectern":
+			return Vector2(0.6, 0.5)
+		"safe":
+			return Vector2(0.7, 0.6)
+	return Vector2(1.0, 1.0)
+
+
+static func _furn_more(c: Ctx, kind: String, o: Vector3, angle: float, dims: Vector2) -> void:
+	var wood: StandardMaterial3D = c.m_wood
+	var pale: StandardMaterial3D = c.m_pale
+	var black: StandardMaterial3D = c.mat(Color(0.12, 0.12, 0.13), "", 0.8)
+	match kind:
+		"cooler":
+			c.fbox(o, angle, Vector3(0, 1.0, 0), Vector3(1.2, 2.0, 0.7), pale)
+			c.fbox(o, angle, Vector3(0, 1.0, 0.36), Vector3(1.1, 1.8, 0.03), c.glow(Color(0.7, 0.85, 1.0), 0.5))
+			c.fcollide(o, angle, Vector3(0, 1.0, 0), Vector3(1.2, 2.0, 0.7))
+		"case":
+			c.fbox(o, angle, Vector3(0, 0.42, 0), Vector3(dims.x, 0.85, dims.y - 0.05), wood)
+			c.fbox(o, angle, Vector3(0, 1.0, 0), Vector3(dims.x - 0.1, 0.22, dims.y - 0.15), c.m_pane_in)
+			c.fcollide(o, angle, Vector3(0, 0.55, 0), Vector3(dims.x, 1.1, dims.y))
+			for i: int in range(int(dims.x / 0.4)):
+				c.fprop(o, angle, Vector3(-dims.x * 0.5 + 0.25 + i * 0.4, 0.98, 0), Vector3(0.18, 0.1, 0.14), c.mat([Color(0.8, 0.7, 0.2), Color(0.7, 0.7, 0.72), Color(0.6, 0.3, 0.2)][i % 3], "", 0.3))
+		"cubicle":
+			var panel: StandardMaterial3D = c.mat(Color(0.5, 0.55, 0.6), "", 0.9)
+			c.fbox(o, angle, Vector3(0, 0.7, -0.87), Vector3(1.9, 1.4, 0.06), panel)
+			for side: float in [-1.0, 1.0]:
+				c.fbox(o, angle, Vector3(side * 0.93, 0.7, 0.0), Vector3(0.06, 1.4, 1.74), panel)
+				c.fcollide(o, angle, Vector3(side * 0.93, 0.7, 0.0), Vector3(0.06, 1.4, 1.74))
+			c.fcollide(o, angle, Vector3(0, 0.7, -0.87), Vector3(1.9, 1.4, 0.06))
+			c.fbox(o, angle, Vector3(0, 0.74, -0.55), Vector3(1.5, 0.05, 0.6), wood)
+			c.fcollide(o, angle, Vector3(0, 0.4, -0.55), Vector3(1.5, 0.8, 0.6))
+			var beige: StandardMaterial3D = c.mat(Color(0.78, 0.75, 0.66), "", 0.7)
+			c.fprop(o, angle, Vector3(0.3, 0.96, -0.62), Vector3(0.4, 0.36, 0.38), beige)
+			c.fprop(o, angle, Vector3(0.3, 0.97, -0.42), Vector3(0.32, 0.25, 0.02), c.glow(Color(0.25, 0.45, 0.6), 0.6))
+			c.fprop(o, angle, Vector3(0, 0.45, -0.05), Vector3(0.45, 0.06, 0.45), black)
+			c.fprop(o, angle, Vector3(0, 0.8, -0.28), Vector3(0.45, 0.6, 0.06), black)
+		"conf":
+			c.fbox(o, angle, Vector3(0, 0.75, 0), Vector3(3.0, 0.06, 1.2), wood)
+			c.fbox(o, angle, Vector3(0, 0.37, 0), Vector3(2.4, 0.7, 0.3), wood)
+			c.fcollide(o, angle, Vector3(0, 0.4, 0), Vector3(3.0, 0.8, 1.2))
+			for i: int in range(3):
+				for side: float in [-1.0, 1.0]:
+					c.fprop(o, angle, Vector3(-1.0 + i * 1.0, 0.5, side * 0.85), Vector3(0.45, 0.06, 0.45), black)
+					c.fprop(o, angle, Vector3(-1.0 + i * 1.0, 0.8, side * 1.05), Vector3(0.45, 0.6, 0.06), black)
+		"pool":
+			c.fbox(o, angle, Vector3(0, 0.4, 0), Vector3(2.7, 0.8, 1.5), wood)
+			c.fbox(o, angle, Vector3(0, 0.82, 0), Vector3(2.3, 0.05, 1.1), c.mat(Color(0.15, 0.4, 0.25), "", 0.95))
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(2.7, 0.9, 1.5))
+			for i: int in range(5):
+				c.fprop(o, angle, Vector3(0.5 + (i % 3) * 0.12, 0.88, (i / 3) * 0.14 - 0.07), Vector3(0.08, 0.08, 0.08), c.mat([Color(0.8, 0.2, 0.2), Color(0.95, 0.95, 0.9), Color(0.2, 0.3, 0.7)][i % 3], "", 0.3))
+			c.fprop(o, angle, Vector3(0, 2.1, 0), Vector3(1.8, 0.12, 0.4), c.glow(Color(1.0, 0.9, 0.6), 0.9))
+		"booth":
+			var seat: StandardMaterial3D = c.m_fabric
+			for side: float in [-1.0, 1.0]:
+				c.fbox(o, angle, Vector3(side * 0.9, 0.22, 0), Vector3(0.5, 0.44, 1.5), seat)
+				c.fbox(o, angle, Vector3(side * 1.12, 0.7, 0), Vector3(0.1, 0.55, 1.5), seat)
+			c.fbox(o, angle, Vector3(0, 0.74, 0), Vector3(0.9, 0.05, 0.9), wood)
+			c.fbox(o, angle, Vector3(0, 0.37, 0), Vector3(0.14, 0.7, 0.14), c.m_metal)
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(2.3, 0.9, 1.6))
+			c.fprop(o, angle, Vector3(0.1, 0.78, 0.1), Vector3(0.1, 0.12, 0.1), pale)
+		"stove":
+			c.fbox(o, angle, Vector3(0, 0.45, 0), Vector3(1.2, 0.9, 0.8), c.m_ac)
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(1.2, 0.9, 0.8))
+			for i: int in range(4):
+				c.fprop(o, angle, Vector3(-0.35 + (i % 2) * 0.7, 0.93, -0.15 + (i / 2) * 0.35), Vector3(0.28, 0.03, 0.28), black)
+		"tires":
+			for i: int in range(3):
+				c.fbox(o, angle, Vector3(0, 0.11 + i * 0.22, 0), Vector3(0.7, 0.22, 0.7), black)
+			c.fcollide(o, angle, Vector3(0, 0.33, 0), Vector3(0.7, 0.66, 0.7))
+		"drum":
+			c.cyl(o + Vector3(0, 0.45, 0), 0.29, 0.9, c.mat(Color(0.2, 0.3, 0.55), "", 0.5), 8)
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(0.6, 0.9, 0.6))
+		"workbench":
+			c.fbox(o, angle, Vector3(0, 0.9, 0), Vector3(2.4, 0.06, 0.75), wood)
+			for end: float in [-1.0, 1.0]:
+				c.fbox(o, angle, Vector3(end * 1.1, 0.44, 0), Vector3(0.1, 0.88, 0.65), c.m_metal)
+			c.fbox(o, angle, Vector3(0, 0.2, 0), Vector3(2.2, 0.06, 0.6), c.m_metal)
+			c.fcollide(o, angle, Vector3(0, 0.47, 0), Vector3(2.4, 0.94, 0.75))
+			c.fprop(o, angle, Vector3(-0.8, 1.0, 0.1), Vector3(0.18, 0.14, 0.12), c.m_metal)
+		"lectern":
+			c.fbox(o, angle, Vector3(0, 0.55, 0), Vector3(0.6, 1.1, 0.5), wood)
+			c.fcollide(o, angle, Vector3(0, 0.55, 0), Vector3(0.6, 1.1, 0.5))
+		"safe":
+			c.fbox(o, angle, Vector3(0, 0.5, 0), Vector3(0.7, 1.0, 0.6), c.m_dark)
+			c.fcollide(o, angle, Vector3(0, 0.5, 0), Vector3(0.7, 1.0, 0.6))
+			c.fprop(o, angle, Vector3(0, 0.6, 0.31), Vector3(0.2, 0.2, 0.03), c.mat(Color(0.75, 0.62, 0.3), "", 0.3))
+
+
+## Two shelves back to back running along z: a shop gondola. `x` is the centre line.
+static func _gondola(c: Ctx, x: float, z0: float, length: float) -> bool:
+	var a: Rect2 = Rect2(x - 0.45, z0, 0.45, length)
+	var b: Rect2 = Rect2(x, z0, 0.45, length)
+	if not c.claim(0, a):
+		return false
+	if not c.claim(0, b):
+		return false
+	_furn(c, 0, "shelf", a, -PI * 0.5, Vector2(length, 0.45))
+	_furn(c, 0, "shelf", b, PI * 0.5, Vector2(length, 0.45))
+	return true
+
+
+static func _gondolas(c: Ctx, shop: Rect2, count: int) -> void:
+	var placed: int = 0
+	var gx: float = shop.position.x + 2.6
+	while gx < shop.end.x - 1.7 and placed < count:
+		var gz: float = shop.position.y + 1.6
+		while gz + 2.2 < shop.end.y - 1.0 and placed < count:
+			if _gondola(c, gx, gz, 2.2):
+				placed += 1
+			gz += 3.4
+		gx += 1.9
+
+
+## Shop fixtures for the corner stores.
+static func _store_fixtures(c: Ctx, trade: String, shop: Rect2, aisle_end_x: float) -> void:
+	var counter_at: float = aisle_end_x - shop.position.x + 0.1
+	match trade:
+		"deli":
+			_put_any(c, 0, shop, "counter", [["n", counter_at]], 2.6)
+			for i: int in range(3):
+				_put_any(c, 0, shop, "cooler", [["e", 0.3 + i * 1.3]])
+			_gondolas(c, shop, 2)
+		"pharmacy":
+			_put_any(c, 0, shop, "counter", [["n", counter_at]], 3.0)
+			_put_any(c, 0, shop, "cooler", [["e", 0.3]])
+			_gondolas(c, shop, 4)
+		"liquor":
+			_put_any(c, 0, shop, "counter", [["n", counter_at]], 2.0)
+			for i: int in range(4):
+				_put_any(c, 0, shop, "cooler", [["e", 0.3 + i * 1.3]])
+			_gondolas(c, shop, 2)
+		"pawn":
+			_put_any(c, 0, shop, "counter", [["n", counter_at]], 2.6)
+			for i: int in range(3):
+				_put_any(c, 0, shop, "case", [["e", 0.3 + i * 1.9]], 1.6)
+			_put_any(c, 0, shop, "case", [["w", 2.6], ["w", 4.0]], 1.6)
+			_put_any(c, 0, shop, "shelf", [["n", counter_at + 3.0]], 1.8)
+			for g: int in range(4):
+				c.deco(Vector3(shop.end.x - 0.05 - g * 0.0, c.f0 + 1.9, shop.position.y + 1.0 + g * 1.5), Vector3(0.1, 0.9, 0.35), c.mat(Color(0.6, 0.35, 0.15), "planks", 0.6))
+		_:
+			_put_any(c, 0, shop, "counter", [["n", counter_at]], 1.8)
+			for i: int in range(3):
+				_put_any(c, 0, shop, "cooler", [["e", 0.3 + i * 1.3]])
+			_gondolas(c, shop, 4)
+	c.deco(Vector3(shop.get_center().x, c.f0 + 2.4, shop.end.y - 0.4), Vector3(1.2, 0.35, 0.05), c.glow(Color(1.0, 0.4, 0.3), 0.9))
+
+
+# --- OFFICE: the walkup's core with cubicle floors -------------------------------------------------
+
+## Fills the two rooms of an office side: open-plan cubicles (a waiting room and records on the ground floor) and a
+## boss office (right) or conference room (left).
+static func _office_fill(c: Ctx, s: int, living: Rect2, other: Rect2, min_edge: bool, back_entry: bool) -> void:
+	var far_wall: String = "e" if min_edge else "w"
+	if s == 0:
+		for i: int in range(4):
+			_put_any(c, s, living, "bench", [[far_wall, 0.3 + i * 2.2]], 1.6)
+		_put_any(c, s, living, "cabinet", [["n", 0.2], ["s", 0.2]])
+		for i: int in range(3):
+			_put_any(c, s, other, "shelf", [[far_wall, 0.3 + i * 2.0]], 1.8)
+		_put_any(c, s, other, "desk", [["n" if not back_entry else "s", 1.0]])
+		return
+	var z: float = 0.2
+	while z + 1.9 <= living.size.y:
+		_put(c, s, living, "cubicle", far_wall, z)
+		z += 2.0
+	if living.size.x >= 7.4:
+		z = living.position.y + 0.3
+		while z + 1.9 <= living.end.y:
+			var x0: float = living.position.x + 3.7 if far_wall == "w" else living.end.x - 3.7 - 1.8
+			var rect: Rect2 = Rect2(x0, z, 1.8, 1.9)
+			if living.encloses(rect) and c.claim(s, rect):
+				_furn(c, s, "cubicle", rect, PI * 0.5 if far_wall == "w" else -PI * 0.5, Vector2(1.9, 1.8))
+			z += 2.0
+	var far_z: String = "s" if back_entry else "n"
+	if min_edge:
+		_put_any(c, s, other, "desk", [[far_z, 0.8], [far_z, 2.0]])
+		_put_any(c, s, other, "sofa", [["e", 0.5], ["w", 0.5]])
+		_put_any(c, s, other, "cabinet", [[far_z, 0.1], [far_z, other.size.x - 0.7]])
+		_put_any(c, s, other, "shelf", [["w", 0.3], ["e", 0.3]], 1.6)
+	else:
+		var mid: Rect2 = Rect2(other.get_center().x - 1.5, other.get_center().y - 0.65, 3.0, 1.3)
+		if other.encloses(mid) and c.claim(s, mid):
+			_furn(c, s, "conf", mid, 0.0, Vector2(3.0, 1.3))
+		_put_any(c, s, other, "cabinet", [[far_z, 0.1], [far_z, other.size.x - 0.7]])
+
+
+## The office lobby's reception desk (in place of mail boxes' company).
+static func _reception(c: Ctx, door_z: float) -> void:
+	var rect: Rect2 = Rect2(-CORE_HALF + 0.35, door_z + 2.2, 0.65, 2.4)
+	if rect.end.y < c.hz - WALL_T - 1.5 and c.claim(0, rect):
+		_furn(c, 0, "counter", rect, PI * 0.5, Vector2(2.4, 0.65))
+
+
+# --- BAR: a bar or pool hall with booths, a back office, restrooms and an alley door -----------------
+
+static func _bar(c: Ctx) -> void:
+	var hx: float = c.hx
+	var hz: float = c.hz
+	var z_back: float = -hz + WALL_T
+	var z_front: float = hz - WALL_T
+	var x_left: float = -hx + WALL_T
+	var x_right: float = hx - WALL_T
+	var z_bk: float = z_back + 4.4
+	c.walls([Kit.opening(0.0, 1.6, 0.0, DOOR_H, "door"), Kit.opening(-hx * 0.5, 2.0, 0.9, 2.5, "window")], [Kit.opening(0.0, 1.4, 0.0, DOOR_H, "door")])
+	c.roof_slab()
+	c.windows_on("right", [0], 4.5, [], 1.0, 0.7, 1.6)
+	c.windows_on("left", [0], 4.5, [], 1.0, 0.7, 1.6)
+	c.windows_on("back", [0], 4.5, [Vector2(-1.2, 1.2)], 1.0, 0.7, 1.6)
+	c.windows_on("front", [0], 4.0, [Vector2(-1.4, 1.4), Vector2(-hx * 0.5 - 1.6, -hx * 0.5 + 1.6)], 1.0, 0.7, 1.6)
+	c.door(Vector3(0, c.f0, hz - WALL_T * 0.5), 1.6, DOOR_H, Vector3.BACK, c.sign_text + " entrance")
+	c.door(Vector3(0, c.f0, -hz + WALL_T * 0.5), 1.4, DOOR_H, Vector3.FORWARD, c.sign_text + " alley door")
+	c.fascia(0.0, c.f0 + 3.3, minf(W_of(c), 7.0), 0.9, 40)
+	c.kit.box(Vector3(hx * 0.5, c.f0 + 2.0, hz + 0.1), Vector3(1.4, 0.5, 0.1), c.glow(Color(1.0, 0.25, 0.2), 1.4))
+	c.kit.box(Vector3(-hx * 0.5, c.f0 + 3.0, hz + 0.12), Vector3(1.0, 0.4, 0.08), c.glow(Color(0.3, 0.6, 1.0), 1.4))
+	c.awning(0.0, c.f0 + 2.8, 2.4, 1.0)
+	c.to_interior()
+	c.m_floor = c.mat(Color(0.5, 0.42, 0.34), "planks", 0.85)
+	c.slab(0)
+	c.roof_ceiling()
+	# Back of house: two restrooms, a corridor to the alley door and an office, each opening off the bar room.
+	var hall: float = 0.9
+	var wc_w: float = 2.3
+	var x_wc2: float = -hall - PART_T
+	var x_wc1: float = x_wc2 - wc_w - PART_T
+	c.partz(0, z_back, z_bk, -hall - PART_T * 0.5)
+	c.partz(0, z_back, z_bk, hall + PART_T * 0.5)
+	c.partz(0, z_back, z_bk, x_wc1)
+	var wc1: Rect2 = Rect2(x_left, z_back, x_wc1 - x_left, z_bk - z_back - 0.08)
+	var wc2: Rect2 = Rect2(x_wc1 + PART_T * 0.5, z_back, x_wc2 - x_wc1 - PART_T, z_bk - z_back - 0.08)
+	var office: Rect2 = Rect2(hall + PART_T, z_back, x_right - hall - PART_T, z_bk - z_back - 0.08)
+	c.partx(0, x_left, x_right, z_bk, [c.gap((x_left + x_wc1) * 0.5, 0.9), c.gap((x_wc1 + x_wc2) * 0.5, 0.9), c.gap(0.0, 1.6, DOOR_H), c.gap((hall + x_right) * 0.5, 0.9)])
+	for rect: Rect2 in [wc1, wc2]:
+		_put_any(c, 0, rect, "toilet", [["n", 0.3]])
+		_put_any(c, 0, rect, "sink", [["w", 1.2], ["e", 1.2]])
+	_put_any(c, 0, office, "desk", [["n", 0.8]])
+	_put_any(c, 0, office, "safe", [["e", 0.3]])
+	_put_any(c, 0, office, "cabinet", [["w", 0.2], ["w", 1.0]])
+	_put_any(c, 0, office, "shelf", [["e", 1.5]], 1.6)
+	# The bar room.
+	var main: Rect2 = Rect2(x_left, z_bk + PART_T * 0.5, x_right - x_left, z_front - z_bk - PART_T * 0.5)
+	c.reserve(0, Rect2(-1.0, z_back, 2.0, D_of(c)))
+	var length: float = minf(7.0, main.size.y - 3.4)
+	var counter: Rect2 = Rect2(x_right - 2.0, main.position.y + 1.0, 0.65, length)
+	if c.claim(0, counter):
+		_furn(c, 0, "counter", counter, -PI * 0.5, Vector2(length, 0.65))
+	_put(c, 0, main, "shelf", "e", 1.0, length)
+	for i: int in range(int(length)):
+		c.deco(Vector3(counter.position.x - 0.35, c.f0 + 0.38, counter.position.y + 0.6 + i * 1.0), Vector3(0.34, 0.7, 0.34), c.m_wood)
+	for i: int in range(3):
+		_put_any(c, 0, main, "booth", [["w", 0.4 + i * 2.5]])
+	var pool_spots: Array = [Rect2(x_left + 2.6, z_bk + 1.2, 1.5, 2.7), Rect2(x_left + 2.6, z_bk + 4.2, 1.5, 2.7), Rect2(1.4, z_bk + 1.2, 1.5, 2.7)]
+	var pool_at: Rect2 = c.fit(0, main, pool_spots)
+	if pool_at.size.x > 0.0:
+		_furn(c, 0, "pool", pool_at, PI * 0.5, Vector2(2.7, 1.5))
+	c.deco(Vector3(x_left + 0.06, c.f0 + 2.2, main.get_center().y), Vector3(0.05, 0.5, 1.4), c.glow(Color(0.3, 0.7, 1.0), 1.0))
+	c.deco(Vector3(x_right - 0.06, c.f0 + 2.6, main.get_center().y - 1.0), Vector3(0.05, 0.6, 1.2), c.glow(Color(1.0, 0.5, 0.2), 1.0))
+	c.lamp(Vector3(0, c.f0 + 2.8, main.get_center().y), 2.2, 12.0)
+	c.lamp(Vector3(0, c.f0 + 2.8, z_back + 2.0), 1.6, 8.0)
+	c.routes["bar_to_alley"] = [Vector3(0, c.f0, z_front - 0.8), Vector3(0, c.f0, z_bk + 0.8), Vector3(0, c.f0, z_bk - 0.8), Vector3(0, c.f0, z_back + 0.8)]
+	c.to_shell()
+	_roof_details(c)
+
+
+# --- AUTO SHOP: a service bay with a car on a lift, tool walls and an office ------------------------
+
+static func _auto_shop(c: Ctx) -> void:
+	var hx: float = c.hx
+	var hz: float = c.hz
+	c.roof_y = c.f0 + 5.2
+	var z_back: float = -hz + WALL_T
+	var z_front: float = hz - WALL_T
+	var x_left: float = -hx + WALL_T
+	var x_right: float = hx - WALL_T
+	var bay_x: float = x_left + 3.4
+	var off_w: float = 5.0
+	var off_d: float = 4.6
+	var cust_x: float = x_right - off_w * 0.5
+	var lane_x: float = x_right - off_w - 1.4
+	c.walls([Kit.opening(bay_x, 4.0, 0.0, 3.6, "door"), Kit.opening(cust_x, 1.4, 0.0, DOOR_H, "door"), Kit.opening(cust_x - 2.6, 1.6, 0.9, 2.5, "window")],
+		[Kit.opening(lane_x, 1.5, 0.0, DOOR_H, "door")], [Kit.opening(z_back + 4.0, 1.4, 0.0, DOOR_H, "door")])
+	c.roof_slab()
+	c.windows_on("right", [0], 4.0, [], 1.6, 0.8, 3.6)
+	c.windows_on("back", [0], 4.0, [Vector2(lane_x - 1.0, lane_x + 1.0)], 1.6, 0.8, 3.6)
+	c.windows_on("left", [0], 4.0, [Vector2(-hz + 3.0, -hz + 5.0)], 1.6, 0.8, 3.6)
+	c.roller(Vector3(bay_x, c.f0, hz - WALL_T * 0.5), 4.0, 3.6, Vector3.BACK, c.sign_text + " service bay")
+	c.door(Vector3(cust_x, c.f0, hz - WALL_T * 0.5), 1.4, DOOR_H, Vector3.BACK, c.sign_text + " entrance")
+	c.door(Vector3(lane_x, c.f0, -hz + WALL_T * 0.5), 1.5, DOOR_H, Vector3.FORWARD, c.sign_text + " alley door")
+	c.door(Vector3(-hx + WALL_T * 0.5, c.f0, z_back + 4.0), 1.4, DOOR_H, Vector3.LEFT, c.sign_text + " side door")
+	c.fascia(0.0, c.f0 + 4.3, minf(W_of(c) - 1.0, 8.0), 0.8, 40)
+	c.kit.box(Vector3(bay_x, c.f0 + 3.75, hz + 0.08), Vector3(4.6, 0.3, 0.16), c.m_metal)
+	c.to_interior()
+	c.m_floor = c.mat(Color(0.42, 0.42, 0.4), "panel", 0.95)
+	c.slab(0)
+	c.roof_ceiling()
+	# The office: two partitions, a doorway into the bay, counter, desk and chairs.
+	var off: Rect2 = Rect2(x_right - off_w, z_front - off_d, off_w, off_d)
+	c.partz(0, z_front - off_d, z_front, x_right - off_w, [c.gap(z_front - 2.2, 1.1, DOOR_H)])
+	c.partx(0, x_right - off_w, x_right, z_front - off_d)
+	c.reserve(0, Rect2(x_right - off_w - 1.4, z_front - 3.0, 2.8, 1.6))
+	var office_room: Rect2 = Rect2(off.position.x + 0.08, off.position.y + 0.08, off.size.x - 0.08, off.size.y - 0.08)
+	_put_any(c, 0, office_room, "counter", [["n", 0.3]], 2.4)
+	_put_any(c, 0, office_room, "desk", [["e", 0.4], ["e", 2.0]])
+	_put_any(c, 0, office_room, "cabinet", [["e", 3.4], ["w", 2.0]])
+	_put_any(c, 0, office_room, "bench", [["w", 1.5], ["w", 0.6]], 1.6)
+	c.deco(Vector3(off.position.x + 0.04, c.f0 + 1.9, off.position.y + 2.3), Vector3(0.04, 0.5, 1.6), c.glow(Color(1.0, 0.3, 0.2), 0.9))
+	# The bay: a lift with a raised car, a parked car, the tool wall, benches, tyres and drums.
+	var lift_z: float = z_front - 6.0
+	var car_rect: Rect2 = Rect2(bay_x - 1.1, lift_z - 2.4, 2.2, 4.8)
+	c.claim(0, Rect2(bay_x - 2.3, z_front - 3.2, 4.6, 2.4))
+	if c.claim(0, car_rect):
+		var body: StandardMaterial3D = c.m_accent
+		c.kit.box(Vector3(bay_x, c.f0 + 2.45, lift_z), Vector3(1.9, 0.7, 4.3), body)
+		c.kit.box(Vector3(bay_x, c.f0 + 3.0, lift_z + 0.2), Vector3(1.6, 0.5, 2.2), c.m_dark)
+		c.kit.collider(Vector3(bay_x, c.f0 + 2.6, lift_z), Vector3(1.9, 1.2, 4.3))
+		for side: float in [-1.0, 1.0]:
+			for end: float in [-1.0, 1.0]:
+				c.kit.box(Vector3(bay_x + side * 1.35, c.f0 + 1.3, lift_z + end * 1.4), Vector3(0.22, 2.6, 0.22), c.mat(Color(0.85, 0.65, 0.1), "", 0.5))
+				c.kit.collider(Vector3(bay_x + side * 1.35, c.f0 + 1.3, lift_z + end * 1.4), Vector3(0.22, 2.6, 0.22))
+		for side: float in [-1.0, 1.0]:
+			c.kit.box(Vector3(bay_x + side * 0.9, c.f0 + 2.05, lift_z), Vector3(0.12, 0.1, 4.0), c.m_metal)
+	var second: Rect2 = Rect2(bay_x + 3.4 - 1.0, z_front - 8.2, 2.0, 4.4)
+	if second.end.x < off.position.x - 1.6 and c.claim(0, second):
+		c.kit.box(Vector3(second.get_center().x, c.f0 + 0.65, second.get_center().y), Vector3(1.9, 0.7, 4.2), c.mat(Color(0.5, 0.5, 0.55), "", 0.4))
+		c.kit.box(Vector3(second.get_center().x, c.f0 + 1.2, second.get_center().y), Vector3(1.6, 0.5, 2.2), c.m_dark)
+		c.kit.collider(Vector3(second.get_center().x, c.f0 + 0.75, second.get_center().y), Vector3(1.9, 1.3, 4.2))
+	c.reserve(0, Rect2(lane_x - 0.8, z_back, 1.6, D_of(c)))
+	c.reserve(0, Rect2(-hx * 0.0 + x_left + 3.4 - 2.4, z_front - 3.0, off.position.x - x_left, 2.6))
+	_put_any(c, 0, Rect2(x_left, z_back, lane_x - 0.9 - x_left, z_front - z_back - 4.0), "workbench", [["n", 0.4], ["n", 3.0]])
+	c.deco(Vector3((x_left + lane_x) * 0.5, c.f0 + 1.9, z_back + 0.3), Vector3(minf(lane_x - x_left - 1.0, 6.0), 1.3, 0.04), c.mat(Color(0.6, 0.55, 0.3), "planks", 0.8))
+	for i: int in range(10):
+		c.deco(Vector3(x_left + 1.0 + i * 0.6, c.f0 + 1.8 + (i % 3) * 0.25, z_back + 0.36), Vector3(0.1, 0.32, 0.03), c.m_metal)
+	var yard: Rect2 = Rect2(x_left, z_back, lane_x - 0.9 - x_left, z_front - z_back - 4.0)
+	_put_any(c, 0, yard, "tires", [["w", 3.0], ["w", 4.0], ["w", 5.0]])
+	_put_any(c, 0, yard, "tires", [["w", 6.0], ["w", 7.0]])
+	_put_any(c, 0, yard, "drum", [["w", 8.0], ["w", 8.8], ["n", 6.4]])
+	_put_any(c, 0, yard, "shelf", [["w", 9.0], ["w", 10.5]], 1.6)
+	c.lamp(Vector3(0, c.f0 + 4.4, z_front - 5.0), 2.6, 15.0)
+	c.lamp(Vector3(0, c.f0 + 4.4, z_back + 4.0), 2.6, 15.0)
+	c.routes["bay_to_alley"] = [Vector3(cust_x, c.f0, z_front - 0.8), Vector3(cust_x, c.f0, z_front - 2.2), Vector3(x_right - off_w - 0.7, c.f0, z_front - 2.2), Vector3(lane_x, c.f0, z_front - 3.3), Vector3(lane_x, c.f0, z_back + 1.0)]
+	c.to_shell()
+	_roof_details(c)
+
+
+# --- DINER: a small diner with booths, a counter with stools and a kitchen ----------------------------
+
+static func _diner_small(c: Ctx) -> void:
+	var hx: float = c.hx
+	var hz: float = c.hz
+	var z_back: float = -hz + WALL_T
+	var z_front: float = hz - WALL_T
+	var x_left: float = -hx + WALL_T
+	var x_right: float = hx - WALL_T
+	var door_x: float = x_right - 1.5
+	var z_k: float = z_back + 3.6
+	var win0: float = x_left + 0.6
+	var win1: float = door_x - 1.3
+	var front: Array = [Kit.opening(door_x, 1.5, 0.0, DOOR_H, "door")]
+	var panes: int = maxi(1, ceili((win1 - win0) / 3.0))
+	var pane_w: float = ((win1 - win0) - (panes - 1) * 0.2) / panes
+	for p: int in range(panes):
+		front.append(Kit.opening(win0 + pane_w * 0.5 + p * (pane_w + 0.2), pane_w, 0.6, 2.6, "window"))
+	c.walls(front, [Kit.opening(door_x, 1.4, 0.0, DOOR_H, "door")])
+	c.roof_slab()
+	c.windows_on("left", [0], 3.6, [], 1.3, 1.2, 1.0)
+	c.windows_on("right", [0], 3.6, [], 1.3, 1.2, 1.0)
+	c.windows_on("back", [0], 4.0, [Vector2(door_x - 1.0, door_x + 1.0)], 1.3, 1.0, 1.2)
+	c.door(Vector3(door_x, c.f0, hz - WALL_T * 0.5), 1.5, DOOR_H, Vector3.BACK, c.sign_text + " entrance")
+	c.door(Vector3(door_x, c.f0, -hz + WALL_T * 0.5), 1.4, DOOR_H, Vector3.FORWARD, c.sign_text + " alley door")
+	c.awning(-0.6, c.f0 + 2.9, W_of(c) - 3.0, 1.2)
+	c.fascia(-0.6, c.f0 + 3.55, minf(W_of(c) - 3.2, 5.5), 0.6, 34)
+	c.kit.box(Vector3(0, c.roof_y + PARAPET + 0.9, hz - 0.5), Vector3(minf(W_of(c) - 2.0, 5.0), 1.2, 0.2), c.m_accent)
+	c.kit.box(Vector3(0, c.roof_y + PARAPET + 0.9, hz - 0.38), Vector3(minf(W_of(c) - 2.4, 4.6), 0.9, 0.06), c.glow(Color(1.0, 0.85, 0.4), 1.3))
+	c.to_interior()
+	c.m_floor = c.mat(Color(0.6, 0.58, 0.52), "tiles", 0.7)
+	c.slab(0)
+	c.roof_ceiling()
+	var counter_x0: float = x_left + 0.6
+	var counter_len: float = door_x - 1.4 - counter_x0 - 0.2
+	# The kitchen wall: a doorway at the lane and a pass-through behind the counter.
+	c.partx(0, x_left, x_right, z_k, [c.gap(door_x, 1.2, DOOR_H), Kit.opening(counter_x0 + counter_len * 0.5, minf(counter_len - 0.6, 3.0), 1.0, 2.2, "gap")])
+	var kitchen: Rect2 = Rect2(x_left, z_back, x_right - x_left, z_k - z_back - 0.08)
+	c.reserve(0, Rect2(door_x - 0.8, z_back, 1.6, D_of(c)))
+	_put_any(c, 0, kitchen, "stove", [["n", 0.3], ["n", 1.6]])
+	_put_any(c, 0, kitchen, "counter", [["n", 3.0], ["n", 3.6]], 2.0)
+	_put_any(c, 0, kitchen, "fridge", [["w", 1.2], ["w", 0.3]])
+	_put_any(c, 0, kitchen, "sink", [["w", 2.4], ["n", 5.2]])
+	# Dining room.
+	var dining: Rect2 = Rect2(x_left, z_k + PART_T * 0.5, x_right - x_left, z_front - z_k - PART_T * 0.5)
+	var cr: Rect2 = Rect2(counter_x0, dining.position.y + 0.9, counter_len, 0.65)
+	if c.claim(0, cr):
+		_furn(c, 0, "counter", cr, 0.0, Vector2(counter_len, 0.65))
+		for i: int in range(int(counter_len / 0.8)):
+			c.deco(Vector3(counter_x0 + 0.5 + i * 0.8, c.f0 + 0.36, cr.end.y + 0.45), Vector3(0.36, 0.72, 0.36), c.m_accent)
+	for i: int in range(3):
+		_put_any(c, 0, dining, "booth", [["s", 0.3 + i * 2.5]])
+	_put_any(c, 0, dining, "booth", [["w", 1.6]])
+	_free_table(c, 0, Rect2(dining.position.x + 0.5, dining.position.y + 2.4, dining.size.x - 3.2, dining.size.y - 5.0))
+	c.lamp(Vector3(0, c.f0 + 2.8, dining.get_center().y), 2.2, 11.0)
+	c.routes["diner_to_alley"] = [Vector3(door_x, c.f0, z_front - 0.8), Vector3(door_x, c.f0, z_k + 0.8), Vector3(door_x, c.f0, z_k - 0.8), Vector3(door_x, c.f0, z_back + 0.8)]
+	c.to_shell()
+	_roof_details(c)
+
+
+# --- CHURCH HALL: a nave with pews and a dais, kitchen and restroom behind, stained glass ------------
+
+static func _church_hall(c: Ctx) -> void:
+	var hx: float = c.hx
+	var hz: float = c.hz
+	c.roof_y = c.f0 + 6.4
+	var z_back: float = -hz + WALL_T
+	var z_front: float = hz - WALL_T
+	var x_left: float = -hx + WALL_T
+	var x_right: float = hx - WALL_T
+	var back_w: float = 2.6
+	var z_bk: float = z_back + 4.0
+	var side_z: float = 1.0
+	c.walls([Kit.opening(0.0, 2.0, 0.0, 3.0, "door")], [Kit.opening(x_right - 1.3, 1.2, 0.0, DOOR_H, "door")], [], [Kit.opening(side_z, 1.4, 0.0, DOOR_H, "door")])
+	c.roof_slab()
+	var stained: Material = c.kit.glow(Color(0.45, 0.35, 0.95), 0.9)
+	c.windows_on("left", [0], 3.2, [Vector2(-hz, -hz + 4.4)], 1.1, 2.4, 0.9, stained)
+	c.windows_on("right", [0], 3.2, [Vector2(-hz, -hz + 4.4), Vector2(side_z - 0.9, side_z + 0.9)], 1.1, 2.4, 0.9, stained)
+	c.windows_on("front", [0], 3.4, [Vector2(-1.8, 1.8)], 1.1, 2.4, 0.9, stained)
+	c.door(Vector3(0, c.f0, hz - WALL_T * 0.5), 2.0, 3.0, Vector3.BACK, c.sign_text + " entrance")
+	c.door(Vector3(x_right - 1.3, c.f0, -hz + WALL_T * 0.5), 1.2, DOOR_H, Vector3.FORWARD, c.sign_text + " back door")
+	c.door(Vector3(hx - WALL_T * 0.5, c.f0, side_z), 1.4, DOOR_H, Vector3.RIGHT, c.sign_text + " side door")
+	c.fascia(0.0, c.f0 + 3.6, minf(W_of(c) - 1.0, 6.0), 0.6, 26)
+	var top: float = c.roof_y + PARAPET
+	c.kit.box(Vector3(0, top + 0.5, hz - 0.2), Vector3(W_of(c) - 1.0, 1.0, 0.5), c.m_trim)
+	c.kit.box(Vector3(0, top + 1.3, hz - 0.2), Vector3(W_of(c) * 0.5, 0.7, 0.5), c.m_trim)
+	c.kit.box(Vector3(0, top + 2.6, hz - 0.2), Vector3(0.25, 2.0, 0.25), c.m_accent)
+	c.kit.box(Vector3(0, top + 3.0, hz - 0.2), Vector3(1.2, 0.25, 0.25), c.m_accent)
+	c.to_interior()
+	c.m_floor = c.mat(Color(0.5, 0.4, 0.3), "planks", 0.85)
+	c.slab(0)
+	c.roof_ceiling()
+	var x_l: float = x_left + back_w
+	var x_r: float = x_right - back_w
+	c.partz(0, z_back, z_bk, x_l)
+	c.partz(0, z_back, z_bk, x_r)
+	c.partx(0, x_left, x_l, z_bk, [c.gap((x_left + x_l) * 0.5, 0.9)])
+	c.partx(0, x_r, x_right, z_bk, [c.gap(x_right - 1.3, 1.0, DOOR_H)])
+	var wc: Rect2 = Rect2(x_left, z_back, back_w - 0.08, z_bk - z_back - 0.08)
+	var kitchen: Rect2 = Rect2(x_r + 0.08, z_back, back_w - 0.08, z_bk - z_back - 0.08)
+	_put_any(c, 0, wc, "toilet", [["n", 0.3]])
+	_put_any(c, 0, wc, "sink", [["w", 1.3], ["e", 1.3]])
+	_put_any(c, 0, kitchen, "stove", [["e", 0.3], ["e", 1.6]])
+	_put_any(c, 0, kitchen, "fridge", [["w", 0.3]])
+	var nave: Rect2 = Rect2(x_left, z_bk + PART_T * 0.5, x_right - x_left, z_front - z_bk - PART_T * 0.5)
+	# The dais between the back rooms: one 0.17 m step up.
+	var dais: Rect2 = Rect2(x_l + 0.2, z_back, x_r - x_l - 0.4, 2.4)
+	c.kit.box(Vector3(dais.get_center().x, c.f0 + 0.085, dais.get_center().y), Vector3(dais.size.x, 0.17, dais.size.y), c.m_wood, true)
+	c.reserve(0, dais)
+	c.reserve(0, Rect2(-1.0, z_bk, 2.0, z_front - z_bk))
+	c.reserve(0, Rect2(x_left, z_bk + 0.1, x_right - x_left, 2.0))
+	c.reserve(0, Rect2(x_right - 2.2, side_z - 1.2, 2.2, 2.4))
+	c.reserve(0, Rect2(x_left, z_front - 3.0, x_right - x_left, 3.0))
+	var lectern: Rect2 = Rect2(-0.3, z_back + 0.6, 0.6, 0.5)
+	if c.claim(0, lectern):
+		c.kit.box(Vector3(0, c.f0 + 0.17 + 0.55, z_back + 0.85), Vector3(0.6, 1.1, 0.5), c.m_wood, true)
+	c.kit.box(Vector3(0, c.f0 + 3.3, z_back + 0.1), Vector3(0.3, 2.4, 0.1), c.m_accent)
+	c.kit.box(Vector3(0, c.f0 + 3.7, z_back + 0.1), Vector3(1.3, 0.3, 0.1), c.m_accent)
+	var row_z: float = z_bk + 2.4
+	while row_z + 0.5 < z_front - 3.2:
+		for side: float in [-1.0, 1.0]:
+			var x0: float = 1.1 if side > 0.0 else x_left + 0.9
+			var x1: float = x_right - 2.4 if side > 0.0 else -1.1
+			var pew: Rect2 = Rect2(x0, row_z, minf(x1 - x0, 3.6), 0.5)
+			if pew.size.x > 1.0 and c.claim(0, pew):
+				_furn(c, 0, "bench", pew, 0.0, Vector2(pew.size.x, 0.5))
+		row_z += 1.3
+	c.lamp(Vector3(0, c.f0 + 5.0, nave.get_center().y), 2.6, 16.0)
+	c.routes["nave_to_back"] = [Vector3(0, c.f0, z_front - 1.0), Vector3(0, c.f0, z_bk + 1.1), Vector3(x_right - 1.3, c.f0, z_bk + 1.1), Vector3(x_right - 1.3, c.f0, z_bk - 0.8), Vector3(x_right - 1.3, c.f0, z_back + 0.8)]
+	c.to_shell()
+	_roof_details(c)
