@@ -158,6 +158,8 @@ func _run() -> void:
 	game._start_free_roam()
 	await _frames(5)
 	var world: Node3D = game.world
+	# Physics steps are fixed at 1/60 s whatever the wall clock, so run the walks faster than real time.
+	Engine.time_scale = 4.0
 	# Guards are practice-only and present in free roam: park them out of the way of the walks.
 	for guard: Variant in game._all_guards():
 		guard.set_present(false)
@@ -193,6 +195,7 @@ func _run() -> void:
 		print(line)
 	print("STAIR WALK RESULT: %d checks, %d failures" % [checks, failures])
 	Input.action_release("move_forward")
+	Engine.time_scale = 1.0
 	quit(0 if failures == 0 else 1)
 
 
