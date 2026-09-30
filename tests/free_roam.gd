@@ -97,8 +97,10 @@ func _run() -> void:
 	await _frames(2)
 	var focused: Control = root.gui_get_focus_owner()
 	_check(focused is Button and game.menu.is_ancestor_of(focused), "A pad press focuses a title-menu button")
-	await _pad(JOY_BUTTON_DPAD_DOWN)
-	await _frames(2)
+	# CREW, then PLAY ONLINE, then FREE ROAM.
+	for step: int in range(2):
+		await _pad(JOY_BUTTON_DPAD_DOWN)
+		await _frames(2)
 	await _pad(JOY_BUTTON_A)
 	await _frames(3)
 	_check(game.phase == game.Phase.LIVE and game.free_roam, "D-pad and A start Free Roam from the title menu")
