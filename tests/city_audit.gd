@@ -174,13 +174,6 @@ func _run() -> void:
 					on_bridge = on_bridge or (bridge["rect"] as Rect2).grow(4.0).has_point(at)
 				if on_bridge:
 					continue
-				# Deliberate traffic-calming kerb islands (city_fill.gd) stand on the carriageway.
-				var on_island: bool = false
-				for island: PackedVector2Array in world.calming_islands:
-					for grown: PackedVector2Array in Geometry2D.offset_polygon(island, 2.5):
-						on_island = on_island or Geometry2D.is_point_in_polygon(at, grown)
-				if on_island:
-					continue
 				var ground: float = _ground(at, 3.0)
 				if ground > 0.12 or ground < -0.1:
 					steps.append("%s at %s: %.2f (%s)" % [road.get("name", "road"), at.snapped(Vector2(0.1, 0.1)), ground, _top_hit(at)])

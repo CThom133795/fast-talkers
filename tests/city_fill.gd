@@ -59,7 +59,8 @@ func _run() -> void:
 	_emptiness()
 	_overlaps()
 	print("CARVED STREETS: %s" % [world.city_fill.carved])
-	_calming_checks()
+	_road_solid_checks()
+	_cluster_checks()
 	_life_checks()
 	print("CITY FILL RESULT: %d checks, %d failures" % [checks, failures])
 	world.queue_free()
@@ -400,58 +401,194 @@ func _write_quadrants(image: Image, bounds: Rect2, folder: String) -> void:
 	print("QUADRANTS written; origin (%.0f, %.0f), 2 px per metre, quadrant size %d x %d px, split at x %.0f z %.0f" % [bounds.position.x, bounds.position.y, half_w, half_h, bounds.position.x + half_w / px_per_m, bounds.position.y + half_h / px_per_m])
 
 
-# --- Traffic calming ---------------------------------------------------------------------------------
+# --- Street props off the road ------------------------------------------------------------------------
 
-## Every kerb island sits on a road and inside its width, and each chicane pair leaves a gap a car fits
-## through: a 2.4 m wide box is swept along the S-path between the two islands.
-func _calming_checks() -> void:
-	var islands: Array[PackedVector2Array] = world.calming_islands
-	print("CALMING: %d kerb islands" % islands.size())
-	_check(islands.size() >= 20 and islands.size() % 2 == 0, "Long streets have chicane islands in pairs (%d islands)" % islands.size())
-	var off_road: int = 0
-	for poly: PackedVector2Array in islands:
-		var center: Vector2 = Vector2.ZERO
-		for point: Vector2 in poly:
-			center += point * 0.25
-		var on_road: bool = false
-		for road: Dictionary in world.roads:
-			var points: PackedVector2Array = road["points"]
-			for index: int in range(points.size() - 1):
-				if center.distance_to(Geometry2D.get_closest_point_to_segment(center, points[index], points[index + 1])) < float(road["width"]) * 0.5:
-					on_road = true
-		off_road += 0 if on_road else 1
-	_check(off_road == 0, "Every island stands on a street (%d off)" % off_road)
-	var blocked: int = 0
+## The corner and sightline clusters (scripts/city_fill.gd `clusters`): kerb corners are dressed, and every
+## cluster keeps off doors, crew car spawns, alley mouths and the Midtown ring.
+func _cluster_checks() -> void:
+	var fill: Variant = world.city_fill
+	var clusters: Array[Dictionary] = fill.clusters
+	var corners: int = 0
+	var kinds: Dictionary = {}
+	for cluster: Dictionary in clusters:
+		corners += 1 if bool(cluster["corner"]) else 0
+		kinds[int(cluster["kind"])] = int(kinds.get(int(cluster["kind"]), 0)) + 1
+	print("PROPS: %d clusters (%d at junction corners), kinds %s" % [clusters.size(), corners, kinds])
+	_check(corners >= 40 and corners == fill.corners_dressed, "Junction corners are dressed with solid props (%d corners, %d clusters in all)" % [corners, clusters.size()])
+	_check(kinds.size() >= 4, "Corner props are varied (%d kinds)" % kinds.size())
+	# Each cluster is a solid you cannot drive through (its collider is found by a shape query).
 	var shape: BoxShape3D = BoxShape3D.new()
-	shape.size = Vector3(2.4, 1.2, 4.8)
-	for pair: int in range(0, islands.size() - 1, 2):
-		var a: PackedVector2Array = islands[pair]
-		var b: PackedVector2Array = islands[pair + 1]
-		var ca: Vector2 = (a[0] + a[1] + a[2] + a[3]) * 0.25
-		var cb: Vector2 = (b[0] + b[1] + b[2] + b[3]) * 0.25
-		var mid: Vector2 = (ca + cb) * 0.5
-		# Frame of the pair: n across the street, the axis midway between the two centres.
-		var n: Vector2 = (a[1] - a[0]).normalized()
-		var width: float = (a[1] - a[0]).length()
-		var side_a: float = signf((ca - mid).dot(n))
-		var axis_a: Vector2 = ca - n * (ca - mid).dot(n)
-		var axis_b: Vector2 = cb - n * (cb - mid).dot(n)
-		# The free lane at island A is on the far side of the centre line from A, and vice versa at B.
-		var free_a: Vector2 = axis_a - n * side_a * width * 0.5
-		var free_b: Vector2 = axis_b + n * side_a * width * 0.5
-		for step: int in range(11):
-			var at: Vector2 = free_a.lerp(free_b, float(step) / 10.0)
-			var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
-			query.shape = shape
-			query.collision_mask = 1
-			var facing: Vector2 = (free_b - free_a).normalized()
-			query.transform = Transform3D(Basis(Vector3.UP, atan2(facing.x, facing.y)), Vector3(at.x, 1.0, at.y))
-			var hits: Array[Dictionary] = space.intersect_shape(query, 1)
-			if not hits.is_empty():
-				blocked += 1
-				print("  CHICANE pair at %s blocked by %s at %s" % [mid.snapped(Vector2(0.1, 0.1)), (hits[0]["collider"] as Node).get_path(), (hits[0]["collider"] as Node3D).global_position.snapped(Vector3(0.1, 0.1, 0.1))])
-				break
-	_check(blocked == 0, "A 2.4 m car fits through every chicane (%d pairs blocked of %d)" % [blocked, islands.size() / 2])
+	shape.size = Vector3(0.6, 0.6, 0.6)
+	var hollow: int = 0
+	for cluster: Dictionary in clusters:
+		var at: Vector2 = cluster["center"]
+		var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+		query.shape = shape
+		query.collision_mask = 1
+		query.transform = Transform3D(Basis.IDENTITY, Vector3(at.x, 0.9, at.y))
+		if space.intersect_shape(query, 1).is_empty():
+			hollow += 1
+	_check(hollow == 0, "Every cluster is solid where it stands (%d hollow of %d)" % [hollow, clusters.size()])
+	var bad: Array[String] = []
+	var walkway: int = 0
+	for cluster: Dictionary in clusters:
+		var at: Vector2 = cluster["center"]
+		var reach: float = Vector2(float(cluster["hw"]), float(cluster["hd"])).length()
+		for door: Dictionary in world.interactable_doors:
+			var spot: Vector3 = door["position"]
+			if Vector2(spot.x, spot.z).distance_to(at) < reach + 2.0:
+				bad.append("%s at %s within 2 m of door %s" % [cluster["kind"], at, door["label"]])
+		for crew: Dictionary in world.crew_spawns.values():
+			var car: Vector3 = crew["car"]
+			if Vector2(car.x, car.z).distance_to(at) < 8.0:
+				bad.append("%s at %s within 8 m of a crew car" % [cluster["kind"], at])
+		for alley: Dictionary in fill.alleys:
+			if (alley["at"] as Vector2).distance_to(at) < reach + 2.0:
+				bad.append("%s at %s in an alley mouth" % [cluster["kind"], at])
+		if absf(at.x) <= 100.0 and absf(at.y) <= 100.0:
+			bad.append("%s at %s inside the Midtown ring" % [cluster["kind"], at])
+		# A corner cluster keeps 2 m of walkway: no building footprint within 2 m of its outline, behind it.
+		if bool(cluster["corner"]):
+			var v: Vector2 = cluster["v"]
+			var open: bool = true
+			for footprint: Rect2 in world.footprints:
+				for lateral: float in [-1.0, 0.0, 1.0]:
+					if footprint.grow(1.99).has_point(at + v * float(cluster["hd"]) + (cluster["u"] as Vector2) * lateral * float(cluster["hw"])):
+						open = false
+			walkway += 1 if open else 0
+			if not open:
+				bad.append("%s at %s has no walkway behind it" % [cluster["kind"], at])
+		_check_off_road(cluster, bad)
+	for line: String in bad.slice(0, 20):
+		print("  CLUSTER " + line)
+	_check(bad.is_empty(), "Clusters keep off doors (2 m), crew cars (8 m), alley mouths, the Midtown ring and the road (%d problems)" % bad.size())
+
+
+## A cluster's outline stays 0.4 m off every carriageway.
+func _check_off_road(cluster: Dictionary, bad: Array[String]) -> void:
+	var at: Vector2 = cluster["center"]
+	var u: Vector2 = cluster["u"]
+	var v: Vector2 = cluster["v"]
+	for sx: float in [-1.0, 0.0, 1.0]:
+		for sz: float in [-1.0, 0.0, 1.0]:
+			var point: Vector2 = at + u * sx * float(cluster["hw"]) + v * sz * float(cluster["hd"])
+			if _road_depth(point) > -0.4:
+				bad.append("%s at %s stands on or beside a carriageway" % [cluster["kind"], at])
+				return
+
+
+# --- Nothing solid on the carriageway ----------------------------------------------------------------
+
+## A road's centre-line segments (with their half widths) in a coarse grid, so the carriageway test is fast.
+var _road_grid: Dictionary = {}
+
+func _index_roads() -> void:
+	_road_grid.clear()
+	for road: Dictionary in world.roads:
+		var points: PackedVector2Array = road["points"]
+		var half: float = float(road["width"]) * 0.5
+		for index: int in range(points.size() - 1):
+			var box: Rect2 = Rect2(points[index], Vector2.ZERO).expand(points[index + 1]).grow(half + 1.0)
+			for cx: int in range(floori(box.position.x / 16.0), floori(box.end.x / 16.0) + 1):
+				for cy: int in range(floori(box.position.y / 16.0), floori(box.end.y / 16.0) + 1):
+					var key: Vector2i = Vector2i(cx, cy)
+					if not _road_grid.has(key):
+						_road_grid[key] = []
+					(_road_grid[key] as Array).append([points[index], points[index + 1], half, index == 0, index == points.size() - 2, str(road["name"])])
+
+
+## How far inside a carriageway the point lies, in metres (negative: that far outside the nearest one).
+func _road_depth(p: Vector2, named: Array = []) -> float:
+	var key: Vector2i = Vector2i(floori(p.x / 16.0), floori(p.y / 16.0))
+	var best: float = -99.0
+	if not _road_grid.has(key):
+		return best
+	for seg: Array in _road_grid[key]:
+		# A street ends square at its last point: nothing past that end is carriageway.
+		var along: float = (p - (seg[0] as Vector2)).dot((seg[1] as Vector2) - (seg[0] as Vector2))
+		var length: float = ((seg[1] as Vector2) - (seg[0] as Vector2)).length()
+		if (along < 0.6 * length and bool(seg[3])) or (along > (length - 0.6) * length and bool(seg[4])):
+			continue
+		var depth: float = float(seg[2]) - p.distance_to(Geometry2D.get_closest_point_to_segment(p, seg[0], seg[1]))
+		if depth > best:
+			best = depth
+			named.assign([seg[5]])
+	return best
+
+
+## Every box or cylinder collider in the world as {points (x/z outline samples), top (y), name}.
+func _solid_shapes() -> Array[Dictionary]:
+	var shapes: Array[Dictionary] = []
+	var stack: Array[Node] = [world]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		stack.append_array(node.get_children())
+		if not node is StaticBody3D:
+			continue
+		for child: Node in node.get_children():
+			if not child is CollisionShape3D or (child as CollisionShape3D).shape == null or (child as CollisionShape3D).disabled:
+				continue
+			var xf: Transform3D = (child as Node3D).global_transform
+			var shape: Shape3D = (child as CollisionShape3D).shape
+			var points: Array[Vector2] = []
+			var top: float = xf.origin.y
+			if shape is BoxShape3D:
+				var half: Vector3 = (shape as BoxShape3D).size * 0.5
+				top += half.y
+				for sx: float in [-1.0, 0.0, 1.0]:
+					for sz: float in [-1.0, 0.0, 1.0]:
+						var at: Vector3 = xf * Vector3(sx * half.x, 0.0, sz * half.z)
+						points.append(Vector2(at.x, at.z))
+			elif shape is CylinderShape3D:
+				var cyl: CylinderShape3D = shape as CylinderShape3D
+				top += cyl.height * 0.5
+				points.append(Vector2(xf.origin.x, xf.origin.z))
+				for step: int in range(8):
+					var ring: Vector2 = Vector2.RIGHT.rotated(step * PI * 0.25) * cyl.radius
+					points.append(Vector2(xf.origin.x + ring.x, xf.origin.z + ring.y))
+			else:
+				continue
+			shapes.append({"points": points, "top": top, "name": str((node as Node).get_path()), "size": (shape as BoxShape3D).size if shape is BoxShape3D else Vector3.ZERO, "at": xf.origin})
+	return shapes
+
+
+## No solid prop (a collider whose top stands 0.4 m or more above the road) may intrude into a
+## carriageway: junction mouths, dead-end streets and carved lanes included. Bridge decks and their
+## rails are the road itself and are skipped.
+func _road_solid_checks() -> void:
+	_index_roads()
+	var offenders: Array[String] = []
+	var tested: int = 0
+	for shape: Dictionary in _solid_shapes():
+		if float(shape["top"]) < 0.4:
+			continue
+		var points: Array[Vector2] = shape["points"]
+		var near_bridge: bool = false
+		for bridge: Dictionary in world.bridges:
+			if (bridge["rect"] as Rect2).grow(4.0).has_point(points[4] if points.size() > 4 else points[0]):
+				near_bridge = true
+		if near_bridge:
+			continue
+		tested += 1
+		var deepest: float = 0.0
+		var deep_at: Vector2 = Vector2.ZERO
+		var road_name: Array = []
+		for point: Vector2 in points:
+			var probe: Array = []
+			var depth: float = _road_depth(point, probe)
+			if depth > deepest:
+				deepest = depth
+				deep_at = point
+				road_name = probe
+		if deepest > 0.3:
+			offenders.append("%5.2f m deep at (%.1f, %.1f) top %.2f on %s: box %s at %s %s" % [deepest, deep_at.x, deep_at.y, float(shape["top"]), road_name, shape["size"], shape["at"], shape["name"]])
+	offenders.sort()
+	offenders.reverse()
+	for line: String in offenders:
+		if not "/Calm" in line:
+			print("  ON ROAD " + line)
+	print("ROAD SOLIDS: %d solid props tested, %d stand on a carriageway" % [tested, offenders.size()])
+	_check(tested > 500 and offenders.is_empty(), "No solid prop stands on a road carriageway (%d of %d tested)" % [offenders.size(), tested])
 
 
 # --- Life ------------------------------------------------------------------------------------------------

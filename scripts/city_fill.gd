@@ -110,7 +110,7 @@ func build() -> void:
 		_frontage(road_index)
 	_coast_frontage()
 	_dress_alleys()
-	_calming()
+	_street_props()
 	_life()
 	_far_massing()
 	for key: Vector3i in _decor_cells:
@@ -121,8 +121,8 @@ func build() -> void:
 				(child as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				(child as GeometryInstance3D).visibility_range_end = 70.0
 				w._detail_ranges.append(child)
-	for key: Vector3i in _calm_cells:
-		var calm: Node3D = _calm_cells[key]
+	for key: Vector3i in _prop_cells:
+		var calm: Node3D = _prop_cells[key]
 		w._finish(calm)
 		for child: Node in calm.get_children():
 			if child is GeometryInstance3D and not child is Label3D:
@@ -147,7 +147,7 @@ func _key(p: Vector2) -> Vector2i:
 	return Vector2i(floori(p.x / CELL), floori(p.y / CELL))
 
 
-## Rects that stop a 1.3 m line of sight (buildings, walls, tall props), for the chicane planner.
+## Rects that stop a 1.3 m line of sight (buildings, walls, tall props), for the sightline planner.
 var _eye: Dictionary = {}
 
 func _add_eye(rect: Rect2) -> void:
@@ -823,31 +823,384 @@ func _dress_alleys() -> void:
 			w._trash_bags(Vector3(spot.x + back.x * 2.4, float(prop["y"]), spot.y + back.y * 2.4))
 
 
-# --- Traffic calming: staggered kerb islands -------------------------------------------------------
+# --- Street props: kerb corners and open ground ---------------------------------------------------------
 
-## Long straight streets get a chicane every ~100 m: two solid islands (a planted hedge with trees, a kiosk
-## or a billboard on a planter), one against each kerb 14 m apart, each reaching 1 m past the centre line, so
-## no straight line of sight runs the length of a street and cars weave through a ~5 m gap. They are real
-## solid props (collision matches what is seen) and stay clear of junctions, doors, plazas, bridges and
-## parked cars. Every island is recorded in `world.calming_islands` (corner polygons) for the tests.
-const CALM_SPACING: float = 100.0
-const CALM_LENGTH: float = 4.0
-const CALM_PAIR_GAP: float = 20.0
+## Nothing solid stands on a road. The 0.8 chicane islands that used to sit in the carriageway are gone: the
+## same vocabulary (clipped hedges with plane trees, kiosks, billboards on planters, construction hoardings)
+## is placed on the free gray ground BESIDE the streets instead, in two passes:
+##  1. Junction corners: at every street corner with open gray ground between the kerb and the buildings
+##     (where drivers cut across the pavement) a solid cluster stands 0.5 m off both kerbs, with 2 m of
+##     walkway left behind it. Never on a doorway, alley mouth, phone, crew spawn, park or Midtown's ring.
+##  2. Sightlines: where a long view (SIGHT_LIMIT+) runs out over open ground past a bend or a street's end,
+##     a hoarding, hedge row or billboard closes it (only ever where the clear-lot test passes: off the road).
+## Every cluster is recorded in `clusters` ({kind, center, u, v, hw, hd, corner}) for the tests.
 const KIOSKS: PackedStringArray = ["NEWS & TOBACCO", "FLOWERS", "PRETZELS", "LOTTO", "BUS TOKENS", "COFFEE", "MAPS & CARDS", "FRESH JUICE"]
 const BOARDS: PackedStringArray = ["MILLENNIUM SALE", "VISIT THE PIER", "HALCYON RADIO 98.7", "LOTTO TONIGHT", "GRAND OPENING", "CALL 555-0142", "RENT A STORAGE UNIT", "PORT HALCYON SAVINGS"]
-var _calm_index: int = 0
-var _calm_cells: Dictionary = {}
-
-
-## The longest 2D sightlines down the streets are found first (a ray along every street every 30 m, blocked
-## by lots, footprints, props and the islands already placed) and a chicane pair goes ~90-125 m along each
-## one that runs past SIGHT_LIMIT, in three passes, so islands land where the views actually are.
 const SIGHT_LIMIT: float = 110.0
+## A corner cluster keeps this far off both kerbs, and leaves this much walkway between it and the buildings.
+const CORNER_SETBACK: float = 0.5
+const CORNER_WALK: float = 2.0
+## Cluster kinds: a hedge with plane trees, a kiosk, a billboard on a planter, a lone tree in a planter, a hoarding.
+const HEDGE: int = 0
+const KIOSK: int = 1
+const BOARD: int = 2
+const TREE: int = 3
+const HOARD: int = 4
+## Half sizes (across, deep) per kind.
+const HALF: Array[Vector2] = [Vector2(2.4, 0.9), Vector2(2.0, 1.4), Vector2(2.6, 0.8), Vector2(0.95, 0.95), Vector2(5.0, 0.15)]
+var clusters: Array[Dictionary] = []
+var corners_dressed: int = 0
+var _prop_index: int = 0
+var _prop_cells: Dictionary = {}
 var _hot: Array = []
 
-func _calming() -> void:
-	# Existing islands (none at first) block rays; each new pair is registered as it is placed.
-	for pass_index: int in range(5):
+
+func _street_props() -> void:
+	_junction_corners()
+	_sightline_clusters()
+
+
+# --- Junction corners ---
+
+## Every crossing and T-junction: {at, arms: [[unit direction away from the junction, road half width], ...]}.
+## An arm exists where that street really runs on 10 m past the junction.
+func _junctions() -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	var boxes: Array[Rect2] = []
+	for road: Dictionary in w.roads:
+		var points: PackedVector2Array = road["points"]
+		var box: Rect2 = Rect2(points[0], Vector2.ZERO)
+		for point: Vector2 in points:
+			box = box.expand(point)
+		boxes.append(box.grow(float(road["width"]) * 0.5 + 2.0))
+	for a: int in range(w.roads.size()):
+		var road_a: Dictionary = w.roads[a]
+		if str(road_a["name"]).begins_with("FOUNTAIN"):
+			continue
+		var pa: PackedVector2Array = road_a["points"]
+		for b: int in range(a + 1, w.roads.size()):
+			var road_b: Dictionary = w.roads[b]
+			if str(road_b["name"]).begins_with("FOUNTAIN") or not boxes[a].intersects(boxes[b]):
+				continue
+			var pb: PackedVector2Array = road_b["points"]
+			# Each spot: [junction point, direction of road a there, direction of road b there].
+			var spots: Array[Array] = []
+			for i: int in range(pa.size() - 1):
+				for j: int in range(pb.size() - 1):
+					var hit: Variant = Geometry2D.segment_intersects_segment(pa[i], pa[i + 1], pb[j], pb[j + 1])
+					if hit != null:
+						spots.append([hit, (pa[i + 1] - pa[i]).normalized(), (pb[j + 1] - pb[j]).normalized()])
+			# A street that ends on the side of another (a T-junction, or a dead end cut in by the fill).
+			for order: int in range(2):
+				var ending: PackedVector2Array = pa if order == 0 else pb
+				var through: PackedVector2Array = pb if order == 0 else pa
+				var half: float = float((road_b if order == 0 else road_a)["width"]) * 0.5 + 1.0
+				for tip: int in [0, ending.size() - 1]:
+					for j: int in range(through.size() - 1):
+						var near: Vector2 = Geometry2D.get_closest_point_to_segment(ending[tip], through[j], through[j + 1])
+						if near.distance_to(ending[tip]) <= half:
+							var inward: Vector2 = (ending[1] - ending[0]).normalized() if tip == 0 else (ending[ending.size() - 2] - ending[ending.size() - 1]).normalized()
+							var along: Vector2 = (through[j + 1] - through[j]).normalized()
+							spots.append([near, inward, along] if order == 0 else [near, along, inward])
+			for spot: Array in spots:
+				var at: Vector2 = spot[0]
+				var key: String = "%d/%d" % [a, b]
+				var dup: bool = false
+				for other: Vector2 in seen.get(key, []):
+					dup = dup or other.distance_to(at) < 6.0
+				if dup:
+					continue
+				if not seen.has(key):
+					seen[key] = []
+				(seen[key] as Array).append(at)
+				var arms: Array = []
+				for entry: Array in [[a, spot[1], road_a], [b, spot[2], road_b]]:
+					for sign: float in [1.0, -1.0]:
+						var dir: Vector2 = (entry[1] as Vector2) * sign
+						if _street_runs(int(entry[0]), at + dir * 10.0):
+							arms.append([dir, float((entry[2] as Dictionary)["width"]) * 0.5])
+				found.append({"at": at, "arms": arms})
+	return found
+
+
+## True if road `road_index` has its centre line within 1.5 m of `p`.
+func _street_runs(road_index: int, p: Vector2) -> bool:
+	var points: PackedVector2Array = (w.roads[road_index] as Dictionary)["points"]
+	for index: int in range(points.size() - 1):
+		if p.distance_to(Geometry2D.get_closest_point_to_segment(p, points[index], points[index + 1])) < 1.5:
+			return true
+	return false
+
+
+## True if `p` is inside any carriageway (centre line + half width + `margin`), carved streets included.
+func _on_road(p: Vector2, margin: float) -> bool:
+	var key: Vector2i = _key(p)
+	if not _segs.has(key):
+		return false
+	for seg: Array in _segs[key]:
+		if p.distance_to(Geometry2D.get_closest_point_to_segment(p, seg[0], seg[1])) < float(seg[2]) + margin:
+			return true
+	return false
+
+
+func _junction_corners() -> void:
+	for junction: Dictionary in _junctions():
+		var at: Vector2 = junction["at"]
+		var arms: Array = junction["arms"]
+		if arms.size() < 3:
+			continue
+		arms.sort_custom(func(p: Array, q: Array) -> bool: return (p[0] as Vector2).angle() < (q[0] as Vector2).angle())
+		for index: int in range(arms.size()):
+			var arm_a: Array = arms[index]
+			var arm_b: Array = arms[(index + 1) % arms.size()]
+			var a: Vector2 = arm_a[0]
+			var b: Vector2 = arm_b[0]
+			var wedge: float = fposmod(b.angle() - a.angle(), TAU)
+			if wedge < deg_to_rad(50.0) or wedge > deg_to_rad(130.0):
+				continue
+			# The kerb corner: where the two kerb lines facing each other meet.
+			var na: Vector2 = Vector2(-a.y, a.x)
+			var nb: Vector2 = Vector2(b.y, -b.x)
+			var det: float = na.x * nb.y - na.y * nb.x
+			if absf(det) < 0.2:
+				continue
+			var ha: float = float(arm_a[1])
+			var hb: float = float(arm_b[1])
+			var apex: Vector2 = at + Vector2((ha * nb.y - na.y * hb) / det, (na.x * hb - ha * nb.x) / det)
+			_dress_corner(apex, (a + b).normalized())
+
+
+## One corner: the first kind (rotating through the four) that stands 0.5 m off both kerbs with its walkway free.
+func _dress_corner(apex: Vector2, out: Vector2) -> void:
+	var u: Vector2 = Vector2(-out.y, out.x)
+	for attempt: int in range(4):
+		var kind: int = (_prop_index + attempt) % 4
+		var half: Vector2 = HALF[kind]
+		var spot: Variant = null
+		# Slide the cluster out along the bisector until its outline is 0.5 m off every carriageway.
+		for step: int in range(0, 21):
+			var probe: Vector2 = apex + out * (0.25 * step)
+			if _outline_off_roads(probe, u, out, half):
+				spot = probe
+				break
+		if spot == null:
+			continue
+		var center: Vector2 = spot
+		if not _corner_ok(center, u, out, half):
+			continue
+		_register_cluster(kind, center, u, out, half, true)
+		_build_cluster(kind, center, u, out, half)
+		_prop_index += 1
+		corners_dressed += 1
+		return
+
+
+## The nine sample points of an oriented box (corners, edge midpoints, centre).
+func _outline(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	for sx: float in [-1.0, 0.0, 1.0]:
+		for sz: float in [-1.0, 0.0, 1.0]:
+			points.append(center + u * sx * half.x + v * sz * half.y)
+	return points
+
+
+func _outline_off_roads(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> bool:
+	for point: Vector2 in _outline(center, u, v, half):
+		if _on_road(point, CORNER_SETBACK):
+			return false
+	return true
+
+
+## The site tests every cluster passes: away from doors, alley mouths, phones, crew spawns, parked cars,
+## bridges, the Midtown ring and the public spaces city_detail.gd dresses. `reach` is the cluster's radius.
+func _site_ok(center: Vector2, reach: float) -> bool:
+	# Midtown's ring roads (the practice wheelman's loop, shop kerbs right on the street) stay as they are.
+	if absf(center.x) <= 100.0 and absf(center.y) <= 100.0:
+		_why("p-midtown")
+		return false
+	if w.door_within(center, reach + 3.0):
+		_why("p-door")
+		return false
+	for alley: Dictionary in alleys:
+		if (alley["at"] as Vector2).distance_to(center) < reach + 5.0:
+			_why("p-alley")
+			return false
+	for phone: Vector3 in w.payphones:
+		if Vector2(phone.x, phone.z).distance_to(center) < reach + 2.5:
+			_why("p-phone")
+			return false
+	for crew: Dictionary in w.crew_spawns.values():
+		for key: String in ["spawn", "car", "hq"]:
+			var spot: Vector3 = crew[key]
+			if Vector2(spot.x, spot.z).distance_to(center) < ((8.0 if key == "car" else 6.0) + reach):
+				_why("p-crew")
+				return false
+	for vehicle: Dictionary in w.parked_vehicles:
+		var spot: Vector3 = vehicle["at"]
+		if Vector2(spot.x, spot.z).distance_to(center) < reach + 4.0:
+			_why("p-car")
+			return false
+	for bridge: Dictionary in w.bridges:
+		if (bridge["rect"] as Rect2).grow(reach + 10.0).has_point(center):
+			_why("p-bridge")
+			return false
+	if CityDetail.is_path_entrance(center):
+		_why("p-path")
+		return false
+	return true
+
+
+## Geometry and ground tests for a corner cluster (its walkway is the 2 m behind it, toward the buildings).
+func _corner_ok(center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> bool:
+	var reach: float = half.length()
+	if not _site_ok(center, reach):
+		return false
+	var outline: Array[Vector2] = _outline(center, u, v, half)
+	for point: Vector2 in outline:
+		if not w._on_land(point):
+			_why("p-land")
+			return false
+		for angle: int in range(0, 8):
+			if not w._on_land(point + Vector2.RIGHT.rotated(angle * PI * 0.25) * 3.0):
+				_why("p-coast")
+				return false
+	var box: Rect2 = _bounds(PackedVector2Array(outline)).grow(1.0)
+	for index: int in range(_keepout.size()):
+		if box.intersects(_keepout_bounds[index]):
+			for point: Vector2 in outline:
+				if Geometry2D.is_point_in_polygon(point, _keepout[index]):
+					_why("p-park")
+					return false
+			if not Geometry2D.intersect_polygons(_corners(center, u, v, half.x, half.y), _keepout[index]).is_empty():
+				_why("p-park")
+				return false
+	var height: float = _height_at(center)
+	for point: Vector2 in outline:
+		if absf(_height_at(point) - height) > 0.02:
+			_why("p-slab")
+			return false
+	# Nothing tall already stands here (hand-placed props, poles, walls).
+	for point: Vector2 in outline:
+		if w.solid_near(point, 0.6):
+			_why("p-solid")
+			return false
+	# Lots, their rear zones and earlier clusters.
+	var low: Vector2i = _key(box.position)
+	var high: Vector2i = _key(box.end)
+	for cx: int in range(low.x, high.x + 1):
+		for cy: int in range(low.y, high.y + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			for source: Dictionary in [_obbs, _zones]:
+				if source.has(key):
+					for other: Array in source[key]:
+						if _obb_pair(center, u, v, half.x + 0.5, half.y + 0.5, other):
+							_why("p-lot")
+							return false
+	# Walkway: the prop plus 2 m behind it (and 0.5 m each end) is clear of buildings, walls and tall props.
+	var walk_center: Vector2 = center + v * CORNER_WALK * 0.5
+	var walk_half: Vector2 = Vector2(half.x + 0.5, half.y + CORNER_WALK * 0.5)
+	var walk_box: Rect2 = _bounds(_corners(walk_center, u, v, walk_half.x, walk_half.y)).grow(0.5)
+	for cx: int in range(_key(walk_box.position).x, _key(walk_box.end).x + 1):
+		for cy: int in range(_key(walk_box.position).y, _key(walk_box.end).y + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if _eye.has(key):
+				for rect: Rect2 in _eye[key]:
+					if walk_box.intersects(rect) and _obb_hits(walk_center, u, v, walk_half.x, walk_half.y, rect):
+						_why("p-walk")
+						return false
+	return true
+
+
+## Puts a cluster on the books: lot-style obstacle (so later passes keep clear), and occupied marks so
+## city_detail.gd's street signs and clutter stand outside it.
+func _register_cluster(kind: int, center: Vector2, u: Vector2, v: Vector2, half: Vector2, corner: bool) -> void:
+	_register_obb(_obbs, center, u, v, half.x, half.y)
+	clusters.append({"kind": kind, "center": center, "u": u, "v": v, "hw": half.x, "hd": half.y, "corner": corner})
+	w._occupied.append(center)
+	for point: Vector2 in _corners(center, u, v, half.x, half.y):
+		w._occupied.append(point)
+
+
+## Builds one cluster at `center` (u across, v deep). Merges like every other fill prop (one node per 96 m cell).
+func _build_cluster(kind: int, center: Vector2, u: Vector2, v: Vector2, half: Vector2) -> void:
+	w._target = _prop_node(center)
+	w._xf = Transform3D.IDENTITY
+	w._xf_yaw = 0.0
+	# Solid props must show up as blockers (city_detail.gd keeps its clutter off them).
+	w._blockers_off = false
+	var ground: float = maxf(_height_at(center), 0.0)
+	var yaw: float = atan2(-u.y, u.x)
+	var width: float = half.x * 2.0
+	var depth: float = half.y * 2.0
+	var facing: Vector3 = Vector3(v.x, 0, v.y)
+	var hedge: StandardMaterial3D = w._material(Color(0.2, 0.36, 0.2), 0.95, "grass")
+	var index: int = _prop_index
+	if kind == TREE:
+		w._tree(Vector3(center.x, ground, center.y), "plane")
+	else:
+		var kerb: StandardMaterial3D = w._material(Color(0.62, 0.6, 0.55), 0.9, "stucco")
+		# Kerbed base: solid, 0.3 m high.
+		w._box_with(Vector3(center.x, ground + 0.15, center.y), Vector3(width, 0.3, depth), kerb, true, yaw)
+		match kind:
+			HEDGE:
+				# A clipped hedge wall (1.5 m, solid) with two plane trees on it.
+				w._box_with(Vector3(center.x, ground + 1.05, center.y), Vector3(width - 0.5, 1.5, depth - 0.5), hedge, true, yaw)
+				for offset: float in [-0.25, 0.25]:
+					var tree_at: Vector2 = center + u * width * offset
+					w._cylinder(Vector3(tree_at.x, ground + 2.4, tree_at.y), 0.14, 3.0, Color(0.37, 0.28, 0.18), 6)
+					w._cylinder(Vector3(tree_at.x, ground + 4.2, tree_at.y), 1.3, 1.8, Color(0.33, 0.45, 0.26), 6)
+			KIOSK:
+				# A kiosk: a solid box with an awning and a sign on its two long faces.
+				var paint: Color = [Color(0.2, 0.42, 0.36), Color(0.62, 0.2, 0.18), Color(0.2, 0.3, 0.5), Color(0.72, 0.55, 0.16)][index % 4]
+				w._box_with(Vector3(center.x, ground + 1.55, center.y), Vector3(width - 0.4, 2.5, depth - 0.4), w._material(paint, 0.7, "panel"), true, yaw)
+				w._box_with(Vector3(center.x, ground + 2.9, center.y), Vector3(width + 0.2, 0.16, depth + 0.8), w._material(Color(0.9, 0.86, 0.78), 0.8), false, yaw)
+				var words: String = str(KIOSKS[index % KIOSKS.size()])
+				for way: float in [1.0, -1.0]:
+					var label_at: Vector3 = Vector3(center.x, ground + 2.35, center.y) + facing * way * (half.y - 0.15)
+					var label: Label3D = w._label(words, label_at, 36, Color(1.0, 0.95, 0.8), atan2(facing.x * way, facing.z * way), _fit(words, width - 0.9))
+					label.visibility_range_end = 60.0
+			_:
+				# A billboard on two posts over a hedge planter (the hedge is the solid at eye height).
+				w._box_with(Vector3(center.x, ground + 0.9, center.y), Vector3(width - 0.6, 1.2, depth - 0.3), hedge, true, yaw)
+				for offset: float in [-0.32, 0.32]:
+					var post_at: Vector2 = center + u * width * offset
+					w._box_with(Vector3(post_at.x, ground + 3.4, post_at.y), Vector3(0.3, 5.4, 0.3), w._material(Color(0.3, 0.3, 0.32), 0.6, "metal"), true, yaw)
+				var board_at: Vector3 = Vector3(center.x, ground + 5.0, center.y)
+				w._box_with(board_at, Vector3(width * 0.9, 2.4, 0.3), w._material(Color(0.14, 0.14, 0.18), 0.8), false, yaw)
+				var text: String = str(BOARDS[index % BOARDS.size()])
+				for way: float in [1.0, -1.0]:
+					var label: Label3D = w._label(text, board_at + facing * way * 0.2, 36, Color(1.0, 0.85, 0.4), atan2(facing.x * way, facing.z * way), _fit(text, width * 0.84))
+					label.visibility_range_end = 90.0
+	w._blockers_off = true
+
+
+## The label pixel size that fits `words` (36 px type, ~0.55 em per glyph) into `span` metres, at most 0.034.
+func _fit(words: String, span: float) -> float:
+	var longest: int = 1
+	for line: String in words.split("\n"):
+		longest = maxi(longest, line.length())
+	return minf(0.034, span / (float(longest) * 0.55 * 36.0))
+
+
+func _prop_node(at: Vector2) -> Node3D:
+	var key: Vector3i = Vector3i(floori(at.x / 96.0), floori(at.y / 96.0), 7)
+	if not _prop_cells.has(key):
+		var saved: Node3D = w._target
+		var node: Node3D = w._begin("Props %d %d" % [key.x, key.y])
+		w._target = saved
+		_prop_cells[key] = node
+	return _prop_cells[key] as Node3D
+
+
+# --- Sightlines over open ground ---
+
+## The longest 2D sightlines down the streets are found first (a ray along every street every 30 m, blocked
+## by lots, footprints, props and the clusters already placed). Where such a view runs on over open ground
+## (past a bend, or off a street's end) a hoarding, hedge row or billboard goes across it ~50-130 m along, on
+## ground that passes the full clear-lot test (so never on a carriageway), in three passes.
+func _sightline_clusters() -> void:
+	for pass_index: int in range(3):
 		_hot.clear()
 		for road_index: int in range(w.roads.size()):
 			var road: Dictionary = w.roads[road_index]
@@ -876,7 +1229,7 @@ func _calming() -> void:
 			var origin: Vector2 = entry[1]
 			var dir: Vector2 = entry[2]
 			var reach: float = minf(float(entry[0]), 400.0)
-			# A pair placed earlier this pass on this same line already cuts it.
+			# A cluster placed earlier this pass on this same line already cuts it.
 			var cut: bool = false
 			for other: Vector2 in placed_here:
 				var along: float = (other - origin).dot(dir)
@@ -885,32 +1238,33 @@ func _calming() -> void:
 					break
 			if cut:
 				continue
-			var done: bool = false
-			for distance: float in [105.0, 95.0, 115.0, 85.0, 125.0, 75.0, 65.0, 55.0, 45.0]:
-				if distance > reach - 12.0:
-					continue
-				var spot: Vector2 = origin + dir * distance
-				var found: int = _road_at(spot)
-				if found < 0:
-					continue
-				var road: Dictionary = w.roads[found]
-				var points: PackedVector2Array = road["points"]
-				var road_dir: Vector2 = Vector2.ZERO
-				for index: int in range(points.size() - 1):
-					if spot.distance_to(Geometry2D.get_closest_point_to_segment(spot, points[index], points[index + 1])) < 0.6:
-						road_dir = (points[index + 1] - points[index]).normalized()
-				if road_dir == Vector2.ZERO or absf(road_dir.cross(dir)) > 0.12:
-					continue
-				var start: Vector2 = spot if road_dir.dot(dir) > 0.0 else spot - road_dir * CALM_PAIR_GAP
-				var forward: Vector2 = road_dir
-				if _calm_ok(start, start + forward * CALM_PAIR_GAP, found):
-					_island_pair(start, forward, float(road["width"]) * 0.5)
-					placed_here.append(spot)
-					done = true
-					break
-			if not done and _try_hoarding(origin, dir, reach):
-				# No island fits along the street itself: the open ground the line runs out over is fenced off.
-				placed_here.append(origin + dir * 90.0)
+			var spot: Variant = _try_cluster(origin, dir, reach)
+			if spot != null:
+				placed_here.append(spot)
+
+
+## Tries to close the line from `origin` along `dir` with one prop across it, on clear ground off every road.
+## Returns where it stood (null if nothing fits).
+func _try_cluster(origin: Vector2, dir: Vector2, reach: float) -> Variant:
+	var across: Vector2 = Vector2(-dir.y, dir.x)
+	for distance: float in [100.0, 90.0, 110.0, 80.0, 120.0, 70.0, 60.0, 130.0, 50.0]:
+		if distance > reach - 12.0:
+			continue
+		var spot: Vector2 = origin + dir * distance
+		if _on_road(spot, 6.0):
+			continue
+		var kind: int = [HOARD, HEDGE, BOARD][_prop_index % 3]
+		var half: Vector2 = HALF[kind]
+		if not _clear(spot, across, dir, half.x * 2.0 + 0.4, half.y * 2.0 + 0.4) or not _site_ok(spot, half.x + 1.0):
+			continue
+		_register_cluster(kind, spot, across, dir, half, false)
+		if kind == HOARD:
+			_hoarding(spot, across, dir)
+		else:
+			_build_cluster(kind, spot, across, dir, half)
+		_prop_index += 1
+		return spot
+	return null
 
 
 ## Road index whose centre line passes within 0.6 m of `p` (-1 if none).
@@ -945,135 +1299,6 @@ func _march(p: Vector2, dir: Vector2) -> Array:
 	return [400.0, false]
 
 
-func _calm_ok(p: Vector2, q: Vector2, road_index: int) -> bool:
-	# Both islands lie on this one straight stretch of the street.
-	for spot: Vector2 in [p, q, (p + q) * 0.5]:
-		if _road_at(spot) != road_index:
-			_why("c-bend")
-			return false
-	# Midtown itself (the square inside its ring roads, where the practice wheelman loops and the shops stand
-	# right on the kerb) keeps its open boulevards: no chicanes inside |x|, |z| <= 100.
-	for spot: Vector2 in [p, q, (p + q) * 0.5]:
-		if absf(spot.x) <= 100.0 and absf(spot.y) <= 100.0:
-			_why("c-midtown")
-			return false
-	# Nothing solid already stands in the carriageway here (a wall or prop that intrudes on the road).
-	var along: Vector2 = (q - p).normalized()
-	var across: Vector2 = Vector2(-along.y, along.x)
-	for step: int in range(5):
-		for lateral: float in [-5.0, -2.5, 0.0, 2.5, 5.0]:
-			if w.solid_near(p.lerp(q, float(step) / 4.0) + across * lateral, 1.4):
-				_why("c-solid")
-				return false
-	for at: Vector2 in [p, q, (p + q) * 0.5]:
-		if not w._on_land(at):
-			_why("c-land")
-			return false
-		for poly: PackedVector2Array in _keepout:
-			if Geometry2D.is_point_in_polygon(at, poly):
-				_why("c-park")
-				return false
-		for bridge: Dictionary in w.bridges:
-			if (bridge["rect"] as Rect2).grow(22.0).has_point(at):
-				_why("c-bridge")
-				return false
-		if w.door_within(at, 5.0):
-			_why("c-door")
-			return false
-		# Chicane pairs keep 27 m from each other, so a car can always thread each one.
-		for poly: PackedVector2Array in w.calming_islands:
-			if (poly[0] + poly[2]) * 0.5 != Vector2.ZERO and ((poly[0] + poly[2]) * 0.5).distance_to(at) < 27.0:
-				_why("c-island")
-				return false
-		for vehicle: Dictionary in w.parked_vehicles:
-			var spot: Vector3 = vehicle["at"]
-			if Vector2(spot.x, spot.z).distance_to(at) < 7.0:
-				_why("c-car")
-				return false
-		# Junction zone: no other street within its half width + 4.5 m.
-		for dx: int in range(-2, 3):
-			for dy: int in range(-2, 3):
-				var key: Vector2i = _key(at) + Vector2i(dx, dy)
-				if not _segs.has(key):
-					continue
-				for seg: Array in _segs[key]:
-					if int(seg[3]) == road_index:
-						continue
-					if at.distance_to(Geometry2D.get_closest_point_to_segment(at, seg[0], seg[1])) < float(seg[2]) + 4.5:
-						_why("c-junction")
-						return false
-	return true
-
-
-func _island_pair(at: Vector2, u: Vector2, half: float) -> void:
-	var n: Vector2 = Vector2(-u.y, u.x)
-	var side: float = 1.0 if (_calm_index % 2 == 0) else -1.0
-	_island(at, u, n, half, side)
-	_island(at + u * CALM_PAIR_GAP, u, n, half, -side)
-
-
-## One island against the `side` kerb (+1 = the left of the direction of travel), reaching 1 m past the centre line.
-func _island(at: Vector2, u: Vector2, n: Vector2, half: float, side: float) -> void:
-	var width: float = half + 1.0
-	var lateral: float = side * (half - width * 0.5)
-	var center: Vector2 = at + n * lateral
-	var yaw: float = atan2(-n.y, n.x)
-	var corners: PackedVector2Array = PackedVector2Array()
-	for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
-		corners.append(center + n * corner.x * width * 0.5 + u * corner.y * CALM_LENGTH * 0.5)
-	w.calming_islands.append(corners)
-	w.calming_info.append({"center": center, "u": u, "n": n, "width": width, "side": side, "axis": center - n * lateral})
-	_register_obb(_obbs, center, n, u, width * 0.5, CALM_LENGTH * 0.5)
-	w._target = _calm_node(center)
-	w._xf = Transform3D.IDENTITY
-	w._xf_yaw = 0.0
-	var kind: int = _calm_index % 3
-	_calm_index += 1
-	var kerb: StandardMaterial3D = w._material(Color(0.62, 0.6, 0.55), 0.9, "stucco")
-	var hedge: StandardMaterial3D = w._material(Color(0.2, 0.36, 0.2), 0.95, "grass")
-	var facing: Vector3 = Vector3(u.x, 0, u.y)
-	# Kerbed base: solid, 0.3 m high.
-	w._box_with(Vector3(center.x, 0.17, center.y), Vector3(width, 0.3, CALM_LENGTH), kerb, true, yaw)
-	match kind:
-		0:
-			# A clipped hedge wall (1.5 m, solid) with two plane trees on it.
-			w._box_with(Vector3(center.x, 1.07, center.y), Vector3(width - 0.5, 1.5, CALM_LENGTH - 1.0), hedge, true, yaw)
-			for offset: float in [-0.25, 0.25]:
-				var tree_at: Vector2 = center + n * width * offset
-				w._cylinder(Vector3(tree_at.x, 2.4, tree_at.y), 0.14, 3.0, Color(0.37, 0.28, 0.18), 6)
-				w._cylinder(Vector3(tree_at.x, 4.2, tree_at.y), 1.5, 1.8, Color(0.33, 0.45, 0.26), 6)
-		1:
-			# A kiosk: a solid box with an awning and a sign.
-			var paint: Color = [Color(0.2, 0.42, 0.36), Color(0.62, 0.2, 0.18), Color(0.2, 0.3, 0.5), Color(0.72, 0.55, 0.16)][_calm_index % 4]
-			w._box_with(Vector3(center.x, 1.5, center.y), Vector3(width - 0.8, 2.5, CALM_LENGTH - 0.8), w._material(paint, 0.7, "panel"), true, yaw)
-			w._box_with(Vector3(center.x, 2.85, center.y), Vector3(width - 0.2, 0.16, CALM_LENGTH + 0.8), w._material(Color(0.9, 0.86, 0.78), 0.8), false, yaw)
-			for way: float in [1.0, -1.0]:
-				var label_at: Vector3 = Vector3(center.x, 2.3, center.y) + facing * way * (CALM_LENGTH * 0.5 - 0.35)
-				var label: Label3D = w._label(str(KIOSKS[_calm_index % KIOSKS.size()]), label_at, 36, Color(1.0, 0.95, 0.8), atan2(facing.x * way, facing.z * way), 0.012)
-				label.visibility_range_end = 60.0
-		_:
-			# A billboard on two posts over a hedge planter (the hedge is the solid at eye height).
-			w._box_with(Vector3(center.x, 0.9, center.y), Vector3(width - 0.6, 1.4, CALM_LENGTH - 1.2), hedge, true, yaw)
-			for offset: float in [-0.32, 0.32]:
-				var post_at: Vector2 = center + n * width * offset
-				w._box_with(Vector3(post_at.x, 3.4, post_at.y), Vector3(0.3, 5.4, 0.3), w._material(Color(0.3, 0.3, 0.32), 0.6, "metal"), true, yaw)
-			var board_at: Vector3 = Vector3(center.x, 5.0, center.y)
-			w._box_with(board_at, Vector3(width * 0.9, 2.4, 0.3), w._material(Color(0.14, 0.14, 0.18), 0.8), false, yaw)
-			for way: float in [1.0, -1.0]:
-				var label: Label3D = w._label(str(BOARDS[_calm_index % BOARDS.size()]), board_at + facing * way * 0.2, 36, Color(1.0, 0.85, 0.4), atan2(facing.x * way, facing.z * way), 0.034)
-				label.visibility_range_end = 90.0
-
-
-func _calm_node(at: Vector2) -> Node3D:
-	var key: Vector3i = Vector3i(floori(at.x / 96.0), floori(at.y / 96.0), 7)
-	if not _calm_cells.has(key):
-		var saved: Node3D = w._target
-		var node: Node3D = w._begin("Calm %d %d" % [key.x, key.y])
-		w._target = saved
-		_calm_cells[key] = node
-	return _calm_cells[key] as Node3D
-
-
 ## Where a long line of sight runs off a street's end across open ground, a construction hoarding (a solid
 ## 10 m plywood fence with bill posters) closes it: the city is mid-boom, sites are fenced off.
 const HOARDS: PackedStringArray = ["FUTURE HOME OF\nPORT HALCYON PLAZA", "COMING SOON\nLOFTS FROM $89,900", "SITE OFFICE\nNO ADMITTANCE", "BUILDING FOR THE\nNEW MILLENNIUM", "PARKING LOT\nCOMING 2000", "CALL 555-0177\nFOR LEASING"]
@@ -1095,10 +1320,11 @@ func _try_hoarding(origin: Vector2, dir: Vector2, reach: float) -> bool:
 
 
 func _hoarding(at: Vector2, across: Vector2, dir: Vector2) -> void:
-	_register_obb(_obbs, at, across, dir, 5.5, 1.0)
-	w._target = _calm_node(at)
+	w._target = _prop_node(at)
 	w._xf = Transform3D.IDENTITY
 	w._xf_yaw = 0.0
+	# Its solid fence shows up as a blocker (city_detail.gd keeps its clutter off it).
+	w._blockers_off = false
 	var yaw: float = atan2(-across.y, across.x)
 	var ground: float = maxf(_height_at(at), 0.0)
 	var planks: StandardMaterial3D = w._material(Color(0.52, 0.46, 0.36), 0.9, "planks")
@@ -1117,6 +1343,7 @@ func _hoarding(at: Vector2, across: Vector2, dir: Vector2) -> void:
 		var label: Label3D = w._label(text, poster_at + facing * way * 0.02, 36, Color(0.5, 0.12, 0.1), atan2(facing.x * way, facing.z * way), 0.0135)
 		label.outline_size = 0
 		label.visibility_range_end = 60.0
+	w._blockers_off = true
 
 
 # --- New streets through the big empty blocks -----------------------------------------------------
@@ -1286,10 +1513,6 @@ func _park_car(center: Vector2, front: Vector2, u: Vector2, size: Vector2) -> vo
 		for key: String in ["spawn", "car", "hq"]:
 			var spot: Vector3 = crew[key]
 			if Vector2(spot.x, spot.z).distance_to(at) < 12.0:
-				return
-	for poly: PackedVector2Array in w.calming_islands:
-		for point: Vector2 in poly:
-			if point.distance_to(at) < 9.0:
 				return
 	# Heading along the street, parked nose-first either way.
 	var heading: float = atan2(u.x, u.y) + (0.0 if rng.randf() < 0.5 else PI)

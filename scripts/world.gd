@@ -79,15 +79,11 @@ var city_fill: RefCounted
 var _blockers_off: bool = false
 var _road_boxes: Array[Rect2] = []
 var _solid_grid: Dictionary = {}
-## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan chicanes.
+## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan its sightline props.
 var eye_blockers: Array[Rect2] = []
 ## Buildings the fill passes made, for the far-distance stand-ins (city_fill.gd builds one merged, vertex-coloured
 ## massing mesh per 96 m cell from these): {center (x/z), size (frontage, height, depth), yaw, color}.
 var lod_lots: Array[Dictionary] = []
-## Corner polygons of the traffic-calming kerb islands the fill pass put in the streets (see city_fill.gd).
-var calming_islands: Array[PackedVector2Array] = []
-## Per island: {center, u (along the street), n (across), width, side (which kerb), axis (the street's centre line at the island)}.
-var calming_info: Array[Dictionary] = []
 ## Beyond this distance a fill building is drawn as its massing box only.
 const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
@@ -492,7 +488,7 @@ func door_near(at: Vector3, radius: float = 2.2) -> int:
 ## point on the road nearest `from` to the point on the road nearest `to` (y = 0).
 ## Empty if unreachable.
 func route(from: Vector3, to: Vector3) -> PackedVector3Array:
-	return _weave_islands(_route_raw(from, to))
+	return _route_raw(from, to)
 
 func _route_raw(from: Vector3, to: Vector3) -> PackedVector3Array:
 	if _graph_points.is_empty():
@@ -559,53 +555,10 @@ func wheelman_path(from: Vector3) -> PackedVector3Array:
 	path.append_array(road_loop)
 	return path
 
-## Adds waypoints in the open lane wherever the route runs into a traffic-calming kerb island, so the GPS line
-## and the practice wheelman thread each chicane instead of running down the centre line into it (`route()`
-## returns the woven path; the extra distance is a few metres per chicane).
-func _weave_islands(path: PackedVector3Array) -> PackedVector3Array:
-	if calming_info.is_empty():
-		return path
-	var woven: PackedVector3Array = PackedVector3Array()
-	for index: int in range(path.size()):
-		woven.append(path[index])
-		if index + 1 >= path.size():
-			break
-		var a: Vector2 = Vector2(path[index].x, path[index].z)
-		var b: Vector2 = Vector2(path[index + 1].x, path[index + 1].z)
-		var length: float = a.distance_to(b)
-		if length < 0.5:
-			continue
-		var hits: Array = []
-		for info: Dictionary in calming_info:
-			var centre: Vector2 = info["center"]
-			if centre.distance_to((a + b) * 0.5) > length * 0.5 + 8.0:
-				continue
-			var half_reach: float = float(info["width"]) * 0.5 + 1.6
-			var t: float = (centre - a).dot((b - a) / length)
-			if t < 0.0 or t > length:
-				continue
-			var closest: Vector2 = a + (b - a) / length * t
-			var offset: Vector2 = closest - centre
-			if absf(offset.dot(info["n"])) < half_reach and absf(offset.dot(info["u"])) < 4.0:
-				hits.append([t, info])
-		hits.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) < float(q[0]))
-		for hit: Array in hits:
-			var info: Dictionary = hit[1]
-			var free: Vector2 = (info["axis"] as Vector2) - (info["n"] as Vector2) * float(info["side"]) * float(info["width"]) * 0.5
-			# Approach and exit points 9 m either side of the island, in the open lane (the pure-pursuit bot
-			# switches waypoint 7 m early, so it clears the island's edge before it turns for the next one).
-			var heading: Vector2 = (b - a) / length
-			var approach: Vector2 = free - heading * 9.0
-			var leave: Vector2 = free + heading * 9.0
-			woven.append(Vector3(approach.x, 0.0, approach.y))
-			woven.append(Vector3(free.x, 0.0, free.y))
-			woven.append(Vector3(leave.x, 0.0, leave.y))
-	return woven
-
 ## Length in metres of `route(from, to)` plus the walk from each point to its road (INF if
 ## there is no way through).
 func route_length(from: Vector3, to: Vector3) -> float:
-	# The street-graph distance (the crews' fairness metric); `route()` adds a few metres of chicane weave.
+	# The street-graph distance (the crews' fairness metric).
 	var path: PackedVector3Array = _route_raw(from, to)
 	if path.is_empty():
 		return INF
@@ -1123,6 +1076,17 @@ func _lamp(at: Vector3, toward: Vector3) -> void:
 	_box(at + toward * 0.7 + Vector3(0, 6.94, 0), Vector3(1.5 if absf(toward.x) > 0.5 else 0.12, 0.12, 0.12 if absf(toward.x) > 0.5 else 1.5), steel)
 	_box_with(at + toward * 1.4 + Vector3(0, 6.86, 0), Vector3(0.6, 0.14, 0.34) if absf(toward.x) > 0.5 else Vector3(0.34, 0.14, 0.6), _glow(Color(1.0, 0.66, 0.28), 2.4))
 
+## True if a world x/z point lies on a carriageway (within half a street's width + `margin` of its centre line).
+## Street furniture and lamps use it to keep off the road surface.
+func _on_carriageway(at: Vector2, margin: float = 0.0) -> bool:
+	for road: Dictionary in roads:
+		var half: float = float(road["width"]) * 0.5 + margin
+		var points: PackedVector2Array = road["points"]
+		for index: int in range(points.size() - 1):
+			if at.distance_squared_to(Geometry2D.get_closest_point_to_segment(at, points[index], points[index + 1])) < half * half:
+				return true
+	return false
+
 ## True if a registered door lies within `radius` (x/z) of a world point.
 func door_within(at: Vector2, radius: float) -> bool:
 	for door: Dictionary in interactable_doors:
@@ -1154,7 +1118,7 @@ func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 				_:
 					at = Vector3(rect.end.x - 1.1, 0.16, rect.position.y + rect.size.y * t)
 					toward = Vector3.RIGHT
-			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6):
+			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6) and not _on_carriageway(_w2(Vector2(at.x, at.z)), 0.3):
 				_lamp(at, toward)
 
 ## A city block: raised paved plinth with lamps. Returns the buildable interior.
@@ -1248,6 +1212,8 @@ func _mesh_at(mesh: Mesh, at: Vector3, material: Material, angle: float = 0.0, t
 # --- Street life: furniture, litter, puddles and steam -------------------------------------
 
 func _free_spot(at: Vector2, clearance: float) -> bool:
+	if _on_carriageway(at, clearance + 0.3):
+		return false
 	for footprint: Rect2 in footprints:
 		if footprint.grow(clearance).has_point(at):
 			return false
