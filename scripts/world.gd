@@ -1082,7 +1082,10 @@ func _walkway(at: Vector3, length: float, color: Color) -> void:
 
 ## Generic city building with windows on every face (some lit), a roof cap and an optional
 ## street sign. `front` is the outward normal of the entrance facade.
-func _tower(center: Vector2, size: Vector3, color: Color, tex: String, front: Vector3 = Vector3.BACK, sign_text: String = "", sign_color: Color = Color(0.94, 0.86, 0.64), roof: Color = Color(0.29, 0.31, 0.30), lit: float = 0.35) -> void:
+func _tower(center: Vector2, size: Vector3, color: Color, tex: String, front: Vector3 = Vector3.BACK, sign_text: String = "", sign_color: Color = Color(0.94, 0.86, 0.64), roof: Color = Color(0.29, 0.31, 0.30), lit: float = 0.35, enter: String = "") -> void:
+	# A prefab kind in `enter` makes this hand-placed business an enterable building (Map 0.8).
+	if enter != "" and _tower_prefab(enter, center, size, color, front, sign_text):
+		return
 	var at: Vector3 = Vector3(center.x, 0, center.y)
 	_footprint(Rect2(center.x - size.x * 0.5, center.y - size.z * 0.5, size.x, size.z))
 	_box(at + Vector3(0, size.y * 0.5, 0), size, color, true, tex)
@@ -2216,8 +2219,8 @@ func _build_solana_heights() -> void:
 	_crew_spawn("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161))
 	# Cantina and auto shop.
 	_block(Rect2(94, -200, 50, 44), Color(0.7, 0.6, 0.48), "tiles")
-	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7)
-	_tower(Vector2(131, -170), Vector3(22, 6.5, 16), Color(0.66, 0.64, 0.6), "stucco", Vector3.BACK, "TALLER  MECANICO", Color(0.95, 0.55, 0.25), Color(0.4, 0.4, 0.42), 0.3)
+	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7, "bar")
+	_tower(Vector2(131, -170), Vector3(22, 6.5, 16), Color(0.66, 0.64, 0.6), "stucco", Vector3.BACK, "TALLER  MECANICO", Color(0.95, 0.55, 0.25), Color(0.4, 0.4, 0.42), 0.3, "auto_shop")
 	_box(Vector3(131, 2.2, -161.9), Vector3(9, 4.4, 0.2), Color(0.2, 0.2, 0.22), false, "metal")
 	_car_prop(Vector3(122, 0.16, -186), 0.3, Color(0.55, 0.2, 0.15))
 	_car_prop(Vector3(138, 0.16, -188), -0.2, Color(0.8, 0.78, 0.7))
@@ -2334,8 +2337,8 @@ func _build_kingsway() -> void:
 	_tower(Vector2(188, 128), Vector3(16, 19, 22), concrete, "panel", Vector3.LEFT, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.35)
 	# Corner store, laundromat, mural wall.
 	_block(Rect2(94, 94, 50, 50), Color(0.5, 0.5, 0.49), "tiles")
-	_tower(Vector2(106, 106), Vector3(16, 5, 14), Color(0.8, 0.78, 0.72), "panel", Vector3.LEFT, "KWIK STOP  24/7", Color(0.35, 1.0, 0.6), Color(0.3, 0.3, 0.3), 0.8)
-	_tower(Vector2(106, 125), Vector3(16, 5, 14), Color(0.76, 0.76, 0.8), "panel", Vector3.LEFT, "SPIN CITY", Color(0.4, 0.8, 1.0), Color(0.3, 0.3, 0.3), 0.8)
+	_tower(Vector2(106, 106), Vector3(16, 5, 14), Color(0.8, 0.78, 0.72), "panel", Vector3.LEFT, "KWIK STOP  24/7", Color(0.35, 1.0, 0.6), Color(0.3, 0.3, 0.3), 0.8, "corner_store")
+	_tower(Vector2(106, 125), Vector3(16, 5, 14), Color(0.76, 0.76, 0.8), "panel", Vector3.LEFT, "SPIN CITY", Color(0.4, 0.8, 1.0), Color(0.3, 0.3, 0.3), 0.8, "row_shop")
 	_box(Vector3(135, 2, 118), Vector3(0.6, 4, 36), Color(0.6, 0.6, 0.58), true, "panel")
 	for index: int in range(8):
 		_box(Vector3(134.66, 1.2 + (index % 3) * 0.9, 102 + index * 4.2), Vector3(0.06, 1.6, 3.4), tags[index % 4])
@@ -2406,7 +2409,7 @@ func _build_harbor() -> void:
 		_box(Vector3(-60 + index * 10, 0.6, -109.8), Vector3(6, 1.2, 2), Color(0.5, 0.5, 0.48), true, "panel")
 	_landmark("COLD STORAGE 7", Vector3(-44, 0, -106))
 	# Harbor office, trailers and light towers.
-	_tower(Vector2(64, -130), Vector3(18, 7, 12), Color(0.8, 0.76, 0.66), "panel", Vector3.LEFT, "HARBOR OFFICE", Color(0.95, 0.85, 0.5), Color(0.3, 0.3, 0.3), 0.6)
+	_tower(Vector2(64, -130), Vector3(18, 7, 12), Color(0.8, 0.76, 0.66), "panel", Vector3.LEFT, "HARBOR OFFICE", Color(0.95, 0.85, 0.5), Color(0.3, 0.3, 0.3), 0.6, "row_shop")
 	for index: int in range(3):
 		_container(Vector3(20 + index * 3.2, 0, -122), colors[index + 2], true)
 		_container(Vector3(20 + index * 3.2, 0, -110), colors[index], true)
@@ -2478,14 +2481,14 @@ func _build_canal_market() -> void:
 	# Both bank blocks stop short of North Shore Road's curve (their corners used to put a
 	# kerbed plinth on the carriageway at x -228 and x -100, z -206).
 	_block(Rect2(-229, -205, 42, 49), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-210, -186), Vector3(17, 7, 36), Color(0.6, 0.64, 0.66), "metal", Vector3.RIGHT, "FISH HALL", Color(0.5, 0.9, 1.0), Color(0.3, 0.33, 0.35), 0.2)
+	_tower(Vector2(-210, -186), Vector3(17, 7, 36), Color(0.6, 0.64, 0.66), "metal", Vector3.RIGHT, "FISH HALL", Color(0.5, 0.9, 1.0), Color(0.3, 0.33, 0.35), 0.2, "warehouse")
 	for index: int in range(3):
 		_box(Vector3(-199.5, 2.2, -198 + index * 12), Vector3(0.2, 4.4, 6), Color(0.3, 0.33, 0.35), false, "metal")
 		_box(Vector3(-198.4, 0.76, -198 + index * 12), Vector3(2, 1.2, 6), Color(0.5, 0.5, 0.48), true, "panel")
 	_landmark("FISH HALL", Vector3(-196, 0, -186))
 	# East bank: warehouse lofts over the basin, with kiosks on the quay.
 	_block(Rect2(-149, -201, 55, 45), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-122, -190), Vector3(40, 13, 18), Color(0.6, 0.42, 0.3), "brick", Vector3.BACK, "CANAL LOFTS", Color(1.0, 0.8, 0.5), Color(0.28, 0.25, 0.24), 0.45)
+	_tower(Vector2(-122, -190), Vector3(40, 13, 18), Color(0.6, 0.42, 0.3), "brick", Vector3.BACK, "CANAL LOFTS", Color(1.0, 0.8, 0.5), Color(0.28, 0.25, 0.24), 0.45, "walkup")
 	for at: Vector3 in [Vector3(-142, 0.16, -170), Vector3(-130, 0.16, -166), Vector3(-196, 0.16, -150 + -14)]:
 		_box(at + Vector3(0, 1.4, 0), Vector3(4, 2.8, 3), Color(0.25, 0.42, 0.36), true, "planks")
 		_box(at + Vector3(0, 3.0, 0), Vector3(4.8, 0.3, 3.8), Color(0.72, 0.36, 0.22), false, "roof")
@@ -2512,7 +2515,7 @@ func _build_canal_market() -> void:
 	_landmark("CANAL MARKET", Vector3(-148, 0, -126))
 	# East of the square, a covered produce hall.
 	_block(Rect2(-117, -144, 23, 38), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-105.5, -125), Vector3(16, 6, 30), Color(0.74, 0.7, 0.6), "stucco", Vector3.LEFT, "PRODUCE", Color(0.5, 1.0, 0.5), Color(0.72, 0.36, 0.22), 0.5)
+	_tower(Vector2(-105.5, -125), Vector3(16, 6, 30), Color(0.74, 0.7, 0.6), "stucco", Vector3.LEFT, "PRODUCE", Color(0.5, 1.0, 0.5), Color(0.72, 0.36, 0.22), 0.5, "warehouse")
 
 ## Waterfront landmarks that went with the crew turf: Lantern Point's pagoda on its
 ## headland, the Solana lookout on the north-east cape, Morris Marina's jetty and the
@@ -2648,6 +2651,46 @@ const FILL_STYLES: Dictionary = {
 	"neon": {"height": Vector2(7.0, 13.0), "colors": [Color(0.16, 0.14, 0.2), Color(0.2, 0.16, 0.24), Color(0.12, 0.14, 0.2), Color(0.24, 0.16, 0.2)], "tex": "panel", "lit": 0.6, "width": Vector2(14.0, 22.0), "signs": ["LUCKY DRAGON", "SILVER SLIPPER", "CASINO ORIOLE", "THE 400 CLUB", "SPIN PALACE", "DICE & DIAMONDS", "AMBER STAR CLUB", "CLUB ORBIT"], "sign_color": Color(1.0, 0.45, 0.85)},
 	"flats": {"height": Vector2(10.0, 20.0), "colors": [Color(0.64, 0.6, 0.52), Color(0.58, 0.62, 0.6), Color(0.68, 0.56, 0.48), Color(0.52, 0.54, 0.6)], "tex": "stucco", "lit": 0.4, "width": Vector2(14.0, 22.0), "signs": [], "sign_color": Color(1.0, 0.9, 0.7)},
 }
+
+## An enterable prefab standing where a hand-placed `_tower` would have been (kit or world frame): the
+## footprint is the tower's, the front faces the same way. False if the library or the kind is missing or the
+## lot is smaller than the prefab's minimum.
+func _tower_prefab(kind: String, center: Vector2, size: Vector3, color: Color, front: Vector3, title: String) -> bool:
+	var lib: Variant = _prefab_library()
+	if lib == null or not lib.kinds().has(kind):
+		return false
+	var world_front: Vector3 = (_xf.basis * front).normalized()
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = size.x if across else size.z
+	var depth: float = size.z if across else size.x
+	var least: Vector2 = lib.min_size(kind)
+	if frontage < least.x or depth < least.y:
+		return false
+	var at: Vector2 = _w2(center)
+	var floors: int = clampi(int(size.y / 3.4), 1, int(lib.max_floors(kind)))
+	var seed: int = absi(int(at.x * 131.0) * 7919 + int(at.y * 977.0)) + 31
+	var palette: Array[Color] = [color, color.lightened(0.35), color.darkened(0.35)]
+	var saved_xf: Transform3D = _xf
+	var saved_yaw: float = _xf_yaw
+	var saved_target: Node3D = _target
+	_begin_building(kind, true, title)
+	var record: Dictionary = _building_open
+	var node: Variant = lib.build(self, kind, at, Vector2(frontage, depth), lib.front_yaw(world_front), floors, seed, {"palette": palette, "sign": title, "lit": 0.4, "district": "hand"})
+	_end_building()
+	_xf = saved_xf
+	_xf_yaw = saved_yaw
+	_target = saved_target
+	if node == null:
+		buildings.erase(record)
+		return false
+	if (record["footprints"] as Array).is_empty():
+		_footprint(Rect2(center.x - size.x * 0.5, center.y - size.z * 0.5, size.x, size.z))
+		(record["footprints"] as Array).append(footprint_polys.size() - 1)
+		buildings.pop_back()
+	_finish(node as Node3D)
+	limit_range(node as Node3D, NEAR_RANGE)
+	lod_lots.append({"center": at, "size": Vector3(size.x, floors * 3.4 + 1.2, size.z), "yaw": _xf_yaw, "color": color})
+	return true
 
 ## Which prefab kinds fill each generic style (best fit first); the high-rises stay solid towers.
 const FILL_PREFABS: Dictionary = {

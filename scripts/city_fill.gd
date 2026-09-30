@@ -339,6 +339,7 @@ func _dist_segment_lot(a: Vector2, b: Vector2, center: Vector2, u: Vector2, v: V
 
 var fail_reasons: Dictionary = {}
 var _alley_props: Array[Dictionary] = []
+var _need_sides: bool = false
 var _setback: float = SETBACK
 var _coast_gap: float = 8.0
 var _apron_front: float = 0.0
@@ -406,6 +407,13 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 			if w.solid_near(center - v * (hd + reach) + u * lateral, 0.5):
 				_why("furniture")
 				return false
+	if _need_sides:
+		# Side-door kinds: the strip beside each wall is free of poles and props too.
+		for side: float in [-1.0, 1.0]:
+			for step: int in range(-2, 3):
+				if w.solid_near(center + u * side * (hw + 1.7) + v * (float(step) * hd * 0.4), 0.5):
+					_why("side")
+					return false
 	var rear: Array = [center + v * (hd + 1.6), u, v, hw, 1.6]
 	var rear_box: Rect2 = _bounds(_corners(rear[0], u, v, hw, 1.6))
 	for key: Vector2i in [_key(rear[0]), _key(center + v * (hd + 0.4)), _key(center + v * (hd + 2.8))]:
@@ -518,6 +526,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 		var limits: Array = _limits(kind)
 		# A wide-gap kind keeps 3.4 m from the lot before it (its side door).
 		var wide: bool = WIDE_KINDS.has(kind)
+		_need_sides = wide
 		if run_start >= 0.0 and (wide or last_wide) and last_gap < WIDE_GAP:
 			t += WIDE_GAP - last_gap
 			last_gap = WIDE_GAP
