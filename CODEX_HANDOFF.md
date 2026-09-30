@@ -799,3 +799,27 @@ Then: merge all into dev, run the full regression plus GPU perf, bump to 0.8, bu
   - About a quarter of the land is open rim.
   - Startup time: consider building interiors lazily.
   - `free_roam` with --fixed-fps 60 fails one wheelman check. That predates 0.8; normal mode passes.
+## 2026-09-30 afternoon — Claude Desktop (lead): 0.9 PLAYTEST POLISH — IN PROGRESS
+
+The user's brief for tonight's friends playtest:
+- street props off the road;
+- Halcyon Trust stairs;
+- phone voice calls (No Big Deal style);
+- crew HQ interiors;
+- the door issue;
+- menu cleanup;
+- a Claude Cloud handoff.
+
+Branches (worktrees in `outputs\wt\<name>`, each merged into `dev` by the lead):
+- [ ] `lead/street-props`: chicane islands leave the carriageway. Kiosks, boards and hedge-trees move to corner
+  pads and open gray lots (city_fill.gd).
+- [ ] `lead/stairs`: the Halcyon roof stair ends on an open-air terrace. BuildingKit flights get closed undersides,
+  open-side rails, and no capsule-trapping slots.
+- [ ] `lead/crew-hq`: four walk-in crew compounds (new `scripts/buildings/crew_hq.gd`), with the spawn inside and the
+  phone on a desk.
+- [ ] `lead/phone-voice`: voice calls through crew phones (P to dial, 1.2 m pickup, 3.5 m speaker, PHONE relay mode).
+  It also fixes the "door issue": host voice routing no longer scans all ~1,270 doors and ~700 interiors per frame.
+- [x] `dev`: title menu cleanup. CONTRACT is retired from the menu, the order is ONLINE, SOLO WEEK, FREE ROAM, and
+  the version label is live. Lobby labels are updated. Design §12 has the phone voice decision.
+- [ ] Merge, full suites, `tools\build_playtest.ps1` (installs into `play-fast-talkers`), then the cloud handoff
+  `docs/tasks/PLAYTEST_0_9_CLOUD.md`.
