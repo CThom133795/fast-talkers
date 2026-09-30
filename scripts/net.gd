@@ -334,6 +334,8 @@ func steam_autostart() -> void:
 		steam_status = "Steam add-on not installed"
 		return
 	steam_status = steam_unavailable_reason()
+	# One line in the player's log (user://logs/godot.log) so a friend's Steam trouble can be diagnosed.
+	print("[steam] %s" % ("ready (app %d)" % int(steam().get("app_id")) if steam_status.is_empty() else steam_status))
 	if not steam_status.is_empty():
 		return
 	var launch: int = int(steam().call("launch_lobby"))

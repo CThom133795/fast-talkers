@@ -967,6 +967,7 @@ func _enter_buy() -> void:
 		# The objective board sits in the buy panel (read the board, then buy).
 		g._show_buy()
 	_system("%s, DAY %d OF %d  ·  WEEK %d" % [day_name(), day, week_days, week])
+	print("[week] Week %d, %s (Day %d of %d), %s, %d players" % [week, day_name(), day, week_days, my_role(), net.players.size()])
 	for line: String in morning_paper():
 		_system(line)
 	g._message("%s.  %s" % [day_name(), role_line()], 8.0)

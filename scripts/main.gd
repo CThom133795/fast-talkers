@@ -306,6 +306,9 @@ func _ready() -> void:
 	_show_title()
 	if "--capture" in OS.get_cmdline_user_args():
 		_capture_views.call_deferred()
+	# `Fast Talkers.exe -- --solo-week` jumps straight into SOLO WEEK (exe smoke tests, quick demos).
+	elif "--solo-week" in OS.get_cmdline_user_args():
+		online.start_solo_week.call_deferred()
 
 func _add_car(at: Vector3, yaw: float, paint: Color, title: String, stripe: Color, type: String = "sedan") -> FastCar:
 	var ride: FastCar = CarScript.new()
