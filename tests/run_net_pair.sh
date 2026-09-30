@@ -7,8 +7,16 @@ PORT="${1:-24651}"
 STEPS="${2:-lobby}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd "$HERE/.." && pwd)"
-WORK="$(cd "$PROJECT/../../work" && pwd)"
-GODOT="${GODOT:-$WORK/tools/godot/Godot_v4.4.1-stable_win64_console.exe}"
+# Local checkout: logs go to ../../work next to the portable Godot. Cloud clone: a temp dir,
+# and Godot from $GODOT, PATH or the cloud_setup.sh install.
+if [ -d "$PROJECT/../../work" ]; then
+	WORK="$(cd "$PROJECT/../../work" && pwd)"
+	DEFAULT_GODOT="$WORK/tools/godot/Godot_v4.4.1-stable_win64_console.exe"
+else
+	WORK="$(mktemp -d)"
+	DEFAULT_GODOT="$(command -v godot || echo "$HOME/.godot-4.4.1/Godot_v4.4.1-stable_linux.x86_64")"
+fi
+GODOT="${GODOT:-$DEFAULT_GODOT}"
 HOST_LOG="$WORK/net-host.log"
 CLIENT_LOG="$WORK/net-client.log"
 LIMIT="${NET_PAIR_LIMIT:-70}"   # hard per-process cap in seconds (the scripts' own watchdog fires at 45 s)

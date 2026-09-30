@@ -237,6 +237,8 @@ func _step_lobby_host() -> void:
 		return
 	var client_id: int = _other_id()
 	_check(client_id > 1, "client id is not 1 (got %d)" % client_id)
+	# The host lists a placeholder on connect and renames it when the client's hello lands.
+	await _wait_until(func() -> bool: return str(_players().get(client_id, {}).get("name", "")) == CLIENT_NAME, 5.0)
 	_check(str(_players().get(client_id, {}).get("name", "")) == CLIENT_NAME, "client name arrived at host (got '%s')" % str(_players().get(client_id, {}).get("name", "")))
 	_check(str(_players().get(1, {}).get("name", "")) == HOST_NAME, "host's own name is in players")
 	var host_crew: String = str(_players().get(1, {}).get("crew", ""))

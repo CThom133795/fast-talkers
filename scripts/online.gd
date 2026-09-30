@@ -61,6 +61,9 @@ var _fired_at: float = -10.0
 ## Host only: which crews killed which this round ("a>b" keys).
 var _kills: Dictionary = {}
 var _round_rotation: int = 0
+## Pellets that hit the same player in one frame go to the host as one summed claim
+## (the host accepts at most 25 claims a second per shooter).
+var _pending_hits: Dictionary = {}
 
 
 func setup(owner_game: Node, owner_net: FastNet) -> void:
@@ -110,13 +113,14 @@ func show_lobby() -> void:
 		lobby = (load("res://scripts/lobby_ui.gd") as GDScript).new()
 		game.hud.get_parent().add_child(lobby)
 		lobby.call("setup", net)
+		lobby.visible = false
 		lobby.connect("back_requested", func() -> void:
 			lobby.visible = false
 			if not active:
 				net.leave()
 				game._show_title())
 	game.menu.hide()
-	lobby.visible = true
+	lobby.call("open")
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
@@ -284,8 +288,20 @@ func _holding(item: int) -> bool:
 
 ## main._on_shot hit a remote player: the host validates and forwards the damage.
 func claim_hit(remote: FastRemote, amount: float, head: bool, origin: Vector3, point: Vector3) -> void:
-	net.send_claim_hit(remote.peer_id, amount, head, origin, point, game.player.weapon_id)
+	var entry: Dictionary = _pending_hits.get(remote.peer_id, {"amount": 0.0, "head": false, "origin": origin, "point": point})
+	entry["amount"] = float(entry["amount"]) + amount
+	entry["head"] = bool(entry["head"]) or head
+	_pending_hits[remote.peer_id] = entry
 	remote.flash_hit()
+	if _pending_hits.size() == 1 and float(entry["amount"]) == amount:
+		_flush_hits.call_deferred()
+
+
+func _flush_hits() -> void:
+	for victim: int in _pending_hits.keys():
+		var entry: Dictionary = _pending_hits[victim]
+		net.send_claim_hit(victim, float(entry["amount"]), bool(entry["head"]), entry["origin"], entry["point"], game.player.weapon_id)
+	_pending_hits.clear()
 
 
 ## Once per trigger pull: everyone else hears the shot and sees a tracer.

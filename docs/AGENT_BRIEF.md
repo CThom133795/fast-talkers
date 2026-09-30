@@ -62,3 +62,11 @@ Run from the project dir, for example:
   `timeout 120 "$GODOT" --headless --import --path .` once, or you get "Could not find type".
 - The project is now a **git repo**. Do not commit; the lead commits. `git diff` shows your changes.
 - Networking contract: `docs/NET_M1_SPEC.md`.
+
+## Cloud sessions
+Claude Code cloud sessions (Linux sandbox cloning the GitHub repo) work on disjoint files and open PRs to `master`.
+- Full guide and rules: `docs/CLOUD.md`.
+- `bash tools/cloud_setup.sh` installs Godot 4.4.1 into `~/.godot-4.4.1/` and primes the class cache; then `export GODOT=...`.
+- `bash tests/run_all.sh [suite ...]` runs all suites headless (`timeout 170` each, soak at `--fixed-fps 60`) and prints a
+  summary table; also works in Git Bash on Windows with `GODOT` set to the console exe. `net_pair` is skipped without `../../work`.
+- Branch `cloud/<task>`, PR body includes the test table; never touch `main.gd` / `online.gd` / `net.gd` unless told to.
