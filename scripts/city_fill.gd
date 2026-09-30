@@ -109,7 +109,15 @@ func build() -> void:
 		_frontage(road_index)
 	_coast_frontage()
 	_dress_alleys()
+	_calming()
 	_far_massing()
+	for key: Vector3i in _calm_cells:
+		var calm: Node3D = _calm_cells[key]
+		w._finish(calm)
+		for child: Node in calm.get_children():
+			if child is GeometryInstance3D and not child is Label3D:
+				(child as GeometryInstance3D).visibility_range_end = 260.0
+				(child as GeometryInstance3D).visibility_range_end_margin = 10.0
 	for key: Vector3i in _cells:
 		var node: Node3D = _cells[key]
 		w._finish(node)
@@ -129,6 +137,20 @@ func _key(p: Vector2) -> Vector2i:
 	return Vector2i(floori(p.x / CELL), floori(p.y / CELL))
 
 
+## Rects that stop a 1.3 m line of sight (buildings, walls, tall props), for the chicane planner.
+var _eye: Dictionary = {}
+
+func _add_eye(rect: Rect2) -> void:
+	var low: Vector2i = _key(rect.position)
+	var high: Vector2i = _key(rect.end)
+	for cx: int in range(low.x, high.x + 1):
+		for cy: int in range(low.y, high.y + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			if not _eye.has(key):
+				_eye[key] = []
+			(_eye[key] as Array).append(rect)
+
+
 func _add_rect(rect: Rect2) -> void:
 	var low: Vector2i = _key(rect.position)
 	var high: Vector2i = _key(rect.end)
@@ -145,6 +167,10 @@ func _index() -> void:
 		_add_rect(rect.grow(1.2))
 	for rect: Rect2 in w._blockers:
 		_add_rect(rect.grow(0.6))
+	for rect: Rect2 in w.eye_blockers:
+		_add_eye(rect)
+	for rect: Rect2 in w.footprints:
+		_add_eye(rect)
 	for vehicle: Dictionary in w.parked_vehicles:
 		var at: Vector3 = vehicle["at"]
 		_add_rect(Rect2(at.x - 3.6, at.z - 3.6, 7.2, 7.2))
@@ -178,7 +204,7 @@ func _index() -> void:
 					var key: Vector2i = Vector2i(cx, cy)
 					if not _segs.has(key):
 						_segs[key] = []
-					(_segs[key] as Array).append([a, b, half - 3.0])
+					(_segs[key] as Array).append([a, b, half - 3.0, road_index])
 	for slab: Dictionary in w._slab_tops:
 		var poly: PackedVector2Array = slab["poly"]
 		var bounds: Rect2 = Rect2(poly[0], Vector2.ZERO)
@@ -353,9 +379,11 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 			_why("park")
 			return false
 	# Front doorway zone free of street furniture; a 3 m strip behind the lot free of other lots (rear doors).
-	for lateral: float in [-3.5, -1.75, 0.0, 1.75, 3.5]:
+	var columns: int = maxi(2, ceili(2.0 * hw / 1.6))
+	for column: int in range(columns + 1):
+		var lateral: float = -hw + 2.0 * hw * float(column) / float(columns)
 		for reach: float in [0.5, 1.5, 2.5, 3.3]:
-			if absf(lateral) <= hw and w.solid_near(center - v * (hd + reach) + u * lateral, 0.5):
+			if w.solid_near(center - v * (hd + reach) + u * lateral, 0.5):
 				_why("furniture")
 				return false
 	var rear: Array = [center + v * (hd + 1.6), u, v, hw, 1.6]
@@ -764,3 +792,287 @@ func _dress_alleys() -> void:
 		w._dumpster(Vector3(spot.x, float(prop["y"]), spot.y), atan2(-u.x * side, -u.y * side), Color(0.2, 0.33, 0.26))
 		if not w.door_within(spot + back * 2.4, 2.6):
 			w._trash_bags(Vector3(spot.x + back.x * 2.4, float(prop["y"]), spot.y + back.y * 2.4))
+
+
+# --- Traffic calming: staggered kerb islands -------------------------------------------------------
+
+## Long straight streets get a chicane every ~100 m: two solid islands (a planted hedge with trees, a kiosk
+## or a billboard on a planter), one against each kerb 14 m apart, each reaching 1 m past the centre line, so
+## no straight line of sight runs the length of a street and cars weave through a ~5 m gap. They are real
+## solid props (collision matches what is seen) and stay clear of junctions, doors, plazas, bridges and
+## parked cars. Every island is recorded in `world.calming_islands` (corner polygons) for the tests.
+const CALM_SPACING: float = 100.0
+const CALM_LENGTH: float = 4.0
+const CALM_PAIR_GAP: float = 14.0
+const KIOSKS: PackedStringArray = ["NEWS & TOBACCO", "FLOWERS", "PRETZELS", "LOTTO", "BUS TOKENS", "COFFEE", "MAPS & CARDS", "FRESH JUICE"]
+const BOARDS: PackedStringArray = ["MILLENNIUM SALE", "VISIT THE PIER", "HALCYON RADIO 98.7", "LOTTO TONIGHT", "GRAND OPENING", "CALL 555-0142", "RENT A STORAGE UNIT", "PORT HALCYON SAVINGS"]
+var _calm_index: int = 0
+var _calm_cells: Dictionary = {}
+
+
+## The longest 2D sightlines down the streets are found first (a ray along every street every 30 m, blocked
+## by lots, footprints, props and the islands already placed) and a chicane pair goes ~90-125 m along each
+## one that runs past SIGHT_LIMIT, in three passes, so islands land where the views actually are.
+const SIGHT_LIMIT: float = 135.0
+var _hot: Array = []
+
+func _calming() -> void:
+	# Existing islands (none at first) block rays; each new pair is registered as it is placed.
+	for pass_index: int in range(4):
+		_hot.clear()
+		for road_index: int in range(w.roads.size()):
+			var road: Dictionary = w.roads[road_index]
+			if str(road["name"]).begins_with("FOUNTAIN"):
+				continue
+			var points: PackedVector2Array = road["points"]
+			for index: int in range(points.size() - 1):
+				var a: Vector2 = points[index]
+				var b: Vector2 = points[index + 1]
+				var length: float = a.distance_to(b)
+				if length < 30.0:
+					continue
+				var u: Vector2 = (b - a) / length
+				var steps: int = maxi(1, int(length / 30.0))
+				for step: int in range(steps + 1):
+					var p: Vector2 = a + u * (length * step / steps)
+					for dir: Vector2 in [u, -u]:
+						var seen: Array = _march(p, dir)
+						if not bool(seen[1]) and float(seen[0]) > SIGHT_LIMIT:
+							_hot.append([float(seen[0]), p, dir, road_index])
+		if _hot.is_empty():
+			return
+		_hot.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) > float(q[0]))
+		var placed_here: Array[Vector2] = []
+		for entry: Array in _hot:
+			var origin: Vector2 = entry[1]
+			var dir: Vector2 = entry[2]
+			var reach: float = minf(float(entry[0]), 400.0)
+			# A pair placed earlier this pass on this same line already cuts it.
+			var cut: bool = false
+			for other: Vector2 in placed_here:
+				var along: float = (other - origin).dot(dir)
+				if along > 8.0 and along < reach and absf((other - origin).cross(dir)) < 4.0:
+					cut = true
+					break
+			if cut:
+				continue
+			var done: bool = false
+			for distance: float in [105.0, 95.0, 115.0, 85.0, 125.0, 75.0, 65.0, 55.0, 45.0]:
+				if distance > reach - 12.0:
+					continue
+				var spot: Vector2 = origin + dir * distance
+				var found: int = _road_at(spot)
+				if found < 0:
+					continue
+				var road: Dictionary = w.roads[found]
+				var points: PackedVector2Array = road["points"]
+				var road_dir: Vector2 = Vector2.ZERO
+				for index: int in range(points.size() - 1):
+					if spot.distance_to(Geometry2D.get_closest_point_to_segment(spot, points[index], points[index + 1])) < 0.6:
+						road_dir = (points[index + 1] - points[index]).normalized()
+				if road_dir == Vector2.ZERO or absf(road_dir.cross(dir)) > 0.12:
+					continue
+				var start: Vector2 = spot if road_dir.dot(dir) > 0.0 else spot - road_dir * CALM_PAIR_GAP
+				var forward: Vector2 = road_dir
+				if _calm_ok(start, start + forward * CALM_PAIR_GAP, found):
+					_island_pair(start, forward, float(road["width"]) * 0.5)
+					placed_here.append(spot)
+					done = true
+					break
+			if not done and _try_hoarding(origin, dir, reach):
+				# No island fits along the street itself: the open ground the line runs out over is fenced off.
+				placed_here.append(origin + dir * 90.0)
+
+
+## Road index whose centre line passes within 0.6 m of `p` (-1 if none).
+func _road_at(p: Vector2) -> int:
+	var key: Vector2i = _key(p)
+	if not _segs.has(key):
+		return -1
+	for seg: Array in _segs[key]:
+		if p.distance_to(Geometry2D.get_closest_point_to_segment(p, seg[0], seg[1])) < 0.6:
+			return int(seg[3])
+	return -1
+
+
+## How far a 2D ray runs from `p` along `dir` before it meets a lot, footprint, prop or island: [metres, ended at the coast].
+func _march(p: Vector2, dir: Vector2) -> Array:
+	var t: float = 8.0
+	while t < 400.0:
+		var q: Vector2 = p + dir * t
+		if fmod(t, 16.0) < 4.0 and not w._on_land(q):
+			return [t, true]
+		var key: Vector2i = _key(q)
+		if _eye.has(key):
+			for rect: Rect2 in _eye[key]:
+				if rect.has_point(q):
+					return [t, false]
+		if _obbs.has(key):
+			for other: Array in _obbs[key]:
+				var d: Vector2 = q - (other[0] as Vector2)
+				if absf(d.dot(other[1])) <= float(other[3]) and absf(d.dot(other[2])) <= float(other[4]):
+					return [t, false]
+		t += 4.0
+	return [400.0, false]
+
+
+func _calm_ok(p: Vector2, q: Vector2, road_index: int) -> bool:
+	# Nothing solid already stands in the carriageway here (a wall or prop that intrudes on the road).
+	var along: Vector2 = (q - p).normalized()
+	var across: Vector2 = Vector2(-along.y, along.x)
+	for step: int in range(5):
+		for lateral: float in [-5.0, -2.5, 0.0, 2.5, 5.0]:
+			if w.solid_near(p.lerp(q, float(step) / 4.0) + across * lateral, 1.4):
+				_why("c-solid")
+				return false
+	for at: Vector2 in [p, q, (p + q) * 0.5]:
+		if not w._on_land(at):
+			_why("c-land")
+			return false
+		for poly: PackedVector2Array in _keepout:
+			if Geometry2D.is_point_in_polygon(at, poly):
+				_why("c-park")
+				return false
+		for bridge: Dictionary in w.bridges:
+			if (bridge["rect"] as Rect2).grow(22.0).has_point(at):
+				_why("c-bridge")
+				return false
+		if w.door_within(at, 5.0):
+			_why("c-door")
+			return false
+		# Chicane pairs keep 26 m from each other, so a car can always thread each one.
+		for poly: PackedVector2Array in w.calming_islands:
+			if (poly[0] + poly[2]) * 0.5 != Vector2.ZERO and ((poly[0] + poly[2]) * 0.5).distance_to(at) < 26.0:
+				_why("c-island")
+				return false
+		for vehicle: Dictionary in w.parked_vehicles:
+			var spot: Vector3 = vehicle["at"]
+			if Vector2(spot.x, spot.z).distance_to(at) < 7.0:
+				_why("c-car")
+				return false
+		# Junction zone: no other street within its half width + 4.5 m.
+		for dx: int in range(-2, 3):
+			for dy: int in range(-2, 3):
+				var key: Vector2i = _key(at) + Vector2i(dx, dy)
+				if not _segs.has(key):
+					continue
+				for seg: Array in _segs[key]:
+					if int(seg[3]) == road_index:
+						continue
+					if at.distance_to(Geometry2D.get_closest_point_to_segment(at, seg[0], seg[1])) < float(seg[2]) + 4.5:
+						_why("c-junction")
+						return false
+	return true
+
+
+func _island_pair(at: Vector2, u: Vector2, half: float) -> void:
+	var n: Vector2 = Vector2(-u.y, u.x)
+	var side: float = 1.0 if (_calm_index % 2 == 0) else -1.0
+	_island(at, u, n, half, side)
+	_island(at + u * CALM_PAIR_GAP, u, n, half, -side)
+
+
+## One island against the `side` kerb (+1 = the left of the direction of travel), reaching 1 m past the centre line.
+func _island(at: Vector2, u: Vector2, n: Vector2, half: float, side: float) -> void:
+	var width: float = half + 1.0
+	var lateral: float = side * (half - width * 0.5)
+	var center: Vector2 = at + n * lateral
+	var yaw: float = atan2(-n.y, n.x)
+	var corners: PackedVector2Array = PackedVector2Array()
+	for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+		corners.append(center + n * corner.x * width * 0.5 + u * corner.y * CALM_LENGTH * 0.5)
+	w.calming_islands.append(corners)
+	_register_obb(_obbs, center, n, u, width * 0.5, CALM_LENGTH * 0.5)
+	w._target = _calm_node(center)
+	w._xf = Transform3D.IDENTITY
+	w._xf_yaw = 0.0
+	var kind: int = _calm_index % 3
+	_calm_index += 1
+	var kerb: StandardMaterial3D = w._material(Color(0.62, 0.6, 0.55), 0.9, "stucco")
+	var hedge: StandardMaterial3D = w._material(Color(0.2, 0.36, 0.2), 0.95, "grass")
+	var facing: Vector3 = Vector3(u.x, 0, u.y)
+	# Kerbed base: solid, 0.3 m high.
+	w._box_with(Vector3(center.x, 0.17, center.y), Vector3(width, 0.3, CALM_LENGTH), kerb, true, yaw)
+	match kind:
+		0:
+			# A clipped hedge wall (1.5 m, solid) with two plane trees on it.
+			w._box_with(Vector3(center.x, 1.07, center.y), Vector3(width - 0.5, 1.5, CALM_LENGTH - 1.0), hedge, true, yaw)
+			for offset: float in [-0.25, 0.25]:
+				var tree_at: Vector2 = center + n * width * offset
+				w._cylinder(Vector3(tree_at.x, 2.4, tree_at.y), 0.14, 3.0, Color(0.37, 0.28, 0.18), 6)
+				w._cylinder(Vector3(tree_at.x, 4.2, tree_at.y), 1.5, 1.8, Color(0.33, 0.45, 0.26), 6)
+		1:
+			# A kiosk: a solid box with an awning and a sign.
+			var paint: Color = [Color(0.2, 0.42, 0.36), Color(0.62, 0.2, 0.18), Color(0.2, 0.3, 0.5), Color(0.72, 0.55, 0.16)][_calm_index % 4]
+			w._box_with(Vector3(center.x, 1.5, center.y), Vector3(width - 0.8, 2.5, CALM_LENGTH - 0.8), w._material(paint, 0.7, "panel"), true, yaw)
+			w._box_with(Vector3(center.x, 2.85, center.y), Vector3(width - 0.2, 0.16, CALM_LENGTH + 0.8), w._material(Color(0.9, 0.86, 0.78), 0.8), false, yaw)
+			for way: float in [1.0, -1.0]:
+				var label_at: Vector3 = Vector3(center.x, 2.3, center.y) + facing * way * (CALM_LENGTH * 0.5 - 0.35)
+				var label: Label3D = w._label(str(KIOSKS[_calm_index % KIOSKS.size()]), label_at, 36, Color(1.0, 0.95, 0.8), atan2(facing.x * way, facing.z * way), 0.012)
+				label.visibility_range_end = 60.0
+		_:
+			# A billboard on two posts over a hedge planter (the hedge is the solid at eye height).
+			w._box_with(Vector3(center.x, 0.9, center.y), Vector3(width - 0.6, 1.4, CALM_LENGTH - 1.2), hedge, true, yaw)
+			for offset: float in [-0.32, 0.32]:
+				var post_at: Vector2 = center + n * width * offset
+				w._box_with(Vector3(post_at.x, 3.4, post_at.y), Vector3(0.3, 5.4, 0.3), w._material(Color(0.3, 0.3, 0.32), 0.6, "metal"), true, yaw)
+			var board_at: Vector3 = Vector3(center.x, 5.0, center.y)
+			w._box_with(board_at, Vector3(width * 0.9, 2.4, 0.3), w._material(Color(0.14, 0.14, 0.18), 0.8), false, yaw)
+			for way: float in [1.0, -1.0]:
+				var label: Label3D = w._label(str(BOARDS[_calm_index % BOARDS.size()]), board_at + facing * way * 0.2, 36, Color(1.0, 0.85, 0.4), atan2(facing.x * way, facing.z * way), 0.034)
+				label.visibility_range_end = 90.0
+
+
+func _calm_node(at: Vector2) -> Node3D:
+	var key: Vector3i = Vector3i(floori(at.x / 96.0), floori(at.y / 96.0), 7)
+	if not _calm_cells.has(key):
+		var saved: Node3D = w._target
+		var node: Node3D = w._begin("Calm %d %d" % [key.x, key.y])
+		w._target = saved
+		_calm_cells[key] = node
+	return _calm_cells[key] as Node3D
+
+
+## Where a long line of sight runs off a street's end across open ground, a construction hoarding (a solid
+## 10 m plywood fence with bill posters) closes it: the city is mid-boom, sites are fenced off.
+const HOARDS: PackedStringArray = ["FUTURE HOME OF\nPORT HALCYON PLAZA", "COMING SOON\nLOFTS FROM $89,900", "SITE OFFICE\nNO ADMITTANCE", "BUILDING FOR THE\nNEW MILLENNIUM", "PARKING LOT\nCOMING 2000", "CALL 555-0177\nFOR LEASING"]
+var _hoard_index: int = 0
+
+func _try_hoarding(origin: Vector2, dir: Vector2, reach: float) -> bool:
+	var across: Vector2 = Vector2(-dir.y, dir.x)
+	for distance: float in [100.0, 90.0, 110.0, 80.0, 120.0, 70.0, 60.0, 130.0, 50.0]:
+		if distance > reach - 12.0:
+			continue
+		var spot: Vector2 = origin + dir * distance
+		if _road_at(spot) >= 0:
+			continue
+		if not _clear(spot, across, dir, 10.0, 1.2):
+			continue
+		_hoarding(spot, across, dir)
+		return true
+	return false
+
+
+func _hoarding(at: Vector2, across: Vector2, dir: Vector2) -> void:
+	_register_obb(_obbs, at, across, dir, 5.5, 1.0)
+	w._target = _calm_node(at)
+	w._xf = Transform3D.IDENTITY
+	w._xf_yaw = 0.0
+	var yaw: float = atan2(-across.y, across.x)
+	var ground: float = maxf(_height_at(at), 0.0)
+	var planks: StandardMaterial3D = w._material(Color(0.52, 0.46, 0.36), 0.9, "planks")
+	w._box_with(Vector3(at.x, ground + 1.2, at.y), Vector3(10.0, 2.4, 0.3), planks, true, yaw)
+	# Two raking braces and a cap rail.
+	for offset: float in [-3.5, 3.5]:
+		var brace_at: Vector2 = at + across * offset + dir * 0.7
+		w._box_with(Vector3(brace_at.x, ground + 0.9, brace_at.y), Vector3(0.14, 1.8, 0.14), planks, false, yaw)
+	w._box_with(Vector3(at.x, ground + 2.45, at.y), Vector3(10.2, 0.12, 0.42), w._material(Color(0.3, 0.3, 0.32), 0.7), false, yaw)
+	var facing: Vector3 = Vector3(dir.x, 0, dir.y)
+	var text: String = str(HOARDS[_hoard_index % HOARDS.size()])
+	_hoard_index += 1
+	for way: float in [1.0, -1.0]:
+		var poster_at: Vector3 = Vector3(at.x, ground + 1.5, at.y) + facing * way * 0.17
+		w._box_with(poster_at, Vector3(4.2, 1.2, 0.02), w._material(Color(0.9, 0.86, 0.72), 0.9), false, yaw)
+		var label: Label3D = w._label(text, poster_at + facing * way * 0.02, 36, Color(0.5, 0.12, 0.1), atan2(facing.x * way, facing.z * way), 0.0135)
+		label.outline_size = 0
+		label.visibility_range_end = 60.0

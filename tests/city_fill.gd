@@ -58,6 +58,8 @@ func _run() -> void:
 	var view: Dictionary = _sightlines()
 	_emptiness()
 	_overlaps()
+	_calming_checks()
+	_life_checks()
 	print("CITY FILL RESULT: %d checks, %d failures" % [checks, failures])
 	world.queue_free()
 	await process_frame
@@ -123,6 +125,7 @@ func _ray_length(from: Vector2, dir: Vector2) -> Array:
 
 func _sightlines() -> Dictionary:
 	var per_district: Dictionary = {}
+	var ends: Dictionary = {}
 	var over: int = 0
 	var samples: int = 0
 	var longest: Array = []
@@ -164,7 +167,19 @@ func _sightlines() -> Dictionary:
 					per_district[district] = record
 					if str(best[1]) != "coast":
 						longest.append([float(best[0]), str(road["name"]), at, dir])
+						if float(best[0]) > 150.0:
+							var end_at: Vector2 = at + dir * float(best[0])
+							var cell: String = "(%d,%d)" % [roundi(end_at.x / 25.0) * 25, roundi(end_at.y / 25.0) * 25]
+							ends[cell] = int(ends.get(cell, 0)) + 1
 	longest.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) > float(q[0]))
+	var buckets: Array[int] = [0, 0, 0, 0]
+	for entry: Array in longest:
+		var metres: float = float(entry[0])
+		buckets[0] += 1 if metres > 150.0 else 0
+		buckets[1] += 1 if metres > 200.0 else 0
+		buckets[2] += 1 if metres > 300.0 else 0
+		buckets[3] += 1 if metres >= 499.0 else 0
+	print("SIGHTLINE HISTOGRAM: over 150 m %d, over 200 m %d, over 300 m %d, unbroken to the 500 m limit %d" % [buckets[0], buckets[1], buckets[2], buckets[3]])
 	print("SIGHTLINES: %d samples, %d longer than 120 m (blocked by a building or prop; views over water excluded)" % [samples, over])
 	var names: Array = per_district.keys()
 	names.sort()
@@ -180,6 +195,12 @@ func _sightlines() -> Dictionary:
 			continue
 		shown[entry[1]] = true
 		print("    %5.0f m  %-22s from (%.0f, %.0f) heading (%.1f, %.1f)" % [float(entry[0]), str(entry[1]), (entry[2] as Vector2).x, (entry[2] as Vector2).y, (entry[3] as Vector2).x, (entry[3] as Vector2).y])
+	var end_cells: Array = ends.keys()
+	end_cells.sort_custom(func(p: String, q: String) -> bool: return int(ends[p]) > int(ends[q]))
+	var listing: Array[String] = []
+	for cell: String in end_cells.slice(0, 14):
+		listing.append("%s x%d" % [cell, ends[cell]])
+	print("  Where rays over 150 m END (25 m cells): %s" % ", ".join(listing))
 	var worst: float = float(longest[0][0]) if not longest.is_empty() else 0.0
 	_check(samples > 500, "Sightlines sampled every road (%d rays)" % samples)
 	if ASSERT_TARGETS:
@@ -372,6 +393,66 @@ func _write_quadrants(image: Image, bounds: Rect2, folder: String) -> void:
 		var part: Image = big.get_region(Rect2i((index % 2) * half_w, (index / 2) * half_h, half_w, half_h))
 		part.save_png("%s/city_fill_q_%s.png" % [folder, names[index]])
 	print("QUADRANTS written; origin (%.0f, %.0f), 2 px per metre, quadrant size %d x %d px, split at x %.0f z %.0f" % [bounds.position.x, bounds.position.y, half_w, half_h, bounds.position.x + half_w / px_per_m, bounds.position.y + half_h / px_per_m])
+
+
+# --- Traffic calming ---------------------------------------------------------------------------------
+
+## Every kerb island sits on a road and inside its width, and each chicane pair leaves a gap a car fits
+## through: a 2.4 m wide box is swept along the S-path between the two islands.
+func _calming_checks() -> void:
+	var islands: Array[PackedVector2Array] = world.calming_islands
+	print("CALMING: %d kerb islands" % islands.size())
+	_check(islands.size() >= 20 and islands.size() % 2 == 0, "Long streets have chicane islands in pairs (%d islands)" % islands.size())
+	var off_road: int = 0
+	for poly: PackedVector2Array in islands:
+		var center: Vector2 = Vector2.ZERO
+		for point: Vector2 in poly:
+			center += point * 0.25
+		var on_road: bool = false
+		for road: Dictionary in world.roads:
+			var points: PackedVector2Array = road["points"]
+			for index: int in range(points.size() - 1):
+				if center.distance_to(Geometry2D.get_closest_point_to_segment(center, points[index], points[index + 1])) < float(road["width"]) * 0.5:
+					on_road = true
+		off_road += 0 if on_road else 1
+	_check(off_road == 0, "Every island stands on a street (%d off)" % off_road)
+	var blocked: int = 0
+	var shape: BoxShape3D = BoxShape3D.new()
+	shape.size = Vector3(2.4, 1.2, 4.8)
+	for pair: int in range(0, islands.size() - 1, 2):
+		var a: PackedVector2Array = islands[pair]
+		var b: PackedVector2Array = islands[pair + 1]
+		var ca: Vector2 = (a[0] + a[1] + a[2] + a[3]) * 0.25
+		var cb: Vector2 = (b[0] + b[1] + b[2] + b[3]) * 0.25
+		var mid: Vector2 = (ca + cb) * 0.5
+		# Frame of the pair: n across the street, the axis midway between the two centres.
+		var n: Vector2 = (a[1] - a[0]).normalized()
+		var width: float = (a[1] - a[0]).length()
+		var side_a: float = signf((ca - mid).dot(n))
+		var axis_a: Vector2 = ca - n * (ca - mid).dot(n)
+		var axis_b: Vector2 = cb - n * (cb - mid).dot(n)
+		# The free lane at island A is on the far side of the centre line from A, and vice versa at B.
+		var free_a: Vector2 = axis_a - n * side_a * width * 0.5
+		var free_b: Vector2 = axis_b + n * side_a * width * 0.5
+		for step: int in range(11):
+			var at: Vector2 = free_a.lerp(free_b, float(step) / 10.0)
+			var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+			query.shape = shape
+			query.collision_mask = 1
+			var facing: Vector2 = (free_b - free_a).normalized()
+			query.transform = Transform3D(Basis(Vector3.UP, atan2(facing.x, facing.y)), Vector3(at.x, 1.0, at.y))
+			var hits: Array[Dictionary] = space.intersect_shape(query, 1)
+			if not hits.is_empty():
+				blocked += 1
+				print("  CHICANE pair at %s blocked by %s at %s" % [mid.snapped(Vector2(0.1, 0.1)), (hits[0]["collider"] as Node).get_path(), (hits[0]["collider"] as Node3D).global_position.snapped(Vector3(0.1, 0.1, 0.1))])
+				break
+	_check(blocked == 0, "A 2.4 m car fits through every chicane (%d pairs blocked of %d)" % [blocked, islands.size() / 2])
+
+
+# --- Life ------------------------------------------------------------------------------------------------
+
+func _life_checks() -> void:
+	pass
 
 
 # --- No overlaps ------------------------------------------------------------------------------------------

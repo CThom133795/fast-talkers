@@ -79,9 +79,13 @@ var city_fill: RefCounted
 var _blockers_off: bool = false
 var _road_boxes: Array[Rect2] = []
 var _solid_grid: Dictionary = {}
+## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan chicanes.
+var eye_blockers: Array[Rect2] = []
 ## Buildings the fill passes made, for the far-distance stand-ins (city_fill.gd builds one merged, vertex-coloured
 ## massing mesh per 96 m cell from these): {center (x/z), size (frontage, height, depth), yaw, color}.
 var lod_lots: Array[Dictionary] = []
+## Corner polygons of the traffic-calming kerb islands the fill pass put in the streets (see city_fill.gd).
+var calming_islands: Array[PackedVector2Array] = []
 ## Beyond this distance a fill building is drawn as its massing box only.
 const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
@@ -837,6 +841,7 @@ func _note_blocker(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
 		return
 	var world_at: Vector3 = _xf * at
 	var yaw: float = angle + _xf_yaw
+	var eye: bool = world_at.y - size.y * 0.5 <= 1.3 and world_at.y + size.y * 0.5 >= 1.3
 	# A long turned box (a diagonal quay face, a fence) is recorded in short pieces, so its bounds
 	# do not swallow the ground beside it.
 	var length: float = maxf(size.x, size.z)
@@ -850,14 +855,16 @@ func _note_blocker(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
 			var half_thick: float = minf(size.x, size.z) * 0.5
 			var reach_x: float = absf(along.x) * half_length + absf(along.y) * half_thick
 			var reach_z: float = absf(along.y) * half_length + absf(along.x) * half_thick
-			_add_blocker(Rect2(chunk.x - reach_x, chunk.y - reach_z, reach_x * 2.0, reach_z * 2.0), size.y, area)
+			_add_blocker(Rect2(chunk.x - reach_x, chunk.y - reach_z, reach_x * 2.0, reach_z * 2.0), size.y, area, eye)
 		return
 	var ex: float = absf(cos(yaw)) * size.x * 0.5 + absf(sin(yaw)) * size.z * 0.5
 	var ez: float = absf(sin(yaw)) * size.x * 0.5 + absf(cos(yaw)) * size.z * 0.5
-	_add_blocker(Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0), size.y, area)
+	_add_blocker(Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0), size.y, area, eye)
 
-func _add_blocker(rect: Rect2, height: float, area: float) -> void:
+func _add_blocker(rect: Rect2, height: float, area: float, eye: bool = false) -> void:
 	_blockers.append(rect)
+	if eye:
+		eye_blockers.append(rect)
 	if height >= 0.5 and area < 400.0:
 		var low: Vector2i = Vector2i(floori(rect.position.x / 16.0), floori(rect.position.y / 16.0))
 		var high: Vector2i = Vector2i(floori(rect.end.x / 16.0), floori(rect.end.y / 16.0))
@@ -2589,7 +2596,7 @@ const FILL_STYLES: Dictionary = {
 	"midrise": {"height": Vector2(14.0, 26.0), "colors": [Color(0.6, 0.55, 0.47), Color(0.5, 0.52, 0.5), Color(0.66, 0.6, 0.5), Color(0.44, 0.46, 0.5)], "tex": "stucco", "lit": 0.4, "width": Vector2(16.0, 24.0), "signs": ["LAW OFFICES", "MERCURY CLINIC", "ATLAS INSURANCE", "PARK VIEW APTS"], "sign_color": Color(0.95, 0.85, 0.6)},
 	"brick": {"height": Vector2(9.0, 17.0), "colors": [Color(0.56, 0.3, 0.24), Color(0.62, 0.38, 0.28), Color(0.5, 0.27, 0.25), Color(0.66, 0.46, 0.34)], "tex": "brick", "lit": 0.4, "width": Vector2(11.0, 17.0), "signs": ["DELI", "HARDWARE", "TAILOR", "CORNER PUB", "PHARMACY", "BARBER"], "sign_color": Color(1.0, 0.85, 0.55)},
 	"warehouse": {"height": Vector2(7.0, 11.0), "colors": [Color(0.5, 0.52, 0.5), Color(0.42, 0.46, 0.5), Color(0.55, 0.5, 0.42), Color(0.36, 0.42, 0.4)], "tex": "metal", "lit": 0.08, "width": Vector2(20.0, 32.0), "signs": ["CARGO WORKS", "COLD STORE", "SHIPPING CO", "TIMBER YARD", "NET LOFT", "CANNERY"], "sign_color": Color(0.9, 0.8, 0.45)},
-	"neon": {"height": Vector2(7.0, 13.0), "colors": [Color(0.16, 0.14, 0.2), Color(0.2, 0.16, 0.24), Color(0.12, 0.14, 0.2), Color(0.24, 0.16, 0.2)], "tex": "panel", "lit": 0.6, "width": Vector2(14.0, 22.0), "signs": ["LUCKY DRAGON", "SILVER SLIPPER", "CASINO ROYALE", "THE 400 CLUB", "SPIN PALACE", "DICE & DIAMONDS", "GOLDEN NUGGET", "CLUB ORBIT"], "sign_color": Color(1.0, 0.45, 0.85)},
+	"neon": {"height": Vector2(7.0, 13.0), "colors": [Color(0.16, 0.14, 0.2), Color(0.2, 0.16, 0.24), Color(0.12, 0.14, 0.2), Color(0.24, 0.16, 0.2)], "tex": "panel", "lit": 0.6, "width": Vector2(14.0, 22.0), "signs": ["LUCKY DRAGON", "SILVER SLIPPER", "CASINO ORIOLE", "THE 400 CLUB", "SPIN PALACE", "DICE & DIAMONDS", "AMBER STAR CLUB", "CLUB ORBIT"], "sign_color": Color(1.0, 0.45, 0.85)},
 	"flats": {"height": Vector2(10.0, 20.0), "colors": [Color(0.64, 0.6, 0.52), Color(0.58, 0.62, 0.6), Color(0.68, 0.56, 0.48), Color(0.52, 0.54, 0.6)], "tex": "stucco", "lit": 0.4, "width": Vector2(14.0, 22.0), "signs": [], "sign_color": Color(1.0, 0.9, 0.7)},
 }
 

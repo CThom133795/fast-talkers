@@ -185,7 +185,15 @@ func _inside_building(at: Vector3) -> String:
 
 func _interior_checks() -> void:
 	# Midtown's walk-in businesses (0.6 adds doors, gates and lifts elsewhere; tests/map_06.gd covers those).
-	var doors: Array = world.interactable_doors.filter(func(door: Dictionary) -> bool: return str(door["district"]) == "MIDTOWN")
+	# Only the original walk-in shops: the 0.8 fill puts prefab shops in Midtown's alleys too, and those are
+	# audited by tests/prefabs.gd, city_audit and city_fill.
+	var doors: Array = world.interactable_doors.filter(func(door: Dictionary) -> bool:
+		if str(door["district"]) != "MIDTOWN":
+			return false
+		for shop: Dictionary in Interiors.SHOPS:
+			if str(door["label"]).begins_with(str(shop["sign"])):
+				return true
+		return false)
 	_check(doors.size() >= 10, "Midtown has 10+ walk-in businesses (%d)" % doors.size())
 	var signed: int = Interiors.SHOPS.size() + 1
 	_check(float(doors.size()) / signed > 0.5, "A majority of signed Midtown storefronts are enterable (%d of %d)" % [doors.size(), signed])
