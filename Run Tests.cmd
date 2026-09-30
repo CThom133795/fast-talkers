@@ -30,13 +30,13 @@ set "FAST_TALKERS_VEH06=%errorlevel%"
 echo [8/9] Map 0.6 expansion checks...
 "%FAST_TALKERS_EDITOR%" --headless --path "%~dp0." --log-file "%~dp0..\..\work\map06-test.log" --script res://tests/map_06.gd
 set "FAST_TALKERS_MAP06=%errorlevel%"
-echo.
-echo Contract: %FAST_TALKERS_CONTRACT%   Free roam: %FAST_TALKERS_FREE%   Soak: %FAST_TALKERS_SOAK%   Map: %FAST_TALKERS_MAP%   Vehicles: %FAST_TALKERS_VEHICLES%   Wiring: %FAST_TALKERS_WIRING%   Veh06: %FAST_TALKERS_VEH06%   Map06: %FAST_TALKERS_MAP06%
-echo 0 means every check passed. Logs are in the work folder.
-pause
 echo [9/9] City furniture, walk-in diner/motel and driving balance...
 "%FAST_TALKERS_EDITOR%" --headless --fixed-fps 60 --path "%~dp0." --log-file "%~dp0..\..\work\city-detail-test.log" --script res://tests/city_detail.gd
 set "FAST_TALKERS_DETAIL=%errorlevel%"
+echo.
+echo Contract: %FAST_TALKERS_CONTRACT%   Free roam: %FAST_TALKERS_FREE%   Soak: %FAST_TALKERS_SOAK%   Map: %FAST_TALKERS_MAP%   Vehicles: %FAST_TALKERS_VEHICLES%   Wiring: %FAST_TALKERS_WIRING%   Veh06: %FAST_TALKERS_VEH06%   Map06: %FAST_TALKERS_MAP06%   City detail: %FAST_TALKERS_DETAIL%
+echo 0 means every check passed. Logs are in the work folder.
+pause
 if not "%FAST_TALKERS_DETAIL%"=="0" exit /b %FAST_TALKERS_DETAIL%
 if not "%FAST_TALKERS_CONTRACT%"=="0" exit /b %FAST_TALKERS_CONTRACT%
 if not "%FAST_TALKERS_FREE%"=="0" exit /b %FAST_TALKERS_FREE%
