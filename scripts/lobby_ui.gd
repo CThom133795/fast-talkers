@@ -123,7 +123,7 @@ func _build_connect(parent: Control) -> void:
 	_steam_note = _label("", 13, MUTED, true)
 	_steam_note.visible = false
 	_connect_box.add_child(_steam_note)
-	_host_button = _button("HOST GAME", _on_host_pressed)
+	_host_button = _button("HOST BY IP  (LAN / DIRECT)", _on_host_pressed)
 	_connect_box.add_child(_host_button)
 	_connect_box.add_child(HSeparator.new())
 	_connect_box.add_child(_label("HOST ADDRESS", 12, MUTED))
@@ -135,7 +135,7 @@ func _build_connect(parent: Control) -> void:
 	_connect_box.add_child(_join_button)
 	_connect_status = _label("", 14, ALERT, true)
 	_connect_box.add_child(_connect_status)
-	_connect_hint = _label("Playing over the internet? Both install Tailscale and join the host's 100.x address, or forward UDP %d." % FastNet.PORT, 13, MUTED, true)
+	_connect_hint = _label("No Steam? Same network: join the host's LAN address. Over the internet: the host forwards UDP %d (or both use a VPN such as Tailscale)." % FastNet.PORT, 13, MUTED, true)
 	_connect_box.add_child(_connect_hint)
 	_back_button = _button("BACK", _on_back_pressed)
 	_connect_box.add_child(_back_button)
@@ -172,7 +172,7 @@ func _build_lobby(parent: Control) -> void:
 		if net != null:
 			net.week_days = 3 if on else 5)
 	_lobby_box.add_child(_week_toggle)
-	_start_button = _button("START MATCH", _on_start_pressed)
+	_start_button = _button("START THE WEEK", _on_start_pressed)
 	_lobby_box.add_child(_start_button)
 	_wait_label = _label("Waiting for the host to start the match...", 14, TEAL, true)
 	_lobby_box.add_child(_wait_label)
