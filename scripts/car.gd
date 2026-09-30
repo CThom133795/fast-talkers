@@ -944,12 +944,15 @@ func _car_body(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: Stan
 	var body: Dictionary = _spec_body()
 	var width: float = body["width"]
 	var axles: Vector2 = spec["axles"]
-	_part(VehicleKit.profile(_lower_outline(body, vehicle_type == "pickup"), width * 0.5, 0.07, float(body["tuck"])), Vector3.ZERO, paint)
+	var glass: Array = body["glass"]
+	var cabin_open: Vector2 = Vector2((glass[0] as Vector2).x + 0.25, (glass[3] as Vector2).x - 0.05)
+	_part(VehicleKit.profile(_lower_outline(body, vehicle_type == "pickup"), width * 0.5, 0.07, float(body["tuck"]), cabin_open, float(body["belt_half"]) - 0.14), Vector3.ZERO, paint)
 	# Dark wheel-well liners behind every arch.
 	var well: StandardMaterial3D = _mat(Color(0.035, 0.035, 0.04), 0.95)
 	for axle: float in [axles.x, axles.y]:
 		var arch: float = body["arch"]
-		_soft(Vector3(width - 0.34, arch * 1.05, arch * 1.9), Vector3(0, float(spec["wheel_r"]) + arch * 0.35 - BODY_Y, axle), well, 0.05)
+		for side: float in [-1.0, 1.0]:
+			_soft(Vector3(0.22, arch * 1.05, arch * 1.9), Vector3(side * (width * 0.5 - 0.19), float(spec["wheel_r"]) + arch * 0.35 - BODY_Y, axle), well, 0.05)
 	_glasshouse(body, paint, trim)
 	_cabin_interior(body, trim)
 
@@ -1022,12 +1025,22 @@ func _cabin_interior(body: Dictionary, trim: StandardMaterial3D) -> void:
 	var g: Array = body["glass"]
 	var belt: float = (g[0] as Vector2).y - BODY_Y
 	var cloth: StandardMaterial3D = _mat(Color(0.16, 0.14, 0.13), 0.95)
-	var dash_z: float = (g[0] as Vector2).x + 0.32
-	_soft(Vector3(float(body["belt_half"]) * 2.0 - 0.12, 0.24, 0.46), Vector3(0, belt - 0.1, dash_z), trim, 0.07)
+	var dash_z: float = (g[0] as Vector2).x + 0.10
+	_soft(Vector3(float(body["belt_half"]) * 2.0 - 0.12, 0.20, 0.30), Vector3(0, belt - 0.12, dash_z), trim, 0.05)
 	var driver_eye: Vector3 = (seats[0] as Dictionary)["eye"]
-	var wheel: MeshInstance3D = _part(MeshKit.torus(0.15, 0.18, 18, 6), Vector3(driver_eye.x, belt + 0.02, dash_z + 0.34), trim)
+	var wheel: MeshInstance3D = _part(MeshKit.torus(0.15, 0.18, 18, 6), Vector3(driver_eye.x, belt + 0.02, dash_z + 0.20), trim)
 	wheel.rotation = Vector3(PI * 0.5 - 0.5, 0, 0)
 	var floor_y: float = (body["nose"] as Array)[0].y - BODY_Y + 0.12
+	var front: float = (g[0] as Vector2).x + 0.25
+	var rear: float = (g[3] as Vector2).x - 0.05
+	var inner: float = float(body["belt_half"]) - 0.14
+	_soft(Vector3(inner * 2 + 0.08, 0.05, rear - front), Vector3(0, floor_y - 0.025, (front + rear) * 0.5), cloth, 0.01)
+	for side: float in [-1.0, 1.0]:
+		_soft(Vector3(0.06, belt - floor_y, rear - front), Vector3(side * (inner + 0.03), (belt + floor_y) * 0.5, (front + rear) * 0.5), trim, 0.02)
+		_soft(Vector3(0.12, 0.08, 0.6), Vector3(side * (inner - 0.04), belt - 0.17, driver_eye.z), cloth, 0.02)
+	# Restrained dashboard details, all using the existing trim/cloth materials.
+	_soft(Vector3(0.3, 0.09, 0.035), Vector3(driver_eye.x, belt - 0.05, dash_z + 0.155), cloth, 0.015)
+	_soft(Vector3(0.2, 0.16, 0.45), Vector3(0, floor_y + 0.09, driver_eye.z - 0.05), trim, 0.02)
 	for seat_spec: Dictionary in seats:
 		var eye: Vector3 = seat_spec["eye"]
 		if eye.y > float(spec["roof"]) or str(seat_spec["shoot"]) == "open":

@@ -1512,7 +1512,9 @@ func _build_roads() -> void:
 		var road: Dictionary = roads[road_index]
 		var points: PackedVector2Array = road["points"]
 		var width: float = road["width"]
-		var y: float = 0.02 + road_index * 0.0015
+		# Millimetre-scale sorting offsets: overlapping ribbons must not rise into
+		# a visible staircase merely because their road records were built later.
+		var y: float = 0.02 + road_index * 0.00004
 		var surface: SurfaceTool = SurfaceTool.new()
 		surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 		var lefts: PackedVector2Array = PackedVector2Array()
@@ -1564,7 +1566,7 @@ func _build_roads() -> void:
 				if not _near_other_road(at, road_index, 2.5):
 					for offset: float in [-0.15, 0.15]:
 						var mark: Vector2 = at + side * offset
-						_box_with(Vector3(mark.x, y + 0.03, mark.y), Vector3(0.1, 0.012, 3.2), paint, false, angle)
+						_box_with(Vector3(mark.x, y + 0.008, mark.y), Vector3(0.1, 0.012, 3.2), paint, false, angle)
 				dash += 7.0
 	for bridge: Dictionary in bridges:
 		var rect: Rect2 = bridge["rect"]

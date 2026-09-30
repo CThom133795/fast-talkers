@@ -2,6 +2,8 @@
 
 **Latest pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
 
+**Newest local pickup: read `docs/VEHICLE_TIDY_HANDOFF.md`. The cabin/surface tidy pass is source-only until the normal-permission settings test and Windows export are rerun.**
+
 ## Shared objective
 Original low-poly round-based business-negotiation shooter, eventual Steam release.
 References for desired feel: Sub Rosa / No Big Deal round negotiations, GTA IV vehicle weight,

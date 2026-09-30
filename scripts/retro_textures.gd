@@ -70,6 +70,8 @@ func _grime(x: int, y: int) -> float:
 
 func _noise(x: int, y: int, amount: float) -> float:
 	# Hash noise that tiles cleanly on the 64 px grid.
+	x = posmod(x, 64)
+	y = posmod(y, 64)
 	var n: int = (x * 73856093) ^ (y * 19349663) ^ 83492791
 	n = (n ^ (n >> 13)) * 1274126177
 	return (float(n & 1023) / 1023.0 - 0.5) * amount
@@ -83,7 +85,7 @@ func _sample(kind: String, x: int, y: int) -> float:
 			var offset: int = 8 if row % 2 == 1 else 0
 			var mortar: bool = y % 8 == 0 or (x + offset) % 16 == 0
 			var brick_tone: float = 0.8 + _noise((x + offset) / 16, row, 0.22)
-			return 1.0 if mortar else brick_tone + _noise(x, y, 0.07)
+			return 0.88 if mortar else brick_tone + _noise(x, y, 0.07)
 		"stucco":
 			return 0.88 + _noise(x / 3, y / 3, 0.12) + _noise(x, y, 0.05) - (0.1 if (x * 7 + y * 3) % 61 == 0 else 0.0)
 		"panel":
@@ -92,7 +94,7 @@ func _sample(kind: String, x: int, y: int) -> float:
 			return 0.84 + _noise(x / 2, y / 2, 0.08) - float(y % 32) * 0.002
 		"asphalt":
 			var speck: float = 0.14 if _noise(x, y, 1.0) > 0.44 else 0.0
-			var crack: float = -0.25 if (x + y * 2) % 47 == 0 and y % 5 < 3 else 0.0
+			var crack: float = -0.10 if (x + y * 2) % 47 == 0 and y % 5 < 3 else 0.0
 			return 0.78 + _noise(x, y, 0.12) + speck + crack
 		"tiles":
 			if x % 16 == 0 or y % 16 == 0:
@@ -104,9 +106,9 @@ func _sample(kind: String, x: int, y: int) -> float:
 				return 0.55
 			return 0.82 + _noise((x + 4) / 8, y / 8, 0.2)
 		"planks":
-			if x % 11 == 0:
+			if x % 8 == 0:
 				return 0.58
-			return 0.8 + _noise(x / 11, 0, 0.14) + sin(float(y) * 0.45 + float(x / 11)) * 0.04
+			return 0.8 + _noise(x / 8, 0, 0.14) + sin(float(y) * TAU / 16.0 + float(x / 8)) * 0.04
 		"metal":
 			return 0.8 + sin(float(x) * 0.785) * 0.12 + _noise(x, y, 0.04)
 		"roof":

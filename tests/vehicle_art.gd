@@ -32,6 +32,27 @@ func _bounds(car: Node3D, node: Node, box: Array) -> void:
 			box[0] = aabb if box[0] == null else (box[0] as AABB).merge(aabb)
 		_bounds(car, child, box)
 
+## Inspect the rendered paint triangles, not the intentionally solid damage/vehicle hull.
+## A closed body extrusion used to hide every occupant below the shoulder line.
+func _paint_between(car: Node3D, from: Vector3, to: Vector3) -> bool:
+	var body: Node3D = car.get("_body")
+	var material: Material = car._paint(car.paint_color)
+	for child: Node in body.get_children():
+		if not child is MeshInstance3D:
+			continue
+		var instance: MeshInstance3D = child
+		for surface: int in range(instance.mesh.get_surface_count()):
+			if instance.mesh.surface_get_material(surface) != material and instance.material_override != material:
+				continue
+			var arrays: Array = instance.mesh.surface_get_arrays(surface)
+			var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+			var frame: Transform3D = body.transform * instance.transform
+			for i: int in range(0, indices.size(), 3):
+				if Geometry3D.segment_intersects_triangle(from, to, frame * vertices[indices[i]], frame * vertices[indices[i + 1]], frame * vertices[indices[i + 2]]) != null:
+					return true
+	return false
+
 
 func _run() -> void:
 	var sizes: Dictionary = {}
@@ -85,6 +106,8 @@ func _run() -> void:
 			var eye: Vector3 = seat["eye"]
 			if type != "motorcycle" and str(seat["shoot"]) != "open":
 				panes_ok = panes_ok and eye.y > float(spec["belt"]) and eye.y < aabb.end.y
+				var below: Vector3 = Vector3(eye.x, (car.BODY[type]["nose"][0] as Vector2).y + 0.14, eye.z)
+				_check(not _paint_between(car, eye - Vector3(0, 0.2, 0), below), "%s seat %d: no solid coachwork sheet across the occupant's torso/legs" % [type, index])
 		_check(panes_ok, "%s: every window seat's pane rolls down and eyes sit between belt and roof" % type)
 		# Glass: every car window is breakable. A shot across the cabin at eye height breaks
 		# the windows it passes through; a reset reglazes them.

@@ -11,8 +11,8 @@ static var _cache: Dictionary = {}
 ## `outline`: closed (z, y) polygon in body space, any winding, may be concave.
 ## `half_width`: half the width at the bottom of the outline; the top is `tuck` narrower.
 ## `bevel`: how far the side edges are rounded off.
-static func profile(outline: PackedVector2Array, half_width: float, bevel: float, tuck: float = 0.0) -> ArrayMesh:
-	var key: String = "pr%s|%.3f|%.3f|%.3f" % [str(outline), half_width, bevel, tuck]
+static func profile(outline: PackedVector2Array, half_width: float, bevel: float, tuck: float = 0.0, cabin: Vector2 = Vector2.ZERO, inner_half: float = 0.0) -> ArrayMesh:
+	var key: String = "pr%s|%.3f|%.3f|%.3f|%s|%.3f" % [str(outline), half_width, bevel, tuck, str(cabin), inner_half]
 	if _cache.has(key):
 		return _cache[key] as ArrayMesh
 	var count: int = outline.size()
@@ -59,13 +59,27 @@ static func profile(outline: PackedVector2Array, half_width: float, bevel: float
 			var bevel_b: Vector3 = (Vector3(side, 0, 0) + _n3(n_end)).normalized()
 			_tri(tool, [inner_a, outer_a, outer_b], [bevel_a, _n3(n_start), _n3(n_end)])
 			_tri(tool, [inner_a, outer_b, inner_b], [bevel_a, _n3(n_end), bevel_b])
-		# Main strip across the width.
-		var la: Vector3 = Vector3(-(h0 - bevel), p0.y, p0.x)
-		var lb: Vector3 = Vector3(-(h1 - bevel), p1.y, p1.x)
-		var ra: Vector3 = Vector3(h0 - bevel, p0.y, p0.x)
-		var rb: Vector3 = Vector3(h1 - bevel, p1.y, p1.x)
-		_tri(tool, [la, ra, rb], [_n3(n_start), _n3(n_start), _n3(n_end)])
-		_tri(tool, [la, rb, lb], [_n3(n_start), _n3(n_end), _n3(n_end)])
+		# Optional opening in upward-facing coachwork strips. Side faces, bonnet, trunk,
+		# arches and underside remain intact; cabin upholstery is built separately.
+		var cuts: Array[float] = [0.0, 1.0]
+		var can_cut: bool = inner_half > 0.0 and n_edge.y > 0.25 and absf(p1.x - p0.x) > 0.001
+		if can_cut:
+			for z: float in [cabin.x, cabin.y]:
+				var t: float = (z - p0.x) / (p1.x - p0.x)
+				if t > 0.001 and t < 0.999:
+					cuts.append(t)
+		cuts.sort()
+		for segment: int in range(cuts.size() - 1):
+			var a: Vector2 = p0.lerp(p1, cuts[segment])
+			var b: Vector2 = p0.lerp(p1, cuts[segment + 1])
+			var ha: float = lerpf(h0, h1, cuts[segment]) - bevel
+			var hb: float = lerpf(h0, h1, cuts[segment + 1]) - bevel
+			var middle: float = (a.x + b.x) * 0.5
+			if can_cut and middle > cabin.x and middle < cabin.y:
+				_strip(tool, a, b, -ha, -hb, -inner_half, -inner_half, n_start, n_end)
+				_strip(tool, a, b, inner_half, inner_half, ha, hb, n_start, n_end)
+			else:
+				_strip(tool, a, b, -ha, -hb, ha, hb, n_start, n_end)
 	# Flat side faces from the inset outline.
 	var inset: PackedVector2Array = PackedVector2Array()
 	for index: int in range(count):
@@ -87,6 +101,14 @@ static func profile(outline: PackedVector2Array, half_width: float, bevel: float
 	var mesh: ArrayMesh = tool.commit()
 	_cache[key] = mesh
 	return mesh
+
+static func _strip(tool: SurfaceTool, a: Vector2, b: Vector2, left_a: float, left_b: float, right_a: float, right_b: float, na: Vector2, nb: Vector2) -> void:
+	var la: Vector3 = Vector3(left_a, a.y, a.x)
+	var lb: Vector3 = Vector3(left_b, b.y, b.x)
+	var ra: Vector3 = Vector3(right_a, a.y, a.x)
+	var rb: Vector3 = Vector3(right_b, b.y, b.x)
+	_tri(tool, [la, ra, rb], [_n3(na), _n3(na), _n3(nb)])
+	_tri(tool, [la, rb, lb], [_n3(na), _n3(nb), _n3(nb)])
 
 
 ## A flat convex glass polygon through `points` (in order round the edge).
