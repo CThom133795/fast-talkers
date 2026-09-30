@@ -64,6 +64,7 @@ var cash_prop: Node3D
 var phone_prop: Node3D
 var _phone_band: StandardMaterial3D
 var _has_phone: bool = false
+var _speaking: bool = false
 
 var _configured: bool = false
 var _built: bool = false
@@ -129,6 +130,7 @@ func _build() -> void:
 	name_tag = Label3D.new()
 	name_tag.name = "NameTag"
 	name_tag.text = display_name
+	_speaking = false
 	name_tag.font_size = 44
 	name_tag.pixel_size = 0.0055
 	name_tag.outline_size = 10
@@ -239,6 +241,14 @@ func _build_carry_props() -> void:
 	_add_box(phone_prop, Vector3(0.014, 0.09, 0.014), Vector3(0.018, 0.14, 0.0), shell)
 	_add_box(phone_prop, Vector3(0.062, 0.025, 0.047), Vector3(0.0, -0.05, 0.0), _phone_band)
 	phone_prop.visible = false
+
+
+## Voice cue: the name tag reads "(( NAME ))" while this player's proximity voice reaches us.
+func set_speaking(on: bool) -> void:
+	if on == _speaking or name_tag == null:
+		return
+	_speaking = on
+	name_tag.text = "((  %s  ))" % display_name if on else display_name
 
 
 ## Show (or hide) the crew phone on this player's belt, banded in the colour of the crew that owns it.

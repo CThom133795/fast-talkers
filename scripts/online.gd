@@ -346,6 +346,10 @@ func tick(delta: float) -> void:
 			_respawn()
 	_set_sidearm_only(_my_trade_item() >= 0)
 	_update_item_visuals()
+	var voice: Node = game.get("voice")
+	if voice != null and voice.has_method("is_speaking"):
+		for id: int in remotes.keys():
+			(remotes[id] as FastRemote).set_speaking(bool(voice.call("is_speaking", id)))
 
 
 ## The user's rule: carrying a trade item limits you to the sidearm (player.gd owns the weapon logic).
