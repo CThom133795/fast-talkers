@@ -3,3 +3,4 @@
 builds/
 *.log
 *.uid.tmp
+work/

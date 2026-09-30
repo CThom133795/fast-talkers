@@ -1,5 +1,6 @@
 extends SceneTree
-## 0.5 map, interiors and railing checks against FastWorld on its own (no main.gd).
+## 0.5/0.6 map, interiors and railing checks against FastWorld on its own (no main.gd). The 0.6
+## layout, plots, gun store and roads are in tests/map_06.gd.
 ## Run: godot --headless --path . --script res://tests/map_interiors.gd
 ## Exit code 0 when every check passes.
 
@@ -97,7 +98,8 @@ func _map_checks() -> void:
 	var shortest: float = lengths.min()
 	var longest: float = lengths.max()
 	_check(longest < INF, "Every crew HQ can drive to the Union Exchange")
-	_check(longest / shortest <= 1.08, "HQ-to-Exchange routes are within 8%% of each other (%.0f..%.0f m)" % [shortest, longest])
+	_check(longest / shortest <= 1.06, "HQ-to-Exchange routes are within 6%% of each other (%.0f..%.0f m)" % [shortest, longest])
+	_check(shortest >= 330.0 and longest <= 380.0, "HQ-to-Exchange routes are 330-380 m (%.0f..%.0f m)" % [shortest, longest])
 	# Spread round the compass, not parked in the four corners.
 	var cardinal: int = 0
 	var hqs: Array[Vector3] = []
@@ -112,7 +114,7 @@ func _map_checks() -> void:
 	for a: int in range(hqs.size()):
 		for b: int in range(a + 1, hqs.size()):
 			closest_pair = minf(closest_pair, Vector2(hqs[a].x, hqs[a].z).distance_to(Vector2(hqs[b].x, hqs[b].z)))
-	_check(closest_pair > 110.0, "Crew HQs are spread across the city (closest pair %.0f m)" % closest_pair)
+	_check(closest_pair >= 300.0, "Crew HQs are at least 300 m apart (closest pair %.0f m)" % closest_pair)
 	# Continuous land: one mainland holds every HQ, Midtown and the Exchange; one canal left.
 	var mainland: PackedVector2Array = world.land[0]
 	var on_mainland: bool = Geometry2D.is_point_in_polygon(Vector2(EXCHANGE.x, EXCHANGE.z), mainland)
@@ -182,7 +184,8 @@ func _inside_building(at: Vector3) -> String:
 # --- Interiors ------------------------------------------------------------------------------
 
 func _interior_checks() -> void:
-	var doors: Array = world.interactable_doors
+	# Midtown's walk-in businesses (0.6 adds doors, gates and lifts elsewhere; tests/map_06.gd covers those).
+	var doors: Array = world.interactable_doors.filter(func(door: Dictionary) -> bool: return str(door["district"]) == "MIDTOWN")
 	_check(doors.size() >= 10, "Midtown has 10+ walk-in businesses (%d)" % doors.size())
 	var signed: int = Interiors.SHOPS.size() + 1
 	_check(float(doors.size()) / signed > 0.5, "A majority of signed Midtown storefronts are enterable (%d of %d)" % [doors.size(), signed])
@@ -198,13 +201,13 @@ func _interior_checks() -> void:
 		_check(down.is_empty() or float(down["position"].y) < 0.2, "%s: a level floor" % label)
 	# Shut one door of each kind and check it really closes.
 	for index: int in [0, doors.size() - 2]:
-		world.set_door_open(index, false)
+		world.set_door_open(int(doors[index]["index"]), false)
 	await _physics(90)
 	for index: int in [0, doors.size() - 2]:
 		var door: Dictionary = doors[index]
 		var blocked: bool = not _ray((door["outside"] as Vector3) + Vector3(0, 1.0, 0), (door["inside"] as Vector3) + Vector3(0, 1.0, 0)).is_empty()
 		_check(blocked and not bool(door["open"]), "%s: a shut door blocks the doorway" % str(door["label"]).strip_edges())
-		world.set_door_open(index, true)
+		world.set_door_open(int(door["index"]), true)
 	await _physics(90)
 	_check(_ray((doors[0]["outside"] as Vector3) + Vector3(0, 1, 0), (doors[0]["inside"] as Vector3) + Vector3(0, 1, 0)).is_empty(), "Doors open again")
 	# Shop windows break when shot, and come back on reset.
@@ -233,10 +236,12 @@ func _railing_checks() -> void:
 	_check(_sweep(Vector3(-10, 0.5, -197.5), Vector3(0, 0, -5)) < 0.99, "It stops them at jump height too (0.5 m)")
 	target.queue_free()
 	# The beach revetment is waist-low: shots clear it, people do not.
-	var beach: Vector3 = Vector3(110, 0, 250)
-	var sea: StaticBody3D = _target(Vector3(110, 1.0, 266))
+	# (0.6 moved the Strip and its beach south-east by the world's STRIP_SHIFT.)
+	var shift: Vector3 = Vector3(world.STRIP_SHIFT.x, 0, world.STRIP_SHIFT.y)
+	var beach: Vector3 = Vector3(110, 0, 250) + shift
+	var sea: StaticBody3D = _target(Vector3(110, 1.0, 266) + shift)
 	await _physics(2)
-	var over_rocks: Dictionary = _ray(beach + Vector3(0, 1.62, 0), Vector3(110, 1.0, 266))
+	var over_rocks: Dictionary = _ray(beach + Vector3(0, 1.62, 0), Vector3(110, 1.0, 266) + shift)
 	_check(not over_rocks.is_empty() and over_rocks["collider"] == sea, "Shots from the beach clear the rock revetment")
 	_check(_sweep(beach, Vector3(0, 0, 12)) < 0.99, "The revetment keeps people out of the sea")
 	sea.queue_free()
