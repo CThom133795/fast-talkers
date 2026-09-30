@@ -1221,6 +1221,7 @@ func week_headline() -> String:
 
 func _result_screen(title: String, subtitle: String) -> void:
 	var g: Node = game
+	_hide_week_card()
 	if g.vehicle != null:
 		g._exit_vehicle(true)
 	g.phase = g.Phase.RESULT
