@@ -97,13 +97,18 @@ systems.
   talk on crew radio. It keeps the dead in the conversation ("he's behind the van") without leaking intel to other
   crews.
 
-## 7. No anti-turtling clock; the contract gets impatient instead [NEXT]
+## 7. No anti-turtling clock; the contract gets impatient instead [DEMO]
 
 - **Reference.** No Big Deal speeds up the clock when players hide in spawn.
 - **What goes wrong.** A faster clock is invisible and feels unfair.
-- **What we do.** If nobody has touched the contract item by 4:00 on the clock, the HQ phones of both contract crews
-  ring: "The client is getting nervous." The item's value then falls 10% per minute until someone picks it up. The
-  pressure is diegetic, readable and never lethal.
+- **What we do.**
+  - If nobody has picked up either trade item 4:00 into the street phase, everyone hears "The client is getting
+    nervous." It arrives as a chat line and a HUD message; ringing the crew phone comes with phone calls.
+  - The Ledger and cash values then fall 10% per minute, to a floor of 50%, until someone picks one up.
+  - The lost value stays lost, and the clean-deal bonus is never cut.
+  - Never on Friday.
+  - The rule is host-owned (`nervous_steps` in the round state) and tested in `week_flow`. The pressure is
+    readable and never lethal.
 
 ## 8. Carrier cues: physical only [DEMO]
 

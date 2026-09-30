@@ -726,8 +726,20 @@ The user delegated design choices on improving the No Big Deal / Sub Rosa system
 - [x] Local tree was clean; checked out the branch.
 - [x] `Run Tests.cmd` rewritten: all 18 suites in a loop (CRLF kept).
 - [x] Windows baseline: all 18 suites green with counts identical to Linux (integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18, vehicles_06 24, map_06 150, city_detail 217, city_audit 72, building_landmarks 204, sfx_audio 321, social_features 29, net_security 91, voice 87, remote_player 74, chat_ui 46, net_lobby_ui 84); net_pair lobby,round PASSED (host 67, client 62).
-- [ ] GodotSteam 4.22.1 GDExtension into `addons/godotsteam`, plus `steam_appid.txt` (480). Downloaded with the user's OK.
-- [ ] Lead hooks from NETWORK_SECURITY_AND_STEAM.md §6: `net.los_check` and `net.map_half_extent` in main.gd.
-- [ ] Export, zip, walkthrough.
-- [ ] Design decisions doc, then Week W0 + inventory (trade item + crew phone) if they pass on 2 instances.
-- [ ] Repo workflow clean-up (branches, who works where).
+- [x] GodotSteam 4.22.1 GDExtension in `addons/godotsteam` (win64 + linux64), `steam_appid.txt` (480). Real Steam host
+      verified on this PC: init, friends-only lobby with tags, SteamMultiplayerPeer host. Join side untested (needs 2 accounts).
+- [x] Lead hooks: `net.los_check`, `net.map_half_extent` (implementer, main.gd); `net_pair` turns LOS off only for its
+      cross-city synthetic claims.
+- [x] `docs/LEAD_DESIGN_DECISIONS.md` (binding), and W0 in online.gd:
+  - the Week, the Dead Drop, the morning paper with "who shot whom", and END OF WEEK;
+  - crew phones with the call gate, and one trade item with the sidearm rule;
+  - SOLO WEEK and Quick Week;
+  - the belt phone and the speaking cue on remotes;
+  - the nervous client and host telemetry.
+  `tests/week_flow.gd` covers it.
+- [x] Export + zip: `tools/build_playtest.ps1` -> `outputs/Fast Talkers Playtest.zip`; exe smoke on the RTX 3080 shows
+      `[steam] ready (app 480)` and SOLO WEEK starting. Walkthrough: `tools/playtest/HOW TO PLAY WITH FRIENDS.txt`.
+- [x] Workflow: `docs/WORKFLOW.md` (dev = integration branch, master = the user's), CLOUD.md / AGENT_BRIEF / README updated;
+      master's design notes merged in.
+- [ ] Final full regression + GPU perf (running), then merge `lead/nervous-client` (nervous client + telemetry), rebuild the zip,
+      push, create `dev`, open the dev -> master PR for the user.

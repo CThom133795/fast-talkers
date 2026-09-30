@@ -31,6 +31,12 @@ IF THE HOST ON STEAM BUTTON IS MISSING
 The menu shows a line saying why (for example "Steam not running"). Start Steam, log in and
 restart the game. Otherwise use the fallback below.
 
+IF THE STEAM INVITE WINDOW DOESN'T POP UP FOR THE HOST
+------------------------------------------------------
+The host stays in the lobby. Each friend opens the Steam friends list (in the Steam app, not in
+the game), right-clicks the host and picks "Join Game" while Fast Talkers is running.
+(Steam > Settings > In Game > "Enable the Steam Overlay while in-game" makes the invite window work.)
+
 FALLBACK: DIRECT IP (ENet)
 --------------------------
 - Easiest over the internet: everyone installs Tailscale (free, tailscale.com/download) and
@@ -48,6 +54,8 @@ THE GAME IN ONE MINUTE
 - Each morning you are at your HQ: a 30 s buy phase (B, or D-pad left) and the morning paper
   (yesterday's results in chat). Then 10 minutes on the street.
 - Contracts grow through the Week: Monday pays x0.6, Friday pays x1.6.
+- Don't sit on the goods. If nobody moves them for 4 minutes, the client gets nervous and the
+  contract loses 10% a minute until someone picks them up.
 - Mon-Thu: one crew holds THE LEDGER and another holds the CASH CASE. Bank the Ledger as
   the buyer, or steal either one and bank it at your own HQ.
   Clean deal (both banked, no kills between the two crews): a bonus for both.
