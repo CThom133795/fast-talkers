@@ -1,14 +1,18 @@
 # Project Fast Talkers — shared handoff
 
-**Latest pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
+**Newest pickup (2026-09-30 overnight): branch `cloud/overnight-heavy-lift`. Read the "Overnight heavy lift" entry at the end of this file first.**
 
-**Newest local pickup: read `docs/VEHICLE_TIDY_HANDOFF.md`. The cabin/surface tidy pass is source-only until the normal-permission settings test and Windows export are rerun.**
+**Earlier pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
+
+**Earlier local pickup: read `docs/VEHICLE_TIDY_HANDOFF.md`. The cabin/surface tidy pass is source-only until the normal-permission settings test and Windows export are rerun.**
 
 ## Shared objective
 Original low-poly round-based business-negotiation shooter, eventual Steam release.
 References for desired feel: Sub Rosa / No Big Deal round negotiations, GTA IV vehicle weight,
 Battlefield / BattleBit responsive gunplay, Arma Reforger grounded movement, CS2 round buying.
-PS2 / Xbox / GameCube visual era; low-end PCs; development storage budget 75 GB.
+PS2 / Xbox / GameCube visual era; development storage budget 75 GB.
+Performance target (user, 2026-09-30): 60+ fps on the user's RTX 3080 at normal settings. A POTATO MODE
+settings toggle serves bare-minimum PCs; it may hide decoration but never anything with collision.
 User confirmed typical matches: 12 players, 3 companies of 4. Large: 24 players, 4 companies of 6.
 Do not copy assets, maps, logos, characters, audio, or source code from those games.
 
@@ -50,7 +54,8 @@ Multiplayer design must revisit pause, equipment retention, friendly fire, and e
 Parse/import cleanly; boot; complete paid and hostile routes; test loss/reset and purchase limits;
 enter/exit safely; blocked exit and moving exit checks; no money from repeated delivery;
 camera ray and weapon aim agree; no client-trusted cash/hits in future network version.
-Performance numbers and 'potato PC' support are targets until hardware profiling establishes them.
+Performance is judged on the user's RTX 3080 (60+ fps). The old ~1,550 draw-call 'potato' budget is retired;
+keep batching sensible and use POTATO MODE (world.set_potato_mode) for minimum-spec machines.
 
 ## Next coordination point
 Codex is currently integrating and testing. Do not overwrite active code files.
@@ -104,3 +109,139 @@ Built eight public spaces with 85 static furniture pieces, marked parking, prote
 Validation: 1,075 passing assertions, 6,000-frame soak, localhost host/client rounds, rendered screenshots and release startup. Busy downtown still exceeds the ~1,550 draw-call target. User will test friends tomorrow; genuine internet/human balance remains unverified. Next priority is that test and measured visibility/material optimization, then extend motel/diner and remaining placeholder landmark interiors. Preserve both exits, crew route fairness, deterministic creation order and actual collision tests.
 
 My take: make Halcyon memorable through recognizable ordinary places and choices of approach/escape. Players should invent stories and meeting locations. Keep original art, readable low-poly silhouettes and purposeful detail. No official meeting zones or copied game appearance.
+
+---
+
+## 2026-09-30 overnight — Cloud Claude: overnight heavy lift (branch `cloud/overnight-heavy-lift`)
+
+Branched from `origin/cloud/map-integration` at `de11b76`. Draft PR targets `cloud/map-integration`, never `master`.
+Nothing here was run on Windows or a GPU. Captures and draw-call counts come from Xvfb with Mesa llvmpipe
+(software OpenGL) on the Compatibility renderer. Treat the counts as renderer counts; the frame times mean nothing.
+No executable was exported or modified.
+
+**User direction captured this session.** Performance target is the user's RTX 3080 at 60+ fps; the old potato budget is retired
+(see the top of this file). A POTATO MODE setting exists for minimum-spec PCs. Mood: "a world paused in time, ripe for deals and
+deceptions" (late 1999). Steam play with friends should be as simple as possible for the end user. Guns should sound gritty and
+boomy, with no "childish beeps".
+
+### What landed (one commit per workstream; see `git log origin/cloud/map-integration..cloud/overnight-heavy-lift`)
+
+1. **Landmark interiors (lead).** All on the existing BuildingKit; no new prefab system.
+   - `scripts/buildings/nightclub.gd`, CLUB VOLTAGE. Street queue rope and canopy; lobby with coat check and cover charge;
+     a 7×6 emissive dance floor; raised DJ booth with speaker stacks; a 13 m bar; lounge booths; a VIP mezzanine reached by a
+     railed stair; back of house with stock and office. Exits: front, alley and side fire door.
+   - `scripts/buildings/stripclub.gd`, THE VELVET ROOM. Tasteful, with no people or imagery. Windowless neon front; cashier booth;
+     stage, runway and poles; horseshoe booths; bar; dressing room; office with safe. Exits on both side alleys.
+   - `scripts/buildings/hotel.gd`, HOTEL MERIDIAN ground floor under a sealed tower. Reception with key cubbies, lounge, lobby bar
+     with its own street door, lift lobby, back of house and a coffered ceiling. The lift cars are not fitted and are signed
+     "service suspended".
+   - `scripts/buildings/garage.gd`, CENTRAL PARKING. Three decks with two 11.7° ramps that a sedan can drive; tested to the roof.
+     Two offset U-stairs, parapets, ticket booth, dust-sheeted static cars.
+   - `scripts/buildings/highrise.gd`, HALCYON TRUST. Lobby plus a second-floor claims office with two working lifts
+     (`kit.lift`, lobby↔2) and two U-stairwells at opposite corners; sealed 18-storey tower above.
+   - `scripts/buildings/motel.gd`, SEA BREEZE upper storey. Rooms 201–204 on a railed roof walkway reached by independent
+     east and west stairs; VACANCY pole sign. The drained pool still has no space on this 32×28 plot.
+   - `scripts/buildings/burger.gd` plus `neighborhood_rooms.gd`. Drive-through lane with a glass pickup window, menu board and
+     speaker; pole sign; awning; rooftop plant. `shell()` gained an optional `east_openings` argument.
+   - **Fixes.** Interior floors were buried under the 0.16 m block plinth, so the street paving showed indoors. Club, strip club,
+     hotel and high-rise floors now sit at 0.17 m, and the diner/motel overlay moved up. `BuildingKit.stairs_u` started its return
+     flight at the landing's far edge; it is fixed, and the garage was its only caller.
+   - `scripts/main.gd` interior sound beds: club bass in both clubs, room tone elsewhere, hall reverb in the garage. The garage roof
+     and the motel walkway count as outdoors.
+2. **City audit and draw calls (city agent).** Files: `scripts/world.gd`, `scripts/city_detail.gd`, `scripts/mesh_merge.gd`,
+   `tests/city_audit.gd`, `docs/OVERNIGHT_CITY_PERF.md`.
+   - Per-district shadow proxy, plus a clutter render layer that neon lights skip.
+   - Software-GL draw calls: Midtown 1,741 → 1,235; north long view 2,027 → 1,499; Motor Mile 1,739 → 1,237; gun store
+     1,593 → 1,079; Exchange interior ≈1,693 → 1,094.
+   - Audit fixes: plinths on North Shore Road, floating picnic furniture (`world.surface_height`), repeated signs, empty
+     promenade, z-fighting park paths, sunk props.
+   - 1999 dressing: posters, window AC units, FOR LEASE shutters, clocks stopped at 11:59, boarded windows, rooftop plant,
+     alley dumpsters, tyres, pallets, bunting, leaf drifts, oil stains.
+   - `world.set_potato_mode(enabled)` hides only collision-free decor; the audit checks collision parity between modes.
+3. **Vehicles (vehicle agent).** Files: `scripts/car.gd`, `scripts/vehicle_kit.gd`, `tests/vehicle_art.gd` (64 → 110 checks),
+   `tests/capture_cabins.gd`, `docs/VEHICLE_TIDY_HANDOFF.md` ("Overnight pass").
+   - Fixed: footwell hole, floating SUV/pickup seats, steering-wheel sight line, wheels proud of the body, wheel-well liners
+     through the tyres, painted arch tunnels across the cabin, door seams in the arches, z-fighting.
+   - Added: mirror, visors, plates, pickup mud flaps.
+   - Driving, seat, door, glass and network APIs are unchanged.
+4. **Audio (audio agent).** Files: `scripts/sfx.gd`, `tests/sfx_audio.gd` (321 checks), `docs/AUDIO_PASS.md`.
+   - All 15 guns rebuilt: gritty crack, sub-bass boom, saturation and street slap; `_far` twins.
+   - Sine "beeps" removed from bolt, pump, mag, draw, dry-fire, shell and cylinder.
+   - New sounds: briefcase, cash, payphone, car door and engine, per-surface footsteps, 1999 ambience beds.
+   - New API: `play_shot_at` and `set_space`.
+   - Listen to `work/audio/*.wav`; regenerate them with `SFX_DUMP=1 godot --headless --path . --script res://tests/sfx_audio.gd`.
+     Nobody has listened to them yet.
+5. **Network security and Steam (network agent).** Files: `scripts/net.gd`, `scripts/online.gd`, `scripts/lobby_ui.gd`,
+   `scripts/remote_player.gd`, new `scripts/net_security.gd`, new `scripts/steam_transport.gd`, `tests/net_security.gd`
+   (91 checks), `docs/NETWORK_SECURITY_AND_STEAM.md`.
+   - Security: host-validated relays; build-tagged handshake; rate limits, strikes and kicks; bounded snapshots; seat-0 car
+     ownership; damage caps; killer attribution limits; string clipping.
+   - The optional Steam (App 480 "Spacewar") transport is **written but unvalidated**: no Steam client or GodotSteam exists in
+     the cloud. ENet stays the default.
+   - `lobby_ui.gd`, `remote_player.gd` and `tests/remote_player.gd` are CRLF files. `git diff --check` flags only their CR
+     endings; `git -c core.whitespace=cr-at-eol diff --check` is clean.
+6. **Gameplay (feature agent, after SubRosa / No Big Deal research).** Files: `scripts/main.gd`, `scripts/player.gd`,
+   `scripts/character_model.gd`, `tests/social_features.gd`, `docs/SUBROSA_NBD_RESEARCH.md`.
+   - Hands up (X): a readable, honest peace signal, synced by state flag 128.
+   - Binoculars (hold Z).
+   - Contract round report.
+   - POTATO MODE setting.
+   - Audio hooks wired.
+   - Deal and round rule changes (inspect-trade, anti-turtling clock, crew spectating, case-carrier cue) stay **proposals** for
+     the user to decide.
+
+### Tests (Linux cloud, Godot 4.4.1 headless)
+`bash tests/run_all.sh` on the final tree reports **OVERALL: PASS** (exit 0), with 1,710 assertions and 0 failures:
+
+| Suite | Checks | Suite | Checks |
+|---|---:|---|---:|
+| vehicle_art | 110 | building_landmarks (new) | 187 |
+| vehicles_06 | 24 | sfx_audio (new) | 321 |
+| integration | 66 | social_features (new) | 29 |
+| free_roam | 137 | net_security (new) | 91 |
+| wiring_05 | 18 | remote_player | 74 |
+| map_interiors | 97 | chat_ui | 46 |
+| map_06 | 150 | net_lobby_ui | 84 |
+| city_detail | 207 | city_audit (new) | 69 |
+
+- soak: 6,000 frames, PASS.
+- net_pair (two-process localhost host and client, lobby and round): PASS.
+- `git diff --check` flags only CR line endings in three files that were already CRLF; `git -c core.whitespace=cr-at-eol diff --check` is clean.
+- Not run: Windows, GPU, real Steam, internet play with real players, listening to the audio.
+
+### Captures (software GL; review, not GPU validation)
+- `docs/captures/overnight/interiors/*.jpg`: club, strip club, hotel, garage, burger lot, motel.
+- `docs/captures/overnight/city/*.jpg`: city dressing.
+- `docs/captures/overnight/vehicles/*.png`: cabins.
+- Regenerate them with `tests/capture_interiors.gd [-- only=<prefix>]`, `tests/capture_cabins.gd`, `tests/capture_map06.gd -- only=detail`
+  and `tests/capture_perf.gd`. Output goes to the ignored `work/captures/`.
+- The high-rise has no capture yet. Its interior was added after the capture pass; it is covered by the walk, lift and stair tests.
+
+### Known limitations and open issues
+- **Gun store range yard crosses Coast Road.** `gunstore.gd` builds the yard 80 m deep along world X. Its side berm (and the
+  yard) crosses Coast Road near world (332–337, −95); `city_audit` lists it as KNOWN. The fix is a layout decision: a shorter
+  yard or a moved road. It touches `armory.gd` range constants and free-roam tests, so it was not changed tonight.
+- **Strip ring road meets the beach rock revetment** at about (24, 400). Also KNOWN in `city_audit`.
+- **Props sunk 16 cm into the plinth** in the hotel, high-rise, burger, motel and nightclub lots. `city_audit` REPORTs them without
+  failing. Use `world.surface_height()` for exterior solid props.
+- Hotel guest floors, the hotel lift and stair, the motel pool, high-rise floors 3–18 and any roof access are not built.
+- Surface-aware footsteps are not wired: there is no reliable surface lookup yet. Several new sounds have no trigger yet; see
+  `docs/AUDIO_PASS.md`.
+- Security gaps that remain: movement and health are still client-side; the host is fully trusted; ENet traffic is unencrypted;
+  door toggles have no distance check.
+- `free_roam`'s "round goes live when the buy timer runs out" check was flaky under heavy parallel load (it waits 6 frames for a
+  0.05 s timer). It passed on every unloaded run.
+- `Run Tests.cmd` was not edited, to avoid clobbering local Windows changes. Add the new suites there: `city_audit`,
+  `building_landmarks`, `sfx_audio`, `social_features`, `net_security`.
+
+### Claude Desktop: next steps
+1. `git fetch origin && git checkout cloud/overnight-heavy-lift`. Keep your local Windows-only files. Review the diff per commit.
+2. Run the suites on Windows: `Run Tests.cmd` plus the five new suites above, and `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
+3. On the RTX 3080, run `tests/capture_perf.gd` windowed and confirm 60+ fps in the busiest views. Toggle POTATO MODE and compare.
+4. Walk the new interiors, ride the high-rise lifts, drive up the garage, and listen to the guns, reloads and interior beds.
+5. Steam: follow `docs/NETWORK_SECURITY_AND_STEAM.md`. Install a GodotSteam build that matches 4.4.1, put `steam_appid.txt` (480)
+   beside the project and the exe, and run the two-PC checklist. `create_host` and `create_client` arguments are the likeliest
+   thing to need adjusting.
+6. Decide the gun-store yard vs Coast Road layout, and the proposals in `docs/SUBROSA_NBD_RESEARCH.md`.
+7. Only after local validation: export, smoke-test, and decide whether to merge into `cloud/map-integration`. Never merge into `master`
+   from here.
