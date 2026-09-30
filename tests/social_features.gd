@@ -151,6 +151,21 @@ func _run() -> void:
 		player.global_position = saved
 		game._update_space(1.0)
 		_check(game._space == "outdoor", "Leaving the building restores outdoor reverb")
+		# Interior beds: club bass in the club, room tone elsewhere, hall reverb in the garage, its roof is outdoors.
+		var by_name: Dictionary = {}
+		for node: Node3D in interiors:
+			by_name[node.name] = node
+		for spec: Array in [["Nightclub", Vector3(-1.5, 1.0, -1.0), "indoor", "club_bass"], ["Hotel", Vector3(0, 1.0, 4.0), "indoor", "room_tone"],
+				["Garage", Vector3(0, 1.0, 10.5), "hall", ""], ["Garage", Vector3(0, 6.9, -10.0), "outdoor", ""]]:
+			if not by_name.has(spec[0]):
+				_check(false, "%s declares an interior" % spec[0])
+				continue
+			player.global_position = (by_name[spec[0]] as Node3D).global_transform * (spec[1] as Vector3)
+			game._update_space(1.0)
+			_check(game._space == spec[2] and game._interior_bed == spec[3], "%s at %s: %s reverb, bed '%s' (got %s, '%s')" % [spec[0], spec[1], spec[2], spec[3], game._space, game._interior_bed])
+		player.global_position = saved
+		game._update_space(1.0)
+		_check(game._interior_bed == "", "Outdoors the interior bed stops")
 
 	# --- Round report -------------------------------------------------------------------
 	game._start_round()

@@ -181,6 +181,8 @@ var _ambient_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _ambient_wait: float = 30.0
 var _space_check: float = 0.0
 var _space: String = "outdoor"
+var _interior_bed: String = ""
+var _interior_bed_player: AudioStreamPlayer
 var _interior_nodes: Array[Node3D] = []
 var _interiors_scanned: bool = false
 ## Round summary bookkeeping (contract rounds).
@@ -529,6 +531,8 @@ func _exit_tree() -> void:
 	_stop_loops()
 	if is_instance_valid(ambience_player):
 		ambience_player.stop()
+	if is_instance_valid(_interior_bed_player):
+		_interior_bed_player.stop()
 
 ## Pad users get a focused button whenever a menu is open, so D-pad/stick and A work.
 func _focus_menu() -> void:
@@ -1763,14 +1767,24 @@ func _update_space(delta: float) -> void:
 	if _space_check > 0.0:
 		return
 	_space_check = 0.25
-	var next: String = "indoor" if player_indoors() else "outdoor"
+	var building: Node3D = _building_around_player()
+	var next: String = "outdoor"
+	if building != null:
+		next = "hall" if building.name.begins_with("Garage") else "indoor"
 	if next != _space:
 		_space = next
 		if sfx.has_method("set_space"):
 			sfx.set_space(next)
+	_update_interior_bed(building)
 
 
 func player_indoors() -> bool:
+	return _building_around_player() != null
+
+
+## The walk-in building (a node with meta "interior_half") the player stands inside, or null. The
+## open roof deck of the parking garage and the motel's roof walkway count as outdoors.
+func _building_around_player() -> Node3D:
 	if not _interiors_scanned and is_instance_valid(world):
 		_interiors_scanned = true
 		_collect_interiors(world, 0)
@@ -1780,9 +1794,34 @@ func player_indoors() -> bool:
 			continue
 		var local: Vector3 = node.global_transform.affine_inverse() * at
 		var half: Vector2 = node.get_meta("interior_half")
-		if absf(local.x) < half.x and absf(local.z) < half.y and local.y > -1.0 and local.y < 9.0:
-			return true
-	return false
+		# Garage roof deck and the motel's roof walkway are open air.
+		var ceiling: float = 5.5 if node.name.begins_with("Garage") else (4.3 if node.name.begins_with("Motel") else 9.0)
+		if absf(local.x) < half.x and absf(local.z) < half.y and local.y > -1.0 and local.y < ceiling:
+			return node
+	return null
+
+
+## Interior sound beds (docs/AUDIO_PASS.md): muffled club bass in the two clubs, room tone in
+## other walk-in buildings, nothing in the open garage or outdoors. One looping player, swapped
+## only when the bed changes; the street ambience dips indoors.
+func _update_interior_bed(building: Node3D) -> void:
+	var bed: String = ""
+	if building != null and not building.name.begins_with("Garage"):
+		bed = "club_bass" if building.name.begins_with("Nightclub") or building.name.begins_with("Stripclub") else "room_tone"
+	if bed == _interior_bed or not sfx.has_method("has_sound"):
+		return
+	_interior_bed = bed
+	if not is_instance_valid(_interior_bed_player):
+		_interior_bed_player = AudioStreamPlayer.new()
+		add_child(_interior_bed_player)
+	_interior_bed_player.stop()
+	if not bed.is_empty() and sfx.has_sound(bed):
+		_interior_bed_player.stream = sfx.call("stream", bed)
+		var hint: float = sfx.call("gain_hint", bed) if sfx.has_method("gain_hint") else 0.0
+		_interior_bed_player.volume_db = sfx.call("master_db", hint - (4.0 if bed == "club_bass" else 8.0))
+		_interior_bed_player.play()
+	if is_instance_valid(ambience_player):
+		ambience_player.volume_db = sfx.call("master_db", -17.0 - (8.0 if not bed.is_empty() else 0.0))
 
 
 func _collect_interiors(node: Node, depth: int) -> void:
