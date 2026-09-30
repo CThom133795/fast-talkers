@@ -348,7 +348,8 @@ func _run() -> void:
 	_check(game.car == sedan and sedan.occupied and player.in_vehicle and player.camera.current, "E enters the driver's seat of the nearest vehicle")
 	_check(not game.avatar.visible, "The first-person driver camera is clear of the local avatar's head")
 	game.car.crashed.connect(func(_strength: float): crashes += 1)
-	sedan.reset_car(Vector3(game.world.HALF + 5.0, 0.1, 35))
+	# 0.6: the east shore is far out, so start 40 m short of the quay on Union Street's east end.
+	sedan.reset_car(Vector3(366.0, 0.1, 35))
 	sedan.rotation.y = -PI * 0.5
 	await _frames(10)
 	Input.action_press("move_forward")
