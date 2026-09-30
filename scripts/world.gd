@@ -889,6 +889,7 @@ func _collider(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
 	body.rotation.y = angle
 	body.add_child(collision)
 	_target.add_child(body)
+	_note_blocker(at, size, angle)
 
 func _cylinder(at: Vector3, radius: float, height: float, color: Color, segments: int = 8, material: Material = null) -> MeshInstance3D:
 	var mesh: CylinderMesh = CylinderMesh.new()
@@ -1064,6 +1065,14 @@ func _lamp(at: Vector3, toward: Vector3) -> void:
 	_box(at + toward * 0.7 + Vector3(0, 6.94, 0), Vector3(1.5 if absf(toward.x) > 0.5 else 0.12, 0.12, 0.12 if absf(toward.x) > 0.5 else 1.5), steel)
 	_box_with(at + toward * 1.4 + Vector3(0, 6.86, 0), Vector3(0.6, 0.14, 0.34) if absf(toward.x) > 0.5 else Vector3(0.34, 0.14, 0.6), _glow(Color(1.0, 0.66, 0.28), 2.4))
 
+## True if a registered door lies within `radius` (x/z) of a world point.
+func door_within(at: Vector2, radius: float) -> bool:
+	for door: Dictionary in interactable_doors:
+		var spot: Vector3 = door["position"]
+		if Vector2(spot.x, spot.z).distance_to(at) < radius:
+			return true
+	return false
+
 ## Lamps along the edges of a block, one every `spacing` metres, facing the road.
 func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 	for side: int in range(4):
@@ -1087,7 +1096,7 @@ func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 				_:
 					at = Vector3(rect.end.x - 1.1, 0.16, rect.position.y + rect.size.y * t)
 					toward = Vector3.RIGHT
-			if _on_land(_w2(Vector2(at.x, at.z))):
+			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6):
 				_lamp(at, toward)
 
 ## A city block: raised paved plinth with lamps. Returns the buildable interior.
@@ -2616,7 +2625,7 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 			var offset: float = (row_depth * 0.5 + row_gap * 0.5) * side if rows == 2 else 0.0
 			var center: Vector2 = Vector2(area.position.x + lot_center, area.get_center().y + offset) if along_x else Vector2(area.get_center().x + offset, area.position.y + lot_center)
 			var lot_size: Vector2 = Vector2(span, row_depth) if along_x else Vector2(row_depth, span)
-			cursor += span + 0.8
+			cursor += span + (3.4 if style == "warehouse" else 0.8)
 			var lot: Rect2 = Rect2(center - lot_size * 0.5, lot_size)
 			if keep_clear.size != Vector2.ZERO and lot.intersects(keep_clear.grow(1.0)):
 				continue
@@ -2733,9 +2742,11 @@ func _rooftop(center: Vector2, size: Vector2, height: float) -> void:
 
 ## One block of a district: the paved plinth, then its buildings (unless a plot or park takes it).
 func _district_block(rect: Rect2, style: String, paving: Color = Color(0.46, 0.45, 0.43), keep_clear: Rect2 = Rect2()) -> Rect2:
-	var buildable: Rect2 = _block(rect, paving, "tiles")
+	# Lamps go up after the buildings, so none stands in a prefab's doorway.
+	var buildable: Rect2 = _block(rect, paving, "tiles", false)
 	if style != "":
 		_fill_block(buildable, style, keep_clear)
+	_block_lamps(rect)
 	return buildable
 
 ## A small paved park in a block: lawn, path, trees and benches (cover, no walls of text).

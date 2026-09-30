@@ -16,6 +16,9 @@ const SETBACK: float = 3.4
 ## Coast rows: an 8 m promenade between the quay rail and the lot, and how close a lot may come to the water.
 const PROMENADE: float = 8.0
 const PARTY_GAP: float = 0.8
+## Kinds with a side door need a 3.4 m gap to their neighbours; the others sit party-wall to party-wall.
+const WIDE_KINDS: PackedStringArray = ["warehouse", "auto_shop", "church_hall", "bar"]
+const WIDE_GAP: float = 3.4
 const ALLEY: float = 5.0
 const CELL: float = 16.0
 ## Fallback lot sizes when a prefab kind has no size of its own: {kind: [min frontage, max frontage, min depth, max depth, floors min, floors max]}.
@@ -24,27 +27,29 @@ const SIZES: Dictionary = {
 	"row_shop": [7.0, 11.0, 11.0, 15.0, 2, 3],
 	"walkup": [10.0, 15.0, 12.0, 16.0, 3, 5],
 	"warehouse": [16.0, 28.0, 14.0, 22.0, 1, 2],
-	"office": [14.0, 22.0, 14.0, 20.0, 3, 8],
+	"office": [16.0, 22.0, 16.0, 20.0, 2, 4],
 	"bar": [10.0, 14.0, 12.0, 15.0, 1, 2],
 	"auto_shop": [12.0, 18.0, 13.0, 18.0, 1, 1],
+	"church_hall": [10.0, 14.0, 16.0, 20.0, 1, 1],
+	"diner_small": [10.0, 14.0, 10.0, 13.0, 1, 1],
 }
 ## What each district builds, as [kind, weight].
 const KINDS: Dictionary = {
-	"MIDTOWN": [["row_shop", 3], ["office", 3], ["walkup", 2], ["bar", 1], ["corner_store", 1]],
+	"MIDTOWN": [["row_shop", 3], ["office", 3], ["walkup", 2], ["bar", 1], ["corner_store", 1], ["diner_small", 1]],
 	"LANTERN ROW": [["bar", 3], ["row_shop", 3], ["walkup", 2], ["corner_store", 1]],
-	"SOLANA HEIGHTS": [["row_shop", 3], ["walkup", 3], ["corner_store", 1], ["bar", 1]],
+	"SOLANA HEIGHTS": [["row_shop", 3], ["walkup", 3], ["corner_store", 1], ["bar", 1], ["church_hall", 1]],
 	"KINGSWAY": [["walkup", 5], ["corner_store", 2], ["row_shop", 1]],
-	"MORRIS PARK": [["walkup", 4], ["row_shop", 2], ["bar", 1], ["corner_store", 1]],
+	"MORRIS PARK": [["walkup", 4], ["row_shop", 2], ["bar", 1], ["corner_store", 1], ["church_hall", 1]],
 	"THE HARBOR": [["warehouse", 5]],
 	"CANAL MARKET": [["row_shop", 3], ["warehouse", 2], ["corner_store", 1]],
 	"UNION STATION": [["row_shop", 2], ["office", 2], ["bar", 1], ["corner_store", 1]],
-	"THE STRIP": [["bar", 3], ["row_shop", 2], ["office", 1]],
+	"THE STRIP": [["bar", 3], ["row_shop", 2], ["office", 1], ["diner_small", 2]],
 	"EASTGATE": [["office", 4], ["row_shop", 1]],
 	"UPTOWN": [["office", 6], ["bar", 1]],
-	"MOTOR MILE": [["auto_shop", 4], ["warehouse", 2], ["corner_store", 1]],
-	"NIGHTLIFE": [["bar", 4], ["row_shop", 2], ["office", 2]],
+	"MOTOR MILE": [["auto_shop", 4], ["warehouse", 2], ["corner_store", 1], ["diner_small", 1]],
+	"NIGHTLIFE": [["bar", 4], ["row_shop", 2], ["office", 2], ["diner_small", 1]],
 	"WEST END": [["walkup", 4], ["row_shop", 2], ["corner_store", 1]],
-	"OLD TOWN": [["walkup", 3], ["row_shop", 3], ["corner_store", 1], ["bar", 1]],
+	"OLD TOWN": [["walkup", 3], ["row_shop", 3], ["corner_store", 1], ["bar", 1], ["church_hall", 1]],
 	"SLIP SIDE": [["warehouse", 4], ["auto_shop", 1]],
 	"OLD WHARF": [["warehouse", 5], ["auto_shop", 1]],
 	"EAST SHORE": [["row_shop", 1], ["corner_store", 1], ["walkup", 1]],
@@ -68,6 +73,8 @@ const TRADES: Dictionary = {
 	"office": ["INSURANCE", "LAW OFFICES", "REALTY", "ACCOUNTING", "TRAVEL", "DENTAL", "TRUST", "CLINIC", "EMPLOYMENT", "SURVEYORS"],
 	"bar": ["TAVERN", "LOUNGE", "PUB", "CLUB", "BAR", "TAP ROOM", "CANTINA"],
 	"auto_shop": ["AUTO", "GARAGE", "TIRE & LUBE", "BODY SHOP", "MOTORS", "SMOG CHECK"],
+	"church_hall": ["PARISH HALL", "COMMUNITY HALL", "MISSION", "CHAPEL"],
+	"diner_small": ["DINER", "COFFEE SHOP", "LUNCHEONETTE", "GRILL"],
 }
 const SIGN_COLORS: Array[Color] = [Color(1.0, 0.85, 0.55), Color(0.95, 0.5, 0.4), Color(0.5, 0.9, 1.0), Color(0.6, 1.0, 0.6), Color(1.0, 0.6, 0.85)]
 
@@ -77,6 +84,7 @@ var prefabs: Variant = null
 ## Uniform grids (CELL m): footprints, props and yards; road segments; slab tops; parked cars.
 var _rects: Dictionary = {}
 var _obbs: Dictionary = {}
+var _zones: Dictionary = {}
 var _segs: Dictionary = {}
 var _slabs: Dictionary = {}
 var _keepout: Array[PackedVector2Array] = []
@@ -100,6 +108,7 @@ func build() -> void:
 	for road_index: int in range(w.roads.size()):
 		_frontage(road_index)
 	_coast_frontage()
+	_dress_alleys()
 	_far_massing()
 	for key: Vector3i in _cells:
 		var node: Node3D = _cells[key]
@@ -221,15 +230,21 @@ func _bounds(poly: PackedVector2Array) -> Rect2:
 
 ## Registers a built lot (oriented, grown by half a party gap) so later lots keep clear of it.
 func _add_obb(center: Vector2, u: Vector2, v: Vector2, hw: float, hd: float) -> void:
+	# The 3 m behind a lot (its rear doors and yard) is reserved too: no lot may be built into it.
+	_register_obb(_zones, center + v * (hd + 1.5), u, v, hw, 1.5)
+	_register_obb(_obbs, center, u, v, hw, hd)
+
+
+func _register_obb(into: Dictionary, center: Vector2, u: Vector2, v: Vector2, hw: float, hd: float) -> void:
 	var box: Rect2 = _bounds(_corners(center, u, v, hw, hd))
 	var low: Vector2i = _key(box.position)
 	var high: Vector2i = _key(box.end)
 	for cx: int in range(low.x, high.x + 1):
 		for cy: int in range(low.y, high.y + 1):
 			var key: Vector2i = Vector2i(cx, cy)
-			if not _obbs.has(key):
-				_obbs[key] = []
-			(_obbs[key] as Array).append([center, u, v, hw, hd])
+			if not into.has(key):
+				into[key] = []
+			(into[key] as Array).append([center, u, v, hw, hd])
 
 
 ## Separating axis test between two oriented rectangles ([centre, u, v, hw, hd]).
@@ -277,6 +292,7 @@ func _dist_segment_lot(a: Vector2, b: Vector2, center: Vector2, u: Vector2, v: V
 
 
 var fail_reasons: Dictionary = {}
+var _alley_props: Array[Dictionary] = []
 var _setback: float = SETBACK
 var _coast_gap: float = 8.0
 var _apron_front: float = 0.0
@@ -321,6 +337,11 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 					if _obb_pair(center, u, v, hw + 0.3, hd + 0.3, other):
 						_why("lot")
 						return false
+			if _zones.has(key):
+				for other: Array in _zones[key]:
+					if _obb_pair(center, u, v, hw, hd, other):
+						_why("rear")
+						return false
 			if _segs.has(key):
 				for seg: Array in _segs[key]:
 					var gap: float = _dist_segment_lot(seg[0], seg[1], center, u, v, hw, hd)
@@ -331,6 +352,26 @@ func _clear(center: Vector2, u: Vector2, v: Vector2, fw: float, dp: float, extra
 		if box.intersects(_keepout_bounds[index]) and not Geometry2D.intersect_polygons(poly, _keepout[index]).is_empty():
 			_why("park")
 			return false
+	# Front doorway zone free of street furniture; a 3 m strip behind the lot free of other lots (rear doors).
+	for lateral: float in [-3.5, -1.75, 0.0, 1.75, 3.5]:
+		for reach: float in [0.5, 1.5, 2.5, 3.3]:
+			if absf(lateral) <= hw and w.solid_near(center - v * (hd + reach) + u * lateral, 0.5):
+				_why("furniture")
+				return false
+	var rear: Array = [center + v * (hd + 1.6), u, v, hw, 1.6]
+	var rear_box: Rect2 = _bounds(_corners(rear[0], u, v, hw, 1.6))
+	for key: Vector2i in [_key(rear[0]), _key(center + v * (hd + 0.4)), _key(center + v * (hd + 2.8))]:
+		if _rects.has(key):
+			for rect: Rect2 in _rects[key]:
+				if rear_box.intersects(rect) and _obb_hits(rear[0], u, v, hw, 1.6, rect):
+					_why("rear")
+					return false
+	for key: Vector2i in [_key(rear[0]), _key(center + v * (hd + 0.4)), _key(center + v * (hd + 2.8))]:
+		if _obbs.has(key):
+			for other: Array in _obbs[key]:
+				if _obb_pair(rear[0], u, v, hw, 1.6, other):
+					_why("rear")
+					return false
 	# Not straddling a slab edge: the whole lot (and its apron) is on one surface height.
 	var height: float = _height_at(center)
 	for point: Vector2 in _corners(center, u, v, hw + 0.6, hd + 0.6):
@@ -420,11 +461,18 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 	var t: float = 2.0
 	var since_alley: int = 0
 	var run_start: float = -1.0
+	var last_gap: float = 99.0
+	var last_wide: bool = false
 	while t < length - 5.0:
 		var probe: Vector2 = a + dir * (t + 6.0) + normal * (half + _setback + 6.0)
 		var district: String = w.district_at(Vector3(probe.x, 0, probe.y))
 		var kind: String = _pick_kind(district)
 		var limits: Array = _limits(kind)
+		# A wide-gap kind keeps 3.4 m from the lot before it (its side door).
+		var wide: bool = WIDE_KINDS.has(kind)
+		if run_start >= 0.0 and (wide or last_wide) and last_gap < WIDE_GAP:
+			t += WIDE_GAP - last_gap
+			last_gap = WIDE_GAP
 		var free: float = length - 3.0 - t
 		if free < float(limits[0]):
 			break
@@ -449,6 +497,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 			run_start = t
 		t += fw
 		since_alley += 1
+		last_wide = wide
 		if since_alley >= 3 + rng.randi() % 3 or t - run_start > 58.0:
 			_alley(a + dir * (t + ALLEY * 0.5) + normal * (half + _setback), dir, back, dp)
 			t += ALLEY
@@ -456,6 +505,7 @@ func _run(a: Vector2, dir: Vector2, length: float, half: float, side: float) -> 
 			run_start = -1.0
 		else:
 			t += PARTY_GAP
+			last_gap = PARTY_GAP
 
 
 func _fits(a: Vector2, dir: Vector2, normal: Vector2, half: float, t: float, fw: float, dp: float) -> bool:
@@ -517,7 +567,8 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 	# Apron: a raised paved plinth under the lot and the sidewalk in front of it (skipped where the
 	# lot already stands on a block plinth).
 	var ground: float = _height_at(center)
-	if ground < 0.05 and OS.get_environment("FT_NOAPRON") != "1":
+	var lamp_wanted: bool = false
+	if ground < 0.05:
 		var apron_depth: float = dp + _setback - _apron_front + 1.0
 		var apron_center: Vector2 = center - back * ((_setback - _apron_front) * 0.5 - 0.5)
 		var yaw: float = atan2(-u.y, u.x)
@@ -525,17 +576,24 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 		w._xf = Transform3D.IDENTITY
 		w._xf_yaw = 0.0
 		w._slab_rot(apron_center, Vector2(fw + 1.6, apron_depth), yaw, Color(0.5, 0.49, 0.45))
-		# A street lamp on the kerb side of the apron.
-		if rng.randf() < 0.5:
-			w._lamp(Vector3(center.x + front.x * (dp * 0.5 + _setback - 1.3), 0.16, center.y + front.y * (dp * 0.5 + _setback - 1.3)), Vector3(front.x, 0, front.y).round() if absf(front.x) > 0.5 or absf(front.y) > 0.5 else Vector3.BACK)
 		ground = 0.16
+		lamp_wanted = rng.randf() < 0.5
 	var sign_text: String = _sign_for(kind)
 	var record_before: int = w.buildings.size()
 	var built: bool = false
 	if prefabs != null and prefabs.kinds().has(kind):
 		built = _prefab(kind, center, front, fw, dp, floors, color, sign_text, district)
-	if not built and OS.get_environment("FT_NOSHELL") != "1":
+	if not built:
 		_solid_shell(kind, center, front, fw, dp, floors, color, sign_text)
+	# A street lamp at the party-wall end of the sidewalk, never in front of a door.
+	if lamp_wanted:
+		var at: Vector2 = center + front * (dp * 0.5 + _setback - 1.3) + u * (fw * 0.5 + 0.1)
+		if not w.door_within(at, 2.8) and not w.solid_near(at, 0.3):
+			var toward: Vector3 = Vector3(front.x, 0, front.y)
+			toward = Vector3(signf(toward.x), 0, 0) if absf(toward.x) > absf(toward.z) else Vector3(0, 0, signf(toward.z))
+			w._target = _cell_node(center)
+			w._xf = Transform3D.IDENTITY
+			w._lamp(Vector3(at.x, 0.16, at.y), toward)
 	_add_obb(center, u, back, fw * 0.5, dp * 0.5)
 	placed.append({"kind": kind, "center": center, "front": front, "size": Vector2(fw, dp), "district": district, "prefab": built, "floors": floors})
 
@@ -674,8 +732,6 @@ func _massing_box(tool: SurfaceTool, center: Vector2, size: Vector3, yaw: float,
 ## street end. The middle 2.4 m stays clear. `at` is on the sidewalk line of the alley's mouth.
 func _alley(at: Vector2, u: Vector2, back: Vector2, depth: float) -> void:
 	alleys.append({"at": at, "dir": back, "width": ALLEY, "depth": depth})
-	if OS.get_environment("FT_NOALLEY") == "1":
-		return
 	var node: Node3D = _cell_node(at)
 	w._target = node
 	w._xf = Transform3D.IDENTITY
@@ -690,5 +746,21 @@ func _alley(at: Vector2, u: Vector2, back: Vector2, depth: float) -> void:
 		floor_y = 0.16
 	var side: float = 1.0 if rng.randf() < 0.5 else -1.0
 	var spot: Vector2 = at + back * (depth * 0.35) + u * side * (ALLEY * 0.5 - 1.05)
-	w._dumpster(Vector3(spot.x, floor_y, spot.y), atan2(-u.x * side, -u.y * side), Color(0.2, 0.33, 0.26))
-	w._trash_bags(Vector3(spot.x + back.x * 2.4, floor_y, spot.y + back.y * 2.4))
+	_alley_props.append({"spot": spot, "u": u, "back": back, "side": side, "y": floor_y})
+
+
+## Dumpsters and bags go in once every lot is built, so none stands at a side door.
+func _dress_alleys() -> void:
+	for prop: Dictionary in _alley_props:
+		var spot: Vector2 = prop["spot"]
+		var back: Vector2 = prop["back"]
+		var u: Vector2 = prop["u"]
+		var side: float = prop["side"]
+		if w.door_within(spot, 3.6) or w.door_within(spot + back * 2.4, 2.6) or w.solid_near(spot, 1.4):
+			continue
+		w._target = _cell_node(spot)
+		w._xf = Transform3D.IDENTITY
+		w._xf_yaw = 0.0
+		w._dumpster(Vector3(spot.x, float(prop["y"]), spot.y), atan2(-u.x * side, -u.y * side), Color(0.2, 0.33, 0.26))
+		if not w.door_within(spot + back * 2.4, 2.6):
+			w._trash_bags(Vector3(spot.x + back.x * 2.4, float(prop["y"]), spot.y + back.y * 2.4))
