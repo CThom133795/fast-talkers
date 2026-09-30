@@ -99,9 +99,10 @@ func _process(_delta: float) -> void:
 func _ensure(sound: String) -> void:
 	if not _lazy.has(sound):
 		return
-	var builder: Callable = _lazy[sound]
+	var entry: Array = _lazy[sound]
 	_lazy.erase(sound)
-	_bank[sound] = _wav(builder.call() as PackedFloat32Array, false)
+	var builder: Callable = entry[0]
+	_bank[sound] = _wav(builder.call() as PackedFloat32Array, bool(entry[1]), float(entry[2]))
 
 
 func _ensure_all() -> void:
@@ -193,6 +194,20 @@ func play_shot_at(weapon: String, at: Vector3, listener: Vector3, pitch: float =
 	play_at(sound, at, pitch, gain_db)
 
 
+## Footstep sample name for a surface ("concrete", "wood", "metal", "carpet", "grass") and variant 0-3.
+## Unknown surfaces fall back to the legacy concrete-ish `step0-3`.
+func step_sound(surface: String, variant: int) -> String:
+	var name: String = "step_%s%d" % [surface, posmod(variant, 4)]
+	if has_sound(name):
+		return name
+	return "step%d" % posmod(variant, 4)
+
+
+## Plays a footstep with a random variant for `surface`.
+func play_step(surface: String = "concrete", gain_db: float = 0.0, pitch: float = 1.0) -> void:
+	play(step_sound(surface, _rng.randi() % 4), pitch * _rng.randf_range(0.94, 1.06), gain_db)
+
+
 ## Selects the reverb applied to gunfire/crash/glass voices: "outdoor", "alley", "indoor", "hall".
 func set_space(space: String) -> void:
 	if not SPACES.has(space):
@@ -241,8 +256,8 @@ func _add(sound: String, samples: PackedFloat32Array, gain_db: float = 0.0, loop
 
 
 ## A firearm: near sample plus "<name>_far". Both play through the reverb-space bus.
-func _add_lazy(sound: String, builder: Callable, gain_db: float) -> void:
-	_lazy[sound] = builder
+func _add_lazy(sound: String, builder: Callable, gain_db: float, loop: bool = false, target_rms: float = 0.0) -> void:
+	_lazy[sound] = [builder, loop, target_rms]
 	_gain[sound] = gain_db
 
 
@@ -333,6 +348,7 @@ func _build_bank() -> void:
 	_add("glass", _glass_break(0.7, 61), -3.0)
 	for extra: String in ["glass", "crash", "door"]:
 		_spatial[extra] = true
+	_build_world_sounds()
 
 
 ## Loop level target so the richer ambience sits where the old rumble did.
@@ -527,6 +543,7 @@ func _click(length: float, frequency: float, decay: float) -> PackedFloat32Array
 ## Weapon handling from timed events: [time s, kind, parameter, gain]. Every kind is noise-led:
 ## filtered-noise bursts, friction scrapes and thuds, with inharmonic metal partials mixed well
 ## UNDER the noise and dying in a few ms, so nothing ever reads as a clean beep.
+## also: paper (banknote flick / rustle, no tone).
 ## kinds: click (small sear/latch tick, parameter = brightness Hz), clack (metal-on-metal, Hz),
 ## thunk (seating thud, Hz), slide (steel friction scrape, parameter = duration s),
 ## brass (casing tink and bounce, Hz), cloth (leather/cloth, duration s).
@@ -549,6 +566,8 @@ func _handling(events: Array, length: float, seed_value: int) -> PackedFloat32Ar
 				span = 0.03
 			"brass":
 				span = 0.06
+			"paper":
+				span = 0.045
 		var count: int = mini(out.size() - start, int(span * RATE))
 		var low: float = 0.0
 		var high_prev: float = 0.0
@@ -597,6 +616,12 @@ func _handling(events: Array, length: float, seed_value: int) -> PackedFloat32Ar
 					low += (noise - low) * 0.22
 					var u: float = local / maxf(param, 0.001)
 					value = low * sin(PI * clampf(u, 0.0, 1.0)) * 1.1
+				"paper":
+					# Banknote flick: a dry band-passed rustle, no tone at all.
+					low += (noise - low) * 0.55
+					band += (low - band) * 0.2
+					value = (low - band) * exp(-local * 320.0) * 1.6 + (noise - high_prev) * exp(-local * 900.0) * 0.3
+					high_prev = noise
 			out[start + offset] += value * gain
 	return _soft_clip(out, 1.5)
 
@@ -943,3 +968,340 @@ func _cash() -> PackedFloat32Array:
 			value += sin(TAU * 1760.0 * late) * exp(-late * 7.0) + 0.4 * sin(TAU * 2637.0 * late) * exp(-late * 11.0)
 		out[index] = value * minf(1.0, t * 500.0)
 	return out
+
+
+## ---- Deal-world sounds (added lazily: built one per frame at idle, or on first use) ----
+
+const STEP_SURFACES: PackedStringArray = ["concrete", "wood", "metal", "carpet", "grass"]
+const STEP_GAINS: Array = [-16.0, -17.0, -15.0, -21.0, -17.0]
+
+
+func _build_world_sounds() -> void:
+	# Briefcase, cash, phone handling: noise-led events like the weapon handling above.
+	_add_lazy("briefcase_open", func() -> PackedFloat32Array: return _handling([[0.0, "click", 2600.0, 0.95], [0.055, "click", 2900.0, 0.95], [0.12, "slide", 0.17, 0.22], [0.29, "thunk", 165.0, 0.45], [0.30, "clack", 800.0, 0.3]], 0.46, 101), -6.0)
+	_add_lazy("briefcase_close", func() -> PackedFloat32Array: return _handling([[0.0, "thunk", 140.0, 0.85], [0.006, "clack", 1100.0, 0.5], [0.085, "click", 2500.0, 0.85], [0.14, "click", 2750.0, 0.85]], 0.28, 102), -6.0)
+	_add_lazy("cash_riffle", _cash_riffle, -9.0)
+	_add_lazy("cash_bundle", func() -> PackedFloat32Array: return _handling([[0.0, "thunk", 120.0, 0.7], [0.0, "paper", 0.0, 1.1], [0.03, "paper", 0.0, 0.5], [0.07, "paper", 0.0, 0.3]], 0.2, 103), -8.0)
+	_add_lazy("phone_pickup", func() -> PackedFloat32Array: return _handling([[0.0, "clack", 700.0, 0.75], [0.03, "slide", 0.09, 0.2], [0.13, "click", 2000.0, 0.7]], 0.28, 104), -8.0)
+	_add_lazy("phone_hangup", func() -> PackedFloat32Array: return _handling([[0.0, "thunk", 180.0, 0.65], [0.01, "clack", 900.0, 0.7], [0.045, "click", 1800.0, 0.75], [0.09, "brass", 3800.0, 0.3]], 0.22, 105), -8.0)
+	_add_lazy("radio_squelch", _radio_squelch, -10.0)
+	# Cars: doors are thumps and latches; the lock chirp is a real tonal device, so it is tonal.
+	_add_lazy("car_door_open", func() -> PackedFloat32Array: return _handling([[0.0, "click", 2200.0, 0.85], [0.02, "clack", 900.0, 0.6], [0.075, "slide", 0.15, 0.25], [0.21, "thunk", 120.0, 0.4]], 0.4, 106), -5.0)
+	_add_lazy("car_door_close", func() -> PackedFloat32Array: return _handling([[0.0, "thunk", 70.0, 1.2], [0.002, "thunk", 115.0, 0.7], [0.004, "clack", 650.0, 0.8], [0.014, "clack", 1600.0, 0.55], [0.07, "slide", 0.14, 0.12]], 0.36, 107), -3.0)
+	_add_lazy("car_chirp", func() -> PackedFloat32Array: return _beeps([0.0, 0.13], 0.065, 2350.0), -18.0)
+	_add_lazy("car_unlock", func() -> PackedFloat32Array: return _beeps([0.0], 0.07, 1950.0), -18.0)
+	_add_lazy("car_alarm", _car_alarm, -20.0, true)
+	_add_lazy("engine_start", _engine_start, -10.0)
+	_add_lazy("engine_stall", _engine_stall, -6.0)
+	# Payphone tones.
+	_add_lazy("phone_dialtone", _dial_tone, -22.0, true)
+	_add_lazy("phone_busy", _busy_tone, -22.0, true)
+	_add_lazy("phone_dial", func() -> PackedFloat32Array: return _dtmf("5551999"), -20.0)
+	# Footsteps per surface, four variants each.
+	for surface_index: int in range(STEP_SURFACES.size()):
+		for variant: int in range(4):
+			var surface: String = STEP_SURFACES[surface_index]
+			_add_lazy("step_%s%d" % [surface, variant], func() -> PackedFloat32Array: return _step(surface, variant), float(STEP_GAINS[surface_index]))
+	# Ambient beds and one-shots for a city frozen in late 1999.
+	_add_lazy("train_horn_far", _train_horn_far, -18.0)
+	_add_lazy("neon_buzz", _neon_buzz, -22.0, true, 0.08)
+	_add_lazy("rain_awning", _rain_awning, -19.0, true, 0.16)
+	_add_lazy("ambience_hush", _hush_loop, -20.0, true, 0.06)
+
+
+## Riffling a stack of notes: ~26 paper ticks that speed up, then one flat slap.
+func _cash_riffle() -> PackedFloat32Array:
+	var events: Array = []
+	var time: float = 0.0
+	var gap: float = 0.032
+	for index: int in range(26):
+		events.append([time, "paper", 0.0, 0.55 + 0.4 * absf(sin(float(index) * 2.3))])
+		time += gap
+		gap = maxf(gap * 0.955, 0.014)
+	events.append([time + 0.01, "paper", 0.0, 1.0])
+	events.append([time + 0.01, "thunk", 130.0, 0.4])
+	return _handling(events, time + 0.16, 108)
+
+
+## Push-to-talk: a burst of band-limited static with a hard leading edge.
+func _radio_squelch() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 109
+	var out: PackedFloat32Array = _buffer(0.17)
+	var fast: float = 0.0
+	var slow: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		fast += (noise - fast) * 0.6
+		slow += (noise - slow) * 0.09
+		out[index] = (fast - slow) * (exp(-t * 55.0) * 0.7 + exp(-t * 900.0) * 1.2)
+	return _soft_clip(out, 1.4)
+
+
+## Short square-ish beeps (a car's lock confirmation). `times` are start times in seconds.
+func _beeps(times: Array, duration: float, frequency: float) -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 110
+	var last: float = float(times[times.size() - 1]) + duration + 0.05
+	var out: PackedFloat32Array = _buffer(last)
+	for start_time: float in times:
+		var start: int = int(start_time * RATE)
+		for offset: int in range(int(duration * RATE)):
+			var local: float = float(offset) / RATE
+			var env: float = minf(1.0, local * 500.0) * minf(1.0, (duration - local) * 500.0)
+			var wave: float = sin(TAU * frequency * local) + sin(TAU * frequency * 3.0 * local) * 0.33 + sin(TAU * frequency * 5.0 * local) * 0.2
+			out[start + offset] += (wave * 0.6 + rng.randf_range(-0.12, 0.12)) * env
+	return out
+
+
+## Car alarm whoop: eight harsh 700-1500 Hz rising sweeps in 2.4 s (loops on the sweep).
+func _car_alarm() -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(2.4)
+	var phase: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var u: float = fposmod(t, 0.3) / 0.3
+		phase += lerpf(700.0, 1500.0, u) / RATE
+		var square: float = sign(sin(TAU * phase)) * 0.6 + sin(TAU * phase * 2.0) * 0.25
+		out[index] = square * (0.75 + 0.25 * (1.0 - u))
+	return _one_pole(out, 0.55)
+
+
+## Starter motor cranking (noise pulses under a low buzz), a catch and an idle that settles.
+func _engine_start() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 111
+	var out: PackedFloat32Array = _buffer(1.9)
+	var smooth: float = 0.0
+	var phase: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		smooth += (noise - smooth) * 0.2
+		var value: float = 0.0
+		if t < 0.95:
+			# Cranking: ~7 compression pulses a second, slowly speeding up, plus the starter's grind.
+			var pulse: float = pow(0.5 + 0.5 * sin(TAU * (6.0 * t + 1.6 * t * t)), 3.0)
+			var grind: float = (noise - smooth) * 0.25
+			value = (smooth * 1.4 * pulse + grind) * minf(1.0, t * 20.0)
+			value += sin(TAU * 95.0 * t) * pulse * 0.25
+		else:
+			# Catch and idle: firing pulses at ~22 Hz that settle to ~15 Hz with a rev flare on the catch.
+			var local: float = t - 0.95
+			var rate: float = lerpf(30.0, 15.0, minf(local / 0.6, 1.0))
+			phase += rate / RATE
+			var fire: float = pow(0.5 + 0.5 * sin(TAU * phase), 4.0)
+			var flare: float = exp(-local * 3.0)
+			value = smooth * 1.2 * fire * (0.5 + 0.8 * flare) + sin(TAU * phase * 2.0) * 0.4 * (0.5 + flare) + sin(TAU * phase) * 0.35
+			value *= minf(1.0, local * 60.0) * minf(1.0, (0.95 - local) / 0.15)
+		out[index] = value
+	return _soft_clip(out, 1.6)
+
+
+## Cranking that catches once, coughs, and dies: pulses slow down while the sound decays and ends with a clunk.
+func _engine_stall() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 112
+	var out: PackedFloat32Array = _buffer(1.5)
+	var smooth: float = 0.0
+	var phase: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		smooth += (noise - smooth) * 0.16
+		var rate: float = lerpf(17.0, 2.5, clampf(t / 1.2, 0.0, 1.0))
+		phase += rate / RATE
+		var fire: float = pow(0.5 + 0.5 * sin(TAU * phase), 5.0)
+		var level: float = exp(-t * 2.2)
+		var value: float = (smooth * 1.3 * fire + sin(TAU * phase * 2.0) * 0.3 * fire) * level
+		if t > 1.15:
+			var clunk: float = t - 1.15
+			value += smooth * exp(-clunk * 60.0) * 0.6 + sin(TAU * 85.0 * clunk) * exp(-clunk * 35.0) * 0.5
+		out[index] = value * minf(1.0, (1.5 - t) / 0.05)
+	return _soft_clip(out, 1.5)
+
+
+## North American dial tone: 350 + 440 Hz, exactly 1 s so the loop is seamless.
+func _dial_tone() -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(1.0)
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		out[index] = (sin(TAU * 350.0 * t) + sin(TAU * 440.0 * t)) * 0.5
+	return out
+
+
+## Busy signal: 480 + 620 Hz, half a second on and half off (2 s loop).
+func _busy_tone() -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(2.0)
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var gate: float = 1.0 if fposmod(t, 1.0) < 0.5 else 0.0
+		var ramp: float = minf(1.0, fposmod(t, 1.0) * 400.0) * minf(1.0, (0.5 - fposmod(t, 1.0)) * 400.0)
+		out[index] = (sin(TAU * 480.0 * t) + sin(TAU * 620.0 * t)) * 0.5 * gate * clampf(ramp, 0.0, 1.0)
+	return out
+
+
+## Touch-tone dialing of `digits` (DTMF pairs, 70 ms tones with 55 ms gaps).
+func _dtmf(digits: String) -> PackedFloat32Array:
+	var rows: Array = [697.0, 770.0, 852.0, 941.0]
+	var columns: Array = [1209.0, 1336.0, 1477.0]
+	var out: PackedFloat32Array = _buffer(float(digits.length()) * 0.125 + 0.05)
+	for position: int in range(digits.length()):
+		var digit: int = int(digits.substr(position, 1))
+		var row: int = 3 if digit == 0 else (digit - 1) / 3
+		var column: int = 1 if digit == 0 else (digit - 1) % 3
+		var start: int = int(float(position) * 0.125 * RATE)
+		for offset: int in range(int(0.07 * RATE)):
+			var local: float = float(offset) / RATE
+			var env: float = minf(1.0, local * 800.0) * minf(1.0, (0.07 - local) * 800.0)
+			out[start + offset] = (sin(TAU * float(rows[row]) * local) + sin(TAU * float(columns[column]) * local)) * 0.5 * env
+	return out
+
+
+## A footstep on `surface`: heel strike, body thud, scuff; the material sets the character.
+func _step(surface: String, variant: int) -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 200 + STEP_SURFACES.find(surface) * 10 + variant
+	# click level/decay, body low-pass, body Hz, body level/decay, scuff level, ring level, length
+	var config: Array
+	match surface:
+		"wood":
+			config = [0.45, 320.0, 0.14, 150.0 + variant * 14.0, 1.0, 32.0, 0.25, 0.0, 0.2]
+		"metal":
+			config = [1.0, 240.0, 0.22, 110.0 + variant * 9.0, 0.5, 45.0, 0.15, 0.11, 0.3]
+		"carpet":
+			config = [0.0, 300.0, 0.07, 72.0 + variant * 5.0, 0.8, 55.0, 0.18, 0.0, 0.14]
+		"grass":
+			config = [0.0, 300.0, 0.3, 80.0, 0.3, 50.0, 0.9, 0.0, 0.24]
+		_:
+			config = [0.95, 380.0, 0.22, 90.0 + variant * 8.0, 0.9, 42.0, 0.28, 0.0, 0.17]
+	var out: PackedFloat32Array = _buffer(float(config[8]))
+	var low: float = 0.0
+	var prev: float = 0.0
+	var band: float = 0.0
+	var scuff_at: float = 0.035 + float(variant) * 0.008
+	var ring_hz: float = 380.0 + float(variant) * 60.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		low += (noise - low) * float(config[2])
+		var click: float = (noise - prev * 0.6) * exp(-t * float(config[1])) * float(config[0])
+		prev = noise
+		var body: float = (low * 1.6 + sin(TAU * float(config[3]) * t * (1.0 - t * 1.2))) * exp(-t * float(config[5])) * float(config[4])
+		var scuff_local: float = t - scuff_at
+		var scuff: float = 0.0
+		if scuff_local > 0.0:
+			band += (noise - band) * 0.35
+			scuff = (band - low) * sin(minf(scuff_local / 0.06, 1.0) * PI * 0.5) * exp(-scuff_local * 30.0) * float(config[6])
+			if surface == "grass":
+				scuff *= 1.0 + 1.5 * absf(sin(scuff_local * 900.0 + float(variant)))
+		var ring: float = 0.0
+		if float(config[7]) > 0.0:
+			ring = (sin(TAU * ring_hz * t) * 0.5 + sin(TAU * ring_hz * 2.41 * t + 0.7) * 0.35 + sin(TAU * ring_hz * 3.9 * t + 1.9) * 0.2) * exp(-t * 40.0) * float(config[7])
+		out[index] = click + body + scuff + ring
+	return _soft_clip(out, 1.5)
+
+
+## A distant locomotive horn: a four-note chord in a long-long-short-long pattern, low-passed by
+## distance and smeared by the buildings.
+func _train_horn_far() -> PackedFloat32Array:
+	var notes: Array = [311.0, 370.0, 415.0, 466.0]
+	var blasts: Array = [[0.0, 1.2], [1.45, 1.1], [2.75, 0.45], [3.4, 1.5]]
+	var out: PackedFloat32Array = _buffer(6.0)
+	# One horn-shaped cycle (fundamental + 2nd + 3rd harmonic) in a table: one lookup per note per sample.
+	var table: PackedFloat32Array = PackedFloat32Array()
+	table.resize(1024)
+	for entry: int in range(1024):
+		var angle: float = TAU * float(entry) / 1024.0
+		table[entry] = sin(angle) + sin(angle * 2.0) * 0.45 + sin(angle * 3.0) * 0.2
+	var phases: PackedFloat32Array = PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	for blast: Array in blasts:
+		var start: int = int(float(blast[0]) * RATE)
+		var length: float = float(blast[1])
+		for offset: int in range(int(length * RATE)):
+			var local: float = float(offset) / RATE
+			var env: float = minf(1.0, local / 0.22) * minf(1.0, (length - local) / 0.3)
+			var value: float = 0.0
+			var detune: float = 1.0 + 0.012 * (1.0 - env)
+			for note_index: int in range(4):
+				phases[note_index] += float(notes[note_index]) * detune / RATE
+				value += table[int(phases[note_index] * 1024.0) & 1023]
+			out[start + offset] += value * env * 0.25
+	out = _one_pole(_one_pole(out, 0.32), 0.45)
+	return _soft_clip(_echoes(out, [[0.28, 0.32, 0.2], [0.6, 0.2, 0.15], [1.05, 0.12, 0.12]]), 1.2)
+
+
+## Neon tube: 120 Hz mains buzz with harmonics, a hiss of gas, and a slow flicker with crackles.
+## 3 s, whole cycles of 120 Hz, so it loops cleanly.
+func _neon_buzz() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 113
+	var span: float = 3.0
+	var out: PackedFloat32Array = _buffer(span)
+	var flickers: Array = [[0.75, 0.05], [1.7, 0.03], [1.78, 0.02], [2.5, 0.06]]
+	var prev: float = 0.0
+	var dip: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		var sizzle: float = (noise - prev) * 0.12
+		prev = noise
+		if index & 15 == 0:
+			dip = 0.0
+			for flicker: Array in flickers:
+				var distance: float = absf(t - float(flicker[0]))
+				if distance < 0.15:
+					dip = maxf(dip, exp(-pow(distance / float(flicker[1]), 2.0)))
+		var hum: float = sin(TAU * 120.0 * t) * 0.6 + sin(TAU * 240.0 * t + 0.4) * 0.35 + sin(TAU * 360.0 * t + 1.0) * 0.28 + sin(TAU * 600.0 * t + 2.0) * 0.1
+		var crackle: float = noise * dip * 0.5 * (1.0 if rng.randf() < 0.2 else 0.0)
+		out[index] = (hum * (1.0 - 0.75 * dip) + sizzle * (1.0 + dip * 3.0)) + crackle
+	return out
+
+
+## Steady rain on a canvas awning: a band of patter, hundreds of small hollow drops and a low
+## roar from the street beyond. 8 s, crossfaded.
+func _rain_awning() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 114
+	var span: float = 8.0
+	var out: PackedFloat32Array = _buffer(span + 0.6)
+	var fast: float = 0.0
+	var slow: float = 0.0
+	var roar: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		fast += (noise - fast) * 0.4
+		slow += (noise - slow) * 0.06
+		roar += (noise - roar) * 0.015
+		var swell: float = 0.85 + 0.15 * sin(TAU * 3.0 * fposmod(t, span) / span + 0.7)
+		out[index] = (fast - slow) * 0.45 * swell + roar * 1.2
+	var k_drop: float = exp(-260.0 / RATE)
+	for drop: int in range(400):
+		var start: int = rng.randi_range(0, out.size() - 500)
+		var step: float = TAU * rng.randf_range(260.0, 620.0) / RATE
+		var level: float = rng.randf_range(0.15, 0.6)
+		var env: float = level
+		for offset: int in range(400):
+			out[start + offset] += (sin(step * float(offset)) * 0.3 + rng.randf_range(-0.7, 0.7)) * env
+			env *= k_drop
+	return _crossfade_loop(out, int(0.6 * RATE))
+
+
+## "World paused in time": a very still bed. Two sub tones beating slowly, a breath of air and a
+## thin far transformer hum. 6 s of whole cycles (55 Hz, 55.5 Hz, 120 Hz), so it loops cleanly.
+func _hush_loop() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 115
+	var span: float = 6.0
+	var out: PackedFloat32Array = _buffer(span + 0.5)
+	var air: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var u: float = fposmod(t, span) / span
+		air += (rng.randf_range(-1.0, 1.0) - air) * 0.03
+		var drone: float = sin(TAU * 55.0 * t) * 0.5 + sin(TAU * 55.5 * t + 0.8) * 0.5
+		var hum: float = sin(TAU * 120.0 * t + 0.3) * 0.08
+		out[index] = drone * 0.5 + hum + air * 2.2 * (0.7 + 0.3 * sin(TAU * 2.0 * u))
+	return _crossfade_loop(out, int(0.5 * RATE))

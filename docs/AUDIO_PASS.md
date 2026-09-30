@@ -121,7 +121,7 @@ None are required: everything works with the existing call sites. These are opti
    - Call `sfx.play("holster")` when a weapon is switched away.
 
 ## Testing
-- `tests/sfx_audio.gd`: 219 checks, 0 failures. It covers:
+- `tests/sfx_audio.gd`: 321 checks, 0 failures. It covers:
   - every legacy and new name, plus `_far` twins;
   - the weapon `"sound"` names in `player.gd`;
   - non-empty streams, peaks at or below 1.0, and mono 16-bit 22.05 kHz;
@@ -132,3 +132,80 @@ None are required: everything works with the existing call sites. These are opti
   - determinism across rebuild and across a second instance.
 - Run it with `godot --headless --path . --script res://tests/sfx_audio.gd`.
 - Set `SFX_DUMP=1` to write every sound to `work/audio/<name>.wav`, which is git-ignored, for listening.
+
+
+## Deal-world pass (phones, cases, cash, cars, footsteps, ambient beds)
+
+### Research notes (short and honest)
+Web access was limited. WebSearch returned only store and wiki summaries, and WebFetch was blocked for steampowered.com and miraheze.org.
+So this comes from search snippets plus general knowledge, not from listening to either game.
+- **Sub Rosa** (Steam) is described as a multiplayer FPS about "tense deals, double-crosses and the occasional high-speed car chase".
+  Its updates mention a new audio system for positional sound.
+- **No Big Deal** (Roblox) is a round-based business-negotiation shooter.
+  Briefcases are carried and exchanged for stacks of cash, and betrayal, blackmail and looting are normal.
+  It is best played with voice chat, so people hear each other and the world at the same time.
+- **Design read.**
+  - The deal loop lives on a handful of highly legible, close-range tells: latches, cash riffle, phones, car doors, footsteps.
+  - Between them there is silence, and distance and ambience carry the tension.
+  - So the sounds here are short, dry, noise-led, easy to identify at a glance, and mixed low.
+- **Late 1999 city, "paused in time".** The beds are sparse and low, with real-world tonal devices used sparingly:
+  - a neon tube's 120 Hz buzz;
+  - rain on an awning;
+  - a far train horn;
+  - a payphone dial tone;
+  - a car's lock chirp.
+  - There is also a very still "hush" drone with a slow beat.
+
+### Sounds added (all synthesised, all built lazily, one per frame at idle or on first use)
+| name | what it is |
+|---|---|
+| `briefcase_open` / `briefcase_close` | two latch clicks, lid creak, seating thud / thud, then two latches |
+| `cash_riffle` | about 26 speeding-up paper flicks, then a slap (noise only) |
+| `cash_bundle` | a banded stack dropped on a table |
+| `phone_pickup` / `phone_hangup` | handset clack, cable scrape and hook switch / thunk and hook click with coin rattle |
+| `phone_dialtone` (loop) | 350 + 440 Hz, exactly 1 s |
+| `phone_busy` (loop) | 480 + 620 Hz, 0.5 s on and 0.5 s off |
+| `phone_dial` | seven DTMF digits |
+| `radio_squelch` | push-to-talk static burst |
+| `car_door_open` / `car_door_close` | handle click, hinge creak and stop / heavy sheet-metal thump with a latch |
+| `car_chirp` / `car_unlock` | two short beeps / one beep, the lock confirmation (deliberately tonal) |
+| `car_alarm` (loop) | eight harsh whoop sweeps, 2.4 s |
+| `engine_start` | starter cranking, catch, and a settling idle |
+| `engine_stall` | pulses that slow down, a cough, then a clunk |
+| `step_<surface><0-3>` | 20 footsteps for surfaces `concrete`, `wood`, `metal`, `carpet` and `grass`. The legacy `step0-3` remain |
+| `train_horn_far` | a four-note chord, long-long-short-long, low-passed and echoing between buildings (6 s) |
+| `neon_buzz` (loop) | 120 Hz buzz with harmonics, gas hiss and a flicker with crackles (3 s) |
+| `rain_awning` (loop) | patter, hollow drops and a street roar (8 s) |
+| `ambience_hush` (loop) | two sub tones beating slowly, air and a thin transformer hum (6 s) |
+
+- API:
+  - `step_sound(surface, variant)`.
+  - `play_step(surface, gain_db, pitch)`, which picks a random variant.
+- The handling one-shots (briefcase, cash, phone, doors, footsteps) are noise-led, as before. Only the tonal devices (chirps, phone tones, train horn, car alarm) use pure tones.
+- Build cost:
+  - Boot is unchanged at about 1.0 s (lazy).
+  - All lazy sounds together are about 2 s of CPU time, spread one per frame after boot.
+  - The heaviest single idle build is about 200 ms (`train_horn_far`, `rain_awning`).
+  - The bank is now 110 sounds, 109.6 s of audio and 4.6 MB.
+
+### Hooks for main.gd (sent to the gameplay agent; optional)
+All hooks use `sfx.play(name, pitch, gain_db)`.
+1. **Car doors and engine.**
+   - Vehicle entry (`_enter_vehicle`): `sfx.play("door")` becomes `sfx.play("car_door_close")`. Add `if index == 0: sfx.play("engine_start", 1.0, -4.0)` after it.
+   - Vehicle exit: `sfx.play("door", 1.05)` becomes `sfx.play("car_door_open")`.
+   - Optional: `car_chirp` when the player walks away from a parked car, `car_unlock` when they approach it, `engine_stall` when a car dies, and `car_alarm` as a loop on its own player.
+2. **Footsteps by surface.** In `_on_footstep(loud)`:
+   `sfx.play_step(_surface_under(), 0.0 if loud else -6.0, randf_range(0.9, 1.1))`.
+   A helper such as `_surface_under() -> String` returns "metal" on a car, "carpet" or "wood" in interiors (by collider meta `surface`), otherwise "concrete". Unknown names fall back to the legacy steps.
+3. **Cash and case.**
+   - `_pay_deal`: play `cash_riffle` and then `cash`.
+   - `_collect_case`: `briefcase_open`.
+   - Tip stash grab: `cash_bundle`.
+   - Banking the stash: `cash_riffle`.
+4. **Payphone.** `_tip_interact` on answer: `phone_pickup`. `phone_hangup` when the tip window expires.
+5. **Zones and beds (only if the lead wants them).**
+   - Loop `neon_buzz` positionally at the neon signs, at `master_db(gain_hint("neon_buzz"))`.
+   - Play `rain_awning` under awnings during rain.
+   - Use `ambience_hush` during the buy or paused phase.
+   - Play `train_horn_far` occasionally from the harbor side, together with the `dog_far` and `siren_far` one-shots.
+   - Use `phone_dialtone` and `phone_busy` on the payphone.

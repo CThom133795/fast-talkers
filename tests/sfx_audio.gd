@@ -23,9 +23,21 @@ const GUNS: PackedStringArray = [
 const NEW_NAMES: PackedStringArray = [
 	"slide", "safety", "holster", "club_bass", "room_tone", "dog_far", "siren_far",
 ]
-const LOOPS: PackedStringArray = ["horn", "engine", "skid", "ambience", "club_bass", "room_tone"]
+const WORLD: PackedStringArray = [
+	"briefcase_open", "briefcase_close", "cash_riffle", "cash_bundle", "phone_pickup", "phone_hangup",
+	"radio_squelch", "car_door_open", "car_door_close", "car_chirp", "car_unlock", "car_alarm", "engine_start",
+	"engine_stall", "phone_dialtone", "phone_busy", "phone_dial", "train_horn_far", "neon_buzz", "rain_awning",
+	"ambience_hush",
+]
+const SURFACES: PackedStringArray = ["concrete", "wood", "metal", "carpet", "grass"]
+const LOOPS: PackedStringArray = [
+	"horn", "engine", "skid", "ambience", "club_bass", "room_tone", "car_alarm", "phone_dialtone", "phone_busy",
+	"neon_buzz", "rain_awning", "ambience_hush",
+]
 const HANDLING: PackedStringArray = [
 	"dry", "mag_out", "mag_in", "pump", "bolt", "shell", "draw", "break_open", "cylinder", "slide", "safety", "holster",
+	"briefcase_open", "briefcase_close", "cash_riffle", "cash_bundle", "phone_pickup", "phone_hangup", "car_door_open",
+	"car_door_close",
 ]
 
 var checks: int = 0
@@ -90,6 +102,11 @@ func _run() -> void:
 		_check(sfx.has_sound(sound + "_far"), "far variant exists: " + sound + "_far")
 	for sound: String in NEW_NAMES:
 		_check(sfx.has_sound(sound), "new sound exists: " + sound)
+	for sound: String in WORLD:
+		_check(sfx.has_sound(sound), "deal-world sound exists: " + sound)
+	for surface: String in SURFACES:
+		for variant: int in range(4):
+			_check(sfx.has_sound("step_%s%d" % [surface, variant]), "footstep exists: step_%s%d" % [surface, variant])
 	_check(not sfx.has_sound("no_such_sound"), "has_sound is false for an unknown name")
 	_check(sfx.stream("no_such_sound") == null, "stream() of an unknown name is null")
 
@@ -132,7 +149,7 @@ func _run() -> void:
 	_check(all_finite, "no NaN/inf samples")
 	print("bank: %d sounds, %.1f s of audio, %.1f MB" % [names.size(), total_seconds, total_seconds * 22050.0 * 2.0 / 1048576.0])
 	_check(absf(total_seconds - float(sfx.bank_seconds())) < 0.01, "bank_seconds() matches the streams")
-	_check(total_seconds < 110.0, "total audio under 110 s (%.1f)" % total_seconds)
+	_check(total_seconds < 150.0, "total audio under 150 s (%.1f)" % total_seconds)
 	_check(float(sfx.get("build_ms")) < 4000.0, "bank builds in under 4 s (%.0f ms)" % float(sfx.get("build_ms")))
 
 	# Loops.
@@ -140,7 +157,7 @@ func _run() -> void:
 		var wav: AudioStreamWAV = sfx.stream(sound)
 		var samples: PackedFloat32Array = _samples(wav)
 		_check(wav.loop_mode == AudioStreamWAV.LOOP_FORWARD and wav.loop_begin == 0 and wav.loop_end == samples.size(), "loop mode set over the whole clip: " + sound)
-	for sound: String in ["ambience", "club_bass", "room_tone", "skid"]:
+	for sound: String in ["ambience", "club_bass", "room_tone", "skid", "phone_dialtone", "phone_busy", "neon_buzz", "rain_awning", "ambience_hush"]:
 		var samples: PackedFloat32Array = _samples(sfx.stream(sound))
 		var delta: float = 0.0
 		for index: int in range(1, samples.size()):
@@ -172,8 +189,43 @@ func _run() -> void:
 	# Handling: short, noise-led (broadband) and never silent.
 	for sound: String in HANDLING:
 		var samples: PackedFloat32Array = _samples(sfx.stream(sound))
-		_check(sfx.duration(sound) <= 0.5 and _rms(samples) > 0.04, "handling click is short and audible: %s (%.2f s, rms %.2f)" % [sound, sfx.duration(sound), _rms(samples)])
+		_check(sfx.duration(sound) <= 0.7 and _rms(samples) > 0.04, "handling click is short and audible: %s (%.2f s, rms %.2f)" % [sound, sfx.duration(sound), _rms(samples)])
 		_check(_brightness(samples) > 0.35, "handling sound is broadband, not a pure tone: %s (%.2f)" % [sound, _brightness(samples)])
+
+	# Footsteps: per-surface character, helpers.
+	var step_brightness: Dictionary = {}
+	var step_signatures: Dictionary = {}
+	for surface: String in SURFACES:
+		var mean: float = 0.0
+		for variant: int in range(4):
+			var wav: AudioStreamWAV = sfx.stream("step_%s%d" % [surface, variant])
+			mean += _brightness(_samples(wav)) / 4.0
+			step_signatures[wav.data.slice(0, 1500).hex_encode()] = true
+			_check(sfx.duration("step_%s%d" % [surface, variant]) < 0.35, "footstep is short: %s%d" % [surface, variant])
+		step_brightness[surface] = mean
+	_check(step_signatures.size() == 20, "all 20 footsteps are unique waveforms (%d)" % step_signatures.size())
+	_check(step_brightness["metal"] > step_brightness["carpet"] and step_brightness["concrete"] > step_brightness["carpet"], "carpet is the softest surface (metal %.2f, concrete %.2f, carpet %.2f)" % [step_brightness["metal"], step_brightness["concrete"], step_brightness["carpet"]])
+	_check(sfx.step_sound("wood", 5) == "step_wood1", "step_sound wraps variants")
+	_check(sfx.step_sound("lava", 2) == "step2", "unknown surface falls back to the legacy step")
+	sfx.play_step("grass")
+	sfx.play_step("nonsense", -3.0)
+
+	# Deal-world sounds.
+	_check(absf(sfx.duration("phone_dial") - (7.0 * 0.125 + 0.05)) < 0.01, "phone_dial is seven DTMF digits")
+	_check(sfx.duration("phone_dialtone") == 1.0 and sfx.duration("phone_busy") == 2.0, "dial tone is 1 s, busy is 2 s")
+	var chirp: PackedFloat32Array = _samples(sfx.stream("car_chirp"))
+	var gap_level: float = 0.0
+	for index: int in range(int(0.085 * 22050.0), int(0.115 * 22050.0)):
+		gap_level = maxf(gap_level, absf(chirp[index]))
+	_check(gap_level < 0.02 and _rms(chirp) > 0.2, "car_chirp is two beeps with silence between (gap %.3f)" % gap_level)
+	var busy: PackedFloat32Array = _samples(sfx.stream("phone_busy"))
+	_check(absf(busy[int(0.75 * 22050.0)]) < 0.001 and _rms(busy) > 0.2, "busy tone is gated off in its second half")
+	_check(sfx.duration("engine_start") > sfx.duration("engine_stall") and sfx.duration("train_horn_far") >= 5.0, "engine start/stall and train horn lengths")
+	_check(_brightness(_samples(sfx.stream("cash_riffle"))) > 0.6, "cash riffle is dry broadband paper noise")
+	_check(sfx.duration("cash_riffle") > 0.4 and sfx.duration("briefcase_open") > sfx.duration("briefcase_close"), "riffle is a real fan; case opens slower than it shuts")
+	_check(_brightness(_samples(sfx.stream("rain_awning"))) > 0.3, "rain on the awning is a broadband patter")
+	_check(_rms(_samples(sfx.stream("neon_buzz"))) > 0.05, "neon buzz is audible")
+	_check(sfx.gain_hint("room_tone") < sfx.gain_hint("ambience_hush") + 5.0 and sfx.gain_hint("neon_buzz") <= -20.0, "ambient beds sit low in the mix")
 
 	# Distance selection and playback.
 	_check(sfx.shot_sound("pistol", 10.0) == "pistol", "near shot within range")
