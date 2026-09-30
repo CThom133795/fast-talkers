@@ -543,7 +543,7 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 func _prefab(kind: String, center: Vector2, front: Vector2, fw: float, dp: float, floors: int, color: Color, sign_text: String, district: String) -> bool:
 	# Prefab frame: local -Z is the street front.
 	var yaw: float = atan2(-front.x, -front.y)
-	var style: Dictionary = {"palette": color, "sign": sign_text, "tex": _texture(kind, color), "lit": 0.3, "district": district}
+	var style: Dictionary = {"palette": [color, color.lightened(0.35), color.darkened(0.35)], "sign": sign_text, "tex": _texture(kind, color), "lit": 0.3, "district": district}
 	w._begin_building(kind, true, sign_text)
 	var record: Dictionary = w._building_open
 	w._xf = Transform3D.IDENTITY

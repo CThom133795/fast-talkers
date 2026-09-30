@@ -1155,6 +1155,11 @@ func _free_spot(at: Vector2, clearance: float) -> bool:
 	for used: Vector2 in _occupied:
 		if used.distance_to(at) < 2.4:
 			return false
+	# Nothing stands in a doorway (prefab doors are registered as their block is built).
+	for door: Dictionary in interactable_doors:
+		var spot: Vector3 = door["position"]
+		if Vector2(spot.x, spot.z).distance_to(at) < 3.0:
+			return false
 	return true
 
 ## Scatters crew-palette street furniture along a block's sidewalk edge.
@@ -2564,7 +2569,9 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 	var length: float = area.size.x if along_x else area.size.y
 	var depth: float = area.size.y if along_x else area.size.x
 	var rows: int = 2 if depth >= 32.0 else 1
-	var row_depth: float = (depth - (0.8 if rows == 2 else 0.0)) / rows
+	# Two rows back to back leave a 5 m alley between them (rear doors, dumpsters, a way through).
+	var row_gap: float = 5.0 if rows == 2 else 0.0
+	var row_depth: float = (depth - row_gap) / rows
 	var widths: Vector2 = spec["width"]
 	for row: int in range(rows):
 		var cursor: float = 0.0
@@ -2574,7 +2581,7 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 			if length - cursor - span < 9.0:
 				span = length - cursor
 			var lot_center: float = cursor + span * 0.5
-			var offset: float = (row_depth * 0.5 + 0.4) * side if rows == 2 else 0.0
+			var offset: float = (row_depth * 0.5 + row_gap * 0.5) * side if rows == 2 else 0.0
 			var center: Vector2 = Vector2(area.position.x + lot_center, area.get_center().y + offset) if along_x else Vector2(area.get_center().x + offset, area.position.y + lot_center)
 			var lot_size: Vector2 = Vector2(span, row_depth) if along_x else Vector2(row_depth, span)
 			cursor += span + 0.8
@@ -2611,6 +2618,16 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 				continue
 			_tower(center, Vector3(lot_size.x, height, lot_size.y), color, str(spec["tex"]), front, title, sign_color, roof, float(spec["lit"]))
 			_rooftop(center, lot_size, height)
+	# Dumpsters and bags along the alley between the rows.
+	if rows == 2:
+		var stops: int = maxi(1, int(length / 26.0))
+		for stop: int in range(stops):
+			var along: float = (stop + 0.5) * length / stops
+			var wall_side: float = -1.0 if stop % 2 == 0 else 1.0
+			var spot: Vector2 = Vector2(area.position.x + along, area.get_center().y + wall_side * 1.4) if along_x else Vector2(area.get_center().x + wall_side * 1.4, area.position.y + along)
+			if _free_spot(_w2(spot), 0.7):
+				_occupied.append(_w2(spot))
+				_dumpster(Vector3(spot.x, 0.16, spot.y), 0.0 if along_x else PI * 0.5, Color(0.2, 0.33, 0.26))
 
 ## The prefab library (scripts/buildings/prefabs.gd), or null while it is not in the project.
 var _prefab_lib: Variant = null
@@ -2634,6 +2651,8 @@ func _fill_prefab(style: String, center: Vector2, lot: Vector2, front: Vector3, 
 	var frontage: float = lot.x if across else lot.y
 	var depth: float = lot.y if across else lot.x
 	for kind: String in FILL_PREFABS[style]:
+		if not lib.kinds().has(kind):
+			continue
 		var least: Vector2 = lib.min_size(kind)
 		if frontage < least.x or depth < least.y:
 			continue
@@ -2685,6 +2704,9 @@ func _pocket_park(rect: Rect2) -> void:
 	var trees: int = maxi(3, int(rect.get_area() / 260.0))
 	for index: int in range(trees):
 		var at: Vector2 = Vector2(_rng.randf_range(lawn.position.x + 2.0, lawn.end.x - 2.0), _rng.randf_range(lawn.position.y + 2.0, lawn.end.y - 2.0))
+		# The two crossing paths (city_detail.gd's park sites) stay open.
+		if absf(at.x - rect.get_center().x) < 3.2 or absf(at.y - rect.get_center().y) < 3.2:
+			continue
 		_tree(Vector3(at.x, 0.2, at.y))
 	_bench(Vector3(lawn.get_center().x, 0.2, lawn.position.y + 1.6), 0.0)
 	_bench(Vector3(lawn.get_center().x, 0.2, lawn.end.y - 1.6), PI)
