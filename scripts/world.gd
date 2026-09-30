@@ -1712,10 +1712,10 @@ func _clip_segment(a: Vector2, b: Vector2, rect: Rect2) -> Vector2:
 	return Vector2(t0, t1)
 
 ## Asphalt ribbons with mitred joints, centre lines, and zebra crossings at bridge ends.
-func _build_roads() -> void:
+func _build_roads(from_index: int = 0) -> void:
 	var asphalt: StandardMaterial3D = _material(Color(0.18, 0.20, 0.21), 0.9, "asphalt")
 	var paint: StandardMaterial3D = _material(Color(0.83, 0.76, 0.48))
-	for road_index: int in range(roads.size()):
+	for road_index: int in range(from_index, roads.size()):
 		var road: Dictionary = roads[road_index]
 		var points: PackedVector2Array = road["points"]
 		var width: float = road["width"]
@@ -1775,7 +1775,8 @@ func _build_roads() -> void:
 						var mark: Vector2 = at + side * offset
 						_box_with(Vector3(mark.x, y + 0.008, mark.y), Vector3(0.1, 0.012, 3.2), paint, false, angle)
 				dash += 7.0
-	for bridge: Dictionary in bridges:
+	# Streets added later (the fill pass's cul-de-sacs) have no bridges to stripe.
+	for bridge: Dictionary in (bridges if from_index == 0 else ([] as Array[Dictionary])):
 		var rect: Rect2 = bridge["rect"]
 		var along_x: bool = bridge["along_x"]
 		if bridge.get("foot", false):

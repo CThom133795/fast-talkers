@@ -105,12 +105,22 @@ func _init(world: Node3D) -> void:
 func build() -> void:
 	w._blockers_off = true
 	_index()
+	_carve_streets()
 	for road_index: int in range(w.roads.size()):
 		_frontage(road_index)
 	_coast_frontage()
 	_dress_alleys()
 	_calming()
+	_life()
 	_far_massing()
+	for key: Vector3i in _decor_cells:
+		var decor: Node3D = _decor_cells[key]
+		w._finish(decor)
+		for child: Node in decor.get_children():
+			if child is GeometryInstance3D and not child is Label3D:
+				(child as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				(child as GeometryInstance3D).visibility_range_end = 70.0
+				w._detail_ranges.append(child)
 	for key: Vector3i in _calm_cells:
 		var calm: Node3D = _calm_cells[key]
 		w._finish(calm)
@@ -190,6 +200,13 @@ func _index() -> void:
 			bounds = bounds.expand(point)
 		_add_keepout_bounds(bounds)
 	for road_index: int in range(w.roads.size()):
+		_index_road(road_index)
+	_index_slabs()
+
+
+## Puts one street's segments into the road grid (each segment in every cell its bounds touch).
+func _index_road(road_index: int) -> void:
+	if true:
 		var road: Dictionary = w.roads[road_index]
 		var points: PackedVector2Array = road["points"]
 		var half: float = float(road["width"]) * 0.5 + 3.0
@@ -205,6 +222,9 @@ func _index() -> void:
 					if not _segs.has(key):
 						_segs[key] = []
 					(_segs[key] as Array).append([a, b, half - 3.0, road_index])
+
+
+func _index_slabs() -> void:
 	for slab: Dictionary in w._slab_tops:
 		var poly: PackedVector2Array = slab["poly"]
 		var bounds: Rect2 = Rect2(poly[0], Vector2.ZERO)
@@ -1076,3 +1096,213 @@ func _hoarding(at: Vector2, across: Vector2, dir: Vector2) -> void:
 		var label: Label3D = w._label(text, poster_at + facing * way * 0.02, 36, Color(0.5, 0.12, 0.1), atan2(facing.x * way, facing.z * way), 0.0135)
 		label.outline_size = 0
 		label.visibility_range_end = 60.0
+
+
+# --- New streets through the big empty blocks -----------------------------------------------------
+
+## Where 60+ m of open ground lies behind a street's frontage, a short dead-end street (a lane, row or
+## court) is cut in at right angles so the frontage engine can line it with buildings. Dead ends add no
+## through routes, so `route()` and the crews' distances are unchanged.
+const CARVE_NAMES: PackedStringArray = ["ALDER ROW", "BIRCH LANE", "CEDAR COURT", "DOGWOOD LANE", "ELM ROW", "FERN COURT", "GRANT LANE", "HAZEL ROW", "IVY COURT", "JUNIPER LANE", "LARCH ROW", "MAPLE COURT", "OLIVE LANE", "PINE ROW", "QUINCE COURT", "ROWAN LANE", "SPRUCE ROW", "TAMARACK COURT", "WILLOW LANE", "YARROW ROW", "ASH COURT", "BAY ROW", "CLOVER LANE", "DAHLIA ROW"]
+const CARVE_MAX: int = 24
+var carved: Array[String] = []
+
+
+## How far open ground runs from `origin` along `normal`, over a 42 m wide corridor (lateral probes every 10.5 m):
+## the shortest run before a building, prop, street, park, slab edge or the coast (10 m margin), capped at 100.
+func _free_depth(origin: Vector2, dir: Vector2, normal: Vector2) -> float:
+	var shortest: float = 100.0
+	for lateral: float in [-21.0, -10.5, 0.0, 10.5, 21.0]:
+		var run: float = 0.0
+		while run < shortest:
+			var at: Vector2 = origin + dir * lateral + normal * run
+			if not w._on_land(at):
+				break
+			var blocked: bool = false
+			for angle: int in range(0, 8, 2):
+				if not w._on_land(at + Vector2.RIGHT.rotated(angle * PI * 0.25) * 10.0):
+					blocked = true
+			if blocked or _height_at(at) > 0.05:
+				break
+			var key: Vector2i = _key(at)
+			if _rects.has(key):
+				for rect: Rect2 in _rects[key]:
+					if rect.grow(1.5).has_point(at):
+						blocked = true
+						break
+			if not blocked and _segs.has(key):
+				for seg: Array in _segs[key]:
+					if at.distance_to(Geometry2D.get_closest_point_to_segment(at, seg[0], seg[1])) < float(seg[2]) + 3.0 and run > 1.0:
+						blocked = true
+						break
+			if not blocked:
+				for index: int in range(_keepout.size()):
+					if _keepout_bounds[index].has_point(at) and Geometry2D.is_point_in_polygon(at, _keepout[index]):
+						blocked = true
+						break
+			if blocked:
+				break
+			run += 4.0
+		shortest = minf(shortest, run)
+	return shortest
+
+
+func _carve_streets() -> void:
+	var first_new: int = w.roads.size()
+	var parents: int = w.roads.size()
+	for road_index: int in range(parents):
+		if carved.size() >= CARVE_MAX:
+			break
+		var road: Dictionary = w.roads[road_index]
+		if str(road["name"]).begins_with("FOUNTAIN"):
+			continue
+		var points: PackedVector2Array = road["points"]
+		var half: float = float(road["width"]) * 0.5
+		for index: int in range(points.size() - 1):
+			var a: Vector2 = points[index]
+			var b: Vector2 = points[index + 1]
+			var length: float = a.distance_to(b)
+			if length < 60.0:
+				continue
+			var dir: Vector2 = (b - a) / length
+			for side: float in [1.0, -1.0]:
+				var normal: Vector2 = Vector2(-dir.y, dir.x) * side
+				var t: float = 30.0
+				while t < length - 30.0 and carved.size() < CARVE_MAX:
+					var best: float = _free_depth(a + dir * t + normal * (half + 4.0), dir, normal)
+					if best >= 52.0:
+						var start: Vector2 = a + dir * t
+						var finish: Vector2 = start + normal * (half + best - 8.0)
+						var title: String = CARVE_NAMES[carved.size() % CARVE_NAMES.size()]
+						w._road(title, [start, finish], 10.0)
+						carved.append(title)
+						_index_road(w.roads.size() - 1)
+						# The new street and its two rows of frontage fill the corridor: skip past it.
+						t += 70.0
+					else:
+						t += 24.0
+	if w.roads.size() > first_new:
+		var saved: Node3D = w._target
+		var node: Node3D = w._begin("FillRoads")
+		w._build_roads(first_new)
+		w._finish(node)
+		w._target = saved
+		w._xf = Transform3D.IDENTITY
+		w._xf_yaw = 0.0
+
+
+# --- Street life ------------------------------------------------------------------------------------
+
+## Static, deterministic dressing for the fill lots, built after everything else: parked cars along the kerb
+## (appended to the END of world.parked_vehicles, so the older order never changes), newspaper boxes,
+## planters and hydrants on the sidewalk, and laundry lines strung across the alleys. Everything keeps
+## 3 m off doors and clear of props; the collision-free pieces (laundry) are `potato_optional`.
+const CAR_COLORS: Array[Color] = [Color(0.55, 0.14, 0.14), Color(0.18, 0.26, 0.4), Color(0.78, 0.74, 0.62), Color(0.13, 0.13, 0.15), Color(0.32, 0.42, 0.3), Color(0.62, 0.5, 0.2), Color(0.5, 0.52, 0.55), Color(0.4, 0.2, 0.3)]
+const CAR_TYPES: PackedStringArray = ["sedan", "sedan", "coupe", "suv", "pickup"]
+const CLOTH: Array[Color] = [Color(0.9, 0.9, 0.86), Color(0.8, 0.3, 0.25), Color(0.25, 0.4, 0.65), Color(0.9, 0.8, 0.3), Color(0.35, 0.6, 0.4), Color(0.85, 0.6, 0.7)]
+var _decor_cells: Dictionary = {}
+var cars_added: int = 0
+var props_added: int = 0
+var lines_added: int = 0
+
+
+func _life() -> void:
+	for lot: Dictionary in placed:
+		var center: Vector2 = lot["center"]
+		var front: Vector2 = lot["front"]
+		var size: Vector2 = lot["size"]
+		var u: Vector2 = Vector2(front.y, -front.x)
+		var edge: Vector2 = center + front * (size.y * 0.5 + 1.1)
+		# A sidewalk piece near the party wall on one side.
+		var roll: float = rng.randf()
+		var lateral: float = (size.x * 0.5 - 1.3) * (1.0 if rng.randf() < 0.5 else -1.0)
+		var spot: Vector2 = edge + u * lateral
+		var yaw: float = atan2(front.x, front.y)
+		if roll < 0.55 and not w.door_within(spot, 2.8) and not w.solid_near(spot, 0.9) and w._on_land(spot):
+			w._target = _cell_node(spot)
+			w._xf = Transform3D.IDENTITY
+			w._xf_yaw = 0.0
+			var ground: float = _height_at(spot) if _height_at(spot) > 0.05 else 0.16
+			if roll < 0.2:
+				w._news_box(Vector3(spot.x, ground, spot.y), yaw, w._street_palette[rng.randi() % w._street_palette.size()])
+			elif roll < 0.4:
+				w._planter(Vector3(spot.x, ground, spot.y))
+			else:
+				w._hydrant(Vector3(spot.x, ground, spot.y))
+			props_added += 1
+		# A parked car at the kerb in front of some lots.
+		if rng.randf() < 0.85:
+			_park_car(center, front, u, size)
+	for alley: Dictionary in alleys:
+		if rng.randf() < 0.6:
+			_laundry(alley)
+
+
+func _park_car(center: Vector2, front: Vector2, u: Vector2, size: Vector2) -> void:
+	# The kerb lane: 1.3 m in from the road edge, which is (dp / 2 + setback) in front of the lot centre.
+	var road_edge: Vector2 = center + front * (size.y * 0.5 + _setback)
+	var at: Vector2 = road_edge + front * 1.4 + u * rng.randf_range(-size.x * 0.25, size.x * 0.25)
+	if not w._on_land(at) or w.door_within(at, 4.0) or w.solid_near(at, 2.2):
+		return
+	# Exactly one street may lie within 14 m (the one it is parked on, 1.4 m inside its edge): no cars in junctions.
+	var near_roads: int = 0
+	var own_ok: bool = false
+	for road: Dictionary in w.roads:
+		var points: PackedVector2Array = road["points"]
+		for index: int in range(points.size() - 1):
+			var closest: Vector2 = Geometry2D.get_closest_point_to_segment(at, points[index], points[index + 1])
+			var gap: float = at.distance_to(closest) - float(road["width"]) * 0.5
+			if gap < 14.0:
+				near_roads += 1
+				own_ok = absf(gap + 1.4) < 0.5
+	if near_roads != 1 or not own_ok:
+		return
+	for vehicle: Dictionary in w.parked_vehicles:
+		var other: Vector3 = vehicle["at"]
+		if Vector2(other.x, other.z).distance_to(at) < 7.0:
+			return
+	for crew: Dictionary in w.crew_spawns.values():
+		for key: String in ["spawn", "car", "hq"]:
+			var spot: Vector3 = crew[key]
+			if Vector2(spot.x, spot.z).distance_to(at) < 12.0:
+				return
+	for poly: PackedVector2Array in w.calming_islands:
+		for point: Vector2 in poly:
+			if point.distance_to(at) < 9.0:
+				return
+	# Heading along the street, parked nose-first either way.
+	var heading: float = atan2(u.x, u.y) + (0.0 if rng.randf() < 0.5 else PI)
+	w._car_prop(Vector3(at.x, 0.03, at.y), heading, CAR_COLORS[rng.randi() % CAR_COLORS.size()], CAR_TYPES[rng.randi() % CAR_TYPES.size()], "")
+	cars_added += 1
+
+
+func _decor_node(at: Vector2) -> Node3D:
+	var key: Vector3i = Vector3i(floori(at.x / 96.0), floori(at.y / 96.0), 9)
+	if not _decor_cells.has(key):
+		var saved: Node3D = w._target
+		var node: Node3D = w._begin("FillDecor %d %d" % [key.x, key.y])
+		node.add_to_group("potato_optional")
+		w._target = saved
+		_decor_cells[key] = node
+	return _decor_cells[key] as Node3D
+
+
+## A washing line across an alley at first-floor window height, with a few pieces pegged out.
+func _laundry(alley: Dictionary) -> void:
+	var at: Vector2 = alley["at"]
+	var back: Vector2 = alley["dir"]
+	var u: Vector2 = Vector2(back.y, -back.x)
+	var reach: float = float(alley["depth"]) * rng.randf_range(0.45, 0.7)
+	var mid: Vector2 = at + back * reach
+	w._target = _decor_node(mid)
+	w._xf = Transform3D.IDENTITY
+	w._xf_yaw = 0.0
+	var y: float = 5.6 + (0.0 if rng.randf() < 0.5 else 3.4)
+	var yaw: float = atan2(-u.y, u.x)
+	var line: StandardMaterial3D = w._material(Color(0.75, 0.72, 0.66), 0.9)
+	w._box_with(Vector3(mid.x, y, mid.y), Vector3(ALLEY + 1.0, 0.03, 0.03), line, false, yaw)
+	for piece: int in range(3 + rng.randi() % 3):
+		var lateral: float = -ALLEY * 0.5 + 0.8 + (ALLEY - 1.6) * (float(piece) + rng.randf() * 0.5) / 5.0
+		var spot: Vector2 = mid + u * lateral
+		w._box_with(Vector3(spot.x, y - 0.4, spot.y), Vector3(0.5, 0.7, 0.02), w._material(CLOTH[rng.randi() % CLOTH.size()], 0.95), false, yaw + rng.randf_range(-0.2, 0.2))
+	lines_added += 1

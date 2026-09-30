@@ -5,13 +5,17 @@ extends SceneTree
 const WorldScript = preload("res://scripts/world.gd")
 ## [label, camera position, look-at point]
 const VIEWS: Array = [
+	["halcyon_south", Vector3(4, 1.7, 110), Vector3(2, 3, 250)],
+	["union_west", Vector3(-150, 1.7, 40), Vector3(-60, 3, 35)],
+	["old_town_street", Vector3(-100, 1.7, 100), Vector3(-100, 6, 190)],
 	["east_rim", Vector3(330, 1.7, 60), Vector3(380, 4, 120)],
 	["west_rim", Vector3(-330, 1.7, 100), Vector3(-380, 4, 200)],
 	["south_rim", Vector3(-100, 1.7, 300), Vector3(-160, 4, 360)],
-	["old_town_street", Vector3(-100, 1.7, 100), Vector3(-100, 6, 190)],
-	["midtown_alley", Vector3(-43, 1.7, -50), Vector3(-43, 3, -20)],
+	["wharf", Vector3(-300, 1.7, -215), Vector3(-350, 6, -175)],
+	["docks", Vector3(230, 1.7, 302), Vector3(340, 12, 320)],
 	["aerial_nw", Vector3(-200, 220, -160), Vector3(-200, 0, -60)],
 	["aerial_e", Vector3(400, 200, 150), Vector3(300, 0, 80)],
+	["aerial_s", Vector3(0, 260, 470), Vector3(0, 0, 250)],
 ]
 var world: Node3D
 var camera: Camera3D

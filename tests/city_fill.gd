@@ -58,6 +58,7 @@ func _run() -> void:
 	var view: Dictionary = _sightlines()
 	_emptiness()
 	_overlaps()
+	print("CARVED STREETS: %s" % [world.city_fill.carved])
 	_calming_checks()
 	_life_checks()
 	print("CITY FILL RESULT: %d checks, %d failures" % [checks, failures])
@@ -452,7 +453,9 @@ func _calming_checks() -> void:
 # --- Life ------------------------------------------------------------------------------------------------
 
 func _life_checks() -> void:
-	pass
+	var fill: Variant = world.city_fill
+	print("LIFE: %d parked cars added (total %d), %d sidewalk props, %d laundry lines" % [fill.cars_added, world.parked_vehicles.size(), fill.props_added, fill.lines_added])
+	_check(fill.cars_added >= 10 and fill.lines_added >= 5 and fill.props_added >= 20, "The fill lots have life: cars %d, props %d, laundry lines %d" % [fill.cars_added, fill.props_added, fill.lines_added])
 
 
 # --- No overlaps ------------------------------------------------------------------------------------------
