@@ -213,6 +213,18 @@ func _run() -> void:
 	_check(upper_doors == 4, "Motel rooms 201-204 have doors (%d)" % upper_doors)
 	var walkway_rail: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(upper.global_transform * Vector3(0, Motel.DECK_Y + 0.2, 8.0), upper.global_transform * Vector3(0, Motel.DECK_Y + 0.2, 12.5)))
 	_check(not walkway_rail.is_empty(), "Motel walkway edge has a solid kick board")
+	# Gun store: Coast Road (edges included) stays clear of the range yard and its long-range plates.
+	var yard_world: Rect2 = Rect2(290.0, -98.0, 90.0, 70.0)
+	var road_clear: bool = true
+	for road: Dictionary in world.roads:
+		if str(road["name"]) != "COAST ROAD":
+			continue
+		var points: PackedVector2Array = road["points"]
+		for index: int in range(points.size() - 1):
+			for step: int in range(41):
+				var at: Vector2 = points[index].lerp(points[index + 1], step / 40.0)
+				road_clear = road_clear and not yard_world.grow(float(road["width"]) * 0.5).has_point(at)
+	_check(road_clear, "Coast Road runs round the gun store range yard, not through it")
 	# Garage: ramps within the 12 degree limit, and a sedan actually drives up each one.
 	var garage: Node3D = world.plot_nodes["garage"]
 	for ramp: Dictionary in garage.get_meta("ramps"):

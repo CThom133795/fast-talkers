@@ -218,9 +218,9 @@ boomy, with no "childish beeps".
 - High-rise captures: `tower_street`, `tower_lobby`, `tower_office` and `tower_conference` in `docs/captures/overnight/interiors/`.
 
 ### Known limitations and open issues
-- **Gun store range yard crosses Coast Road.** `gunstore.gd` builds the yard 80 m deep along world X. Its side berm (and the
-  yard) crosses Coast Road near world (332–337, −95); `city_audit` lists it as KNOWN. The fix is a layout decision: a shorter
-  yard or a moved road. It touches `armory.gd` range constants and free-roam tests, so it was not changed tonight.
+- **Gun store vs Coast Road: fixed.** Coast Road ran through the Halcyon Arms range yard and past the long-range plates.
+  It now swings east round the yard: (386,-105) → (388,-22) → (340,-22), rejoining its old line at x 340. The range is unchanged.
+  `building_landmarks` checks the road stays clear, and `city_audit` no longer needs the exception.
 - **Strip ring road meets the beach rock revetment** at about (24, 400). Also KNOWN in `city_audit`.
 - **Props sunk 16 cm into the plinth** in the hotel, high-rise, burger, motel and nightclub lots. `city_audit` REPORTs them without
   failing. Use `world.surface_height()` for exterior solid props.
@@ -242,6 +242,6 @@ boomy, with no "childish beeps".
 5. Steam: follow `docs/NETWORK_SECURITY_AND_STEAM.md`. Install a GodotSteam build that matches 4.4.1, put `steam_appid.txt` (480)
    beside the project and the exe, and run the two-PC checklist. `create_host` and `create_client` arguments are the likeliest
    thing to need adjusting.
-6. Decide the gun-store yard vs Coast Road layout, and the proposals in `docs/SUBROSA_NBD_RESEARCH.md`.
+6. Drive the rerouted Coast Road round the gun store, and decide on the proposals in `docs/SUBROSA_NBD_RESEARCH.md`.
 7. Only after local validation: export, smoke-test, and decide whether to merge into `cloud/map-integration`. Never merge into `master`
    from here.

@@ -1295,7 +1295,9 @@ func _define_roads() -> void:
 	_road("BAYSIDE AVENUE", [Vector2(88, 88), Vector2(100, 99), Vector2(118, 102), Vector2(227, 102)])
 	# Kingsway Boulevard: the diagonal from Midtown's east ring at Canal Street through Motor Mile.
 	_road("KINGSWAY BOULEVARD", [Vector2(88, -15), Vector2(141, 35), _ring_snap("kingsway", Vector2(240, 130))])
-	_road("COAST ROAD", [_ring_snap("solana", Vector2(335, -105)), Vector2(340, -60), Vector2(340, 35), Vector2(340, 110), _ring_snap("kingsway", Vector2(315, 135))])
+	# Coast Road swings east round the Halcyon Arms range yard (world x 292-378, z -97..-29) instead of
+	# running through it and past the long-range plates, then rejoins the old line at x 340.
+	_road("COAST ROAD", [_ring_snap("solana", Vector2(335, -105)), Vector2(386, -105), Vector2(388, -22), Vector2(340, -22), Vector2(340, 35), Vector2(340, 110), _ring_snap("kingsway", Vector2(315, 135))])
 	_road("SOLANA BLUFF DRIVE", [Vector2(227, -150), Vector2(240, -170), Vector2(238, -200), _ring_snap("solana", Vector2(255, -190))])
 	# --- South: Halcyon Avenue to the beach, the outer ring, Old Town and the Strip ---------
 	_road("MORRIS LINK", [Vector2(0, 250), _ring_snap("morris", Vector2(-20, 250))])
