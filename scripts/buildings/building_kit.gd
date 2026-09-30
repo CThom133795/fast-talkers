@@ -327,7 +327,9 @@ func stairs_u(start: Vector3, heading: Vector3, total_rise: float, width: float,
 	var landing_center: Vector3 = start + direction * (first * run + landing_depth * 0.5) + lateral * ((width + gap) * 0.5) + Vector3(0, landing_top * 0.5, 0)
 	var angle: float = atan2(direction.x, direction.z)
 	world._box_with(landing_center, landing_size, material, true, angle)
-	var second_start: Vector3 = start + lateral * (width + gap) + direction * (first * run + landing_depth) + Vector3(0, landing_top, 0)
+	# The return flight starts at the landing's near edge, beside the end of the first flight (it
+	# used to start at the far edge, which stood its lower steps on the landing and blocked the turn).
+	var second_start: Vector3 = start + lateral * (width + gap) + direction * (first * run) + Vector3(0, landing_top, 0)
 	_flight(second_start, -direction, second, rise, width, run, material)
 	var top: Vector3 = second_start - direction * (second * run) + Vector3(0, second * rise, 0)
 	if rails:

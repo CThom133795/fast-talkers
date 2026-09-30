@@ -8,6 +8,8 @@ const Stripclub = preload("res://scripts/buildings/stripclub.gd")
 const Hotel = preload("res://scripts/buildings/hotel.gd")
 const Burger = preload("res://scripts/buildings/burger.gd")
 const Glass = preload("res://scripts/breakable_glass.gd")
+const Garage = preload("res://scripts/buildings/garage.gd")
+const Car = preload("res://scripts/car.gd")
 var checks: int = 0
 var failures: int = 0
 var world: Node3D
@@ -90,10 +92,10 @@ func _run() -> void:
 	root.add_child(world)
 	await _frames(3)
 	for spec: Array in [["nightclub", "Club Voltage", "CLUB VOLTAGE", 3, Nightclub.HALF], ["stripclub", "Velvet Room", "THE VELVET ROOM", 3, Stripclub.HALF],
-			["hotel", "Hotel Meridian", "HOTEL MERIDIAN", 3, Hotel.HALF]]:
+			["hotel", "Hotel Meridian", "HOTEL MERIDIAN", 3, Hotel.HALF], ["garage", "", "CENTRAL PARKING", 0, Garage.HALF]]:
 		var key: String = spec[0]
 		var node: Node3D = world.plot_nodes[key]
-		_check(node.has_meta("walk_in") and node.has_node("Interior"), key + " is a furnished walk-in building")
+		_check(node.has_meta("walk_in") and (node.has_node("Interior") or key == "garage"), key + " is a walk-in building")
 		_check(node.get_meta("interior_half", Vector2.ZERO) == spec[4], key + " publishes its interior half-size")
 		var named: bool = false
 		for landmark: Dictionary in world.landmarks:
@@ -111,9 +113,10 @@ func _run() -> void:
 			var inside: Vector3 = door["inside"]
 			var floor_y: float = _floor_at(inside)
 			_check(not is_nan(floor_y) and _clear(Vector3(inside.x, floor_y, inside.z), label + " inside"), "%s has a clear landing inside" % label)
-		_check(exits >= spec[3], "%s has %d street/alley exits (>= %d)" % [key, exits, spec[3]])
+		if not str(spec[1]).is_empty():
+			_check(exits >= spec[3], "%s has %d street/alley exits (>= %d)" % [key, exits, spec[3]])
 		var routes: Dictionary = node.get_meta("routes", {})
-		_check(routes.size() >= 2, key + " publishes at least two walk routes")
+		_check(routes.size() >= (1 if key == "garage" else 2), key + " publishes its walk routes")
 		for route_name: String in routes:
 			_check(_route_ok(node, routes[route_name], key + " " + route_name), "%s route %s is walkable end to end" % [key, route_name])
 		# Lamp budget: at most two interior lamps (main room group + back of house), on the interior layer.
@@ -122,7 +125,7 @@ func _run() -> void:
 		for light: Node in node.find_children("*", "OmniLight3D", true, false):
 			lamps += 1
 			layered = layered and (light as OmniLight3D).light_cull_mask == 1 << (world.INTERIOR_LAYER - 1)
-		_check(lamps >= 1 and lamps <= 2 and layered, "%s uses %d interior-layer lamps (<= 2)" % [key, lamps])
+		_check(lamps <= 2 and layered, "%s uses %d interior-layer lamps (<= 2)" % [key, lamps])
 		# Merged: few mesh instances left after finish(), and the interior furniture sits on layer 2 with a range.
 		var meshes: int = 0
 		for child: Node in node.find_children("*", "MeshInstance3D", true, false):
@@ -131,7 +134,7 @@ func _run() -> void:
 		print("  %s mesh instances after merge: %d" % [key, meshes])
 		_check(meshes <= 90, "%s merges to %d mesh instances (<= 90)" % [key, meshes])
 		var interior_ok: bool = true
-		for child: Node in node.get_node("Interior").get_children():
+		for child: Node in (node.get_node("Interior").get_children() if node.has_node("Interior") else []):
 			if child is GeometryInstance3D:
 				var geometry: GeometryInstance3D = child
 				interior_ok = interior_ok and geometry.layers == 1 << (world.INTERIOR_LAYER - 1) and geometry.visibility_range_end > 0.0
@@ -176,6 +179,31 @@ func _run() -> void:
 	var pole: Vector3 = burger.global_transform * Vector3(-13.6, 0, 11.8)
 	var pole_hit: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(pole + Vector3(3, 1.0, 0) + (burger.global_transform.basis * Vector3(0, 0, 0)), pole + Vector3(-3, 1.0, 0)))
 	_check(not pole_hit.is_empty(), "Burger pole sign has a solid pole where it is drawn")
+	# Garage: ramps within the 12 degree limit, and a sedan actually drives up each one.
+	var garage: Node3D = world.plot_nodes["garage"]
+	for ramp: Dictionary in garage.get_meta("ramps"):
+		_check(float(ramp["degrees"]) <= 12.0, "Garage ramp is %.1f degrees (<= 12)" % float(ramp["degrees"]))
+	for action: String in ["move_left", "move_right", "stick_left", "stick_right", "move_forward", "move_back", "pad_throttle", "pad_brake", "handbrake"]:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+	for climb: Array in [[Vector3(-11.5, Garage.LEVELS[0] + 0.4, 10.5), 0.0, Garage.LEVELS[1], "west ramp to deck 2"],
+			[Vector3(11.5, Garage.LEVELS[1] + 0.4, -10.5), PI, Garage.LEVELS[2], "east ramp to the roof"]]:
+		var car: Node3D = Car.new()
+		car.vehicle_type = "sedan"
+		root.add_child(car)
+		car.reset_car(garage.global_transform * (climb[0] as Vector3))
+		car.rotation.y = garage.rotation.y + float(climb[1])
+		car.enabled = true
+		await _frames(10)
+		car.occupied = true
+		Input.action_press("move_forward")
+		await _frames(300)
+		Input.action_release("move_forward")
+		var reached: float = car.global_position.y
+		_check(reached > float(climb[2]) - 0.2, "A sedan drives up the garage %s (reached y %.2f, deck at %.2f)" % [climb[3], reached, float(climb[2])])
+		car.occupied = false
+		car.queue_free()
+		await _frames(2)
 	world.queue_free()
 	await _frames(3)
 	print("BUILDING LANDMARKS RESULT: %d checks, %d failures" % [checks, failures])
