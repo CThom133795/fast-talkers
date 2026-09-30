@@ -83,6 +83,11 @@ func has_sound(sound: String) -> bool:
 	return _bank.has(sound) or _lazy.has(sound)
 
 
+## The three music stings (title screen, Friday dead drop intro, end of week standings).
+func sting_names() -> Array:
+	return ["sting_title", "sting_deaddrop", "sting_week_end"]
+
+
 func stream(sound: String) -> AudioStreamWAV:
 	_ensure(sound)
 	return _bank.get(sound) as AudioStreamWAV
@@ -349,6 +354,7 @@ func _build_bank() -> void:
 	for extra: String in ["glass", "crash", "door"]:
 		_spatial[extra] = true
 	_build_world_sounds()
+	_build_playtest_sounds()
 
 
 ## Loop level target so the richer ambience sits where the old rumble did.
@@ -1305,3 +1311,268 @@ func _hush_loop() -> PackedFloat32Array:
 		var hum: float = sin(TAU * 120.0 * t + 0.3) * 0.08
 		out[index] = drone * 0.5 + hum + air * 2.2 * (0.7 + 0.3 * sin(TAU * 2.0 * u))
 	return _crossfade_loop(out, int(0.5 * RATE))
+
+
+## ---- Playtest additions: music stings, HQ bank, phone hardware, newspaper (all lazy) ----
+## Stings are sustained, so they carry a target RMS (the peak alone would make them far louder
+## than the clicks); phone tones are quiet tonal beds like `phone_busy`.
+
+func _build_playtest_sounds() -> void:
+	_add_lazy("sting_title", _sting_title, -8.0, false, 0.12)
+	_add_lazy("sting_deaddrop", _sting_deaddrop, -6.0, false, 0.15)
+	_add_lazy("sting_week_end", _sting_week_end, -6.0, false, 0.15)
+	_add_lazy("bank", _bank_thunk, -8.0)
+	_add_lazy("dial", func() -> PackedFloat32Array: return _dtmf_blip(770.0, 1336.0), -16.0)
+	_add_lazy("busy", _busy_signal, -20.0)
+	_add_lazy("hangup", func() -> PackedFloat32Array: return _handling([[0.0, "thunk", 160.0, 0.85], [0.004, "clack", 850.0, 0.8], [0.032, "clack", 1450.0, 0.35], [0.05, "slide", 0.05, 0.15], [0.135, "click", 1900.0, 0.65], [0.19, "click", 2700.0, 0.3], [0.255, "brass", 3300.0, 0.14]], 0.35, 301), -8.0)
+	_add_lazy("pickup_phone", func() -> PackedFloat32Array: return _handling([[0.0, "click", 2200.0, 0.7], [0.022, "clack", 760.0, 0.85], [0.05, "slide", 0.08, 0.22], [0.15, "clack", 1100.0, 0.45], [0.172, "click", 2400.0, 0.4]], 0.25, 304), -9.0)
+	_add_lazy("paper", _paper_unfold, -12.0)
+	_add_lazy("ringback", _ringback_burst, -21.0)
+
+
+## Telephone band: roughly 300 Hz to 3.4 kHz (one-pole high-pass and low-pass at 22.05 kHz).
+func _phone_band(samples: PackedFloat32Array) -> PackedFloat32Array:
+	var out: PackedFloat32Array = PackedFloat32Array()
+	out.resize(samples.size())
+	var low: float = 0.0
+	var band: float = 0.0
+	for index: int in range(samples.size()):
+		low += (samples[index] - low) * 0.085
+		band += (samples[index] - low - band) * 0.62
+		out[index] = band
+	return out
+
+
+## Cheap room: four damped feedback combs (47-88 ms) summed under the dry signal. `decay` is the
+## loop feedback (higher rings longer), `mix` the wet level. Fixed delays, so fully deterministic.
+func _room(dry: PackedFloat32Array, decay: float, mix: float) -> PackedFloat32Array:
+	var out: PackedFloat32Array = dry.duplicate()
+	for delay: int in [1103, 1427, 1699, 1933]:
+		var line: PackedFloat32Array = PackedFloat32Array()
+		line.resize(delay)
+		var head: int = 0
+		var state: float = 0.0
+		for index: int in range(dry.size()):
+			var echoed: float = line[head]
+			state += (echoed - state) * 0.32
+			line[head] = dry[index] + state * decay
+			head += 1
+			if head == delay:
+				head = 0
+			out[index] += echoed * mix * 0.5
+	return _one_pole(out, 0.55)
+
+
+## Softly ends a sting: the last `span` seconds fade along a smooth curve.
+func _fade_tail(samples: PackedFloat32Array, span: float) -> PackedFloat32Array:
+	var total: float = float(samples.size()) / RATE
+	for index: int in range(samples.size()):
+		samples[index] *= smoothstep(0.0, span, total - float(index) / RATE)
+	return samples
+
+
+## A slow synth pad: detuned saws through a two-pole low-pass that opens over the attack (the
+## "filter swell"). Active from `start`, fades after `release_at`. Returns a full-length buffer.
+func _pad_layer(total: float, start: float, notes: Array, level: float, attack: float, release_at: float, open_from: float, open_to: float) -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(total)
+	var phases: PackedFloat32Array = PackedFloat32Array()
+	phases.resize(notes.size() * 2)
+	for voice: int in range(phases.size()):
+		phases[voice] = float(voice) * 0.37
+	var first: float = 0.0
+	var second: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var local: float = t - start
+		if local < 0.0:
+			continue
+		var env: float = smoothstep(0.0, attack, local) * (1.0 if t < release_at else exp(-(t - release_at) * 1.5))
+		var coefficient: float = lerpf(open_from, open_to, smoothstep(0.0, attack * 1.8, local))
+		var saw: float = 0.0
+		for voice: int in range(phases.size()):
+			var hz: float = float(notes[voice >> 1]) * (0.997 if voice % 2 == 0 else 1.003)
+			phases[voice] = fposmod(phases[voice] + hz / RATE, 1.0)
+			saw += phases[voice] * 2.0 - 1.0
+		first += (saw - first) * coefficient
+		second += (first - second) * coefficient
+		out[index] = second * env * level * 2.0 / float(notes.size())
+	return out
+
+
+## One electric-piano note (soft FM bell, octave partial, a short tine bark, slow tremolo) mixed
+## into `out` from `start`; `decay` is the exponential decay rate per second.
+func _keys(out: PackedFloat32Array, start: float, hz: float, level: float, decay: float) -> void:
+	var first: int = int(start * RATE)
+	for index: int in range(first, out.size()):
+		var local: float = float(index - first) / RATE
+		var env: float = minf(1.0, local * 250.0) * exp(-local * decay)
+		if local > 0.1 and env < 0.0005:
+			break
+		var angle: float = TAU * hz * local
+		var tone: float = sin(angle + 1.0 * exp(-local * 6.0) * sin(angle)) + 0.3 * sin(angle * 2.0) * exp(-local * 3.0) + 0.1 * sin(angle * 7.0) * exp(-local * 22.0)
+		out[index] += tone * env * (1.0 + 0.1 * sin(TAU * 4.4 * local)) * level
+
+
+## A soft sine bass note with a touch of second harmonic, mixed into `out` from `start`.
+func _bass_note(out: PackedFloat32Array, start: float, hz: float, level: float, decay: float) -> void:
+	var first: int = int(start * RATE)
+	for index: int in range(first, out.size()):
+		var local: float = float(index - first) / RATE
+		var env: float = smoothstep(0.0, 0.04, local) * exp(-local * decay)
+		if local > 0.1 and env < 0.0005:
+			break
+		out[index] += (sin(TAU * hz * local) + 0.3 * sin(TAU * hz * 2.0 * local)) * env * level
+
+
+## Title sting, 3.8 s: a low C, then a Cm9 (Eb Bb D G over a C pad) on electric piano, under a slow
+## filter swell, decaying into a dark room. Restrained: one chord, no melody.
+func _sting_title() -> PackedFloat32Array:
+	var length: float = 3.8
+	var out: PackedFloat32Array = _pad_layer(length, 0.0, [130.81, 155.56, 196.0, 233.08, 293.66], 0.9, 1.3, 2.0, 0.02, 0.2)
+	_bass_note(out, 0.0, 65.41, 0.55, 0.9)
+	_keys(out, 0.05, 233.08, 0.22, 0.9)
+	_keys(out, 0.11, 293.66, 0.2, 0.95)
+	_keys(out, 0.17, 311.13, 0.2, 1.0)
+	_keys(out, 0.24, 392.0, 0.17, 1.1)
+	return _fade_tail(_room(_soft_clip(out, 1.1), 0.83, 0.5), 0.9)
+
+
+## Dead Drop sting, 3.0 s: a detuned saw braam (root plus a tritone, low-pass opening, pitch
+## creeping up) swells for 1.8 s, cuts to a beat of silence, then a dark pitch-dropping hit lands
+## in a long, dim room tail.
+func _sting_deaddrop() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 302
+	var length: float = 3.0
+	var hit_at: float = 1.85
+	var out: PackedFloat32Array = _buffer(length)
+	var phases: PackedFloat32Array = PackedFloat32Array([0.0, 0.21, 0.47, 0.11, 0.64, 0.83])
+	var ratios: Array = [0.994, 1.0, 1.007, 1.406, 1.42, 1.436]
+	var first: float = 0.0
+	var second: float = 0.0
+	var sub_phase: float = 0.0
+	var thump_phase: float = 0.0
+	var dark: float = 0.0
+	var prev: float = 0.0
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var value: float = 0.0
+		if t < hit_at:
+			var swell: float = pow(clampf(t / (hit_at - 0.05), 0.0, 1.0), 1.6)
+			var bend: float = 0.955 + 0.045 * swell
+			var saw: float = 0.0
+			for voice: int in range(6):
+				phases[voice] = fposmod(phases[voice] + 55.0 * float(ratios[voice]) * bend / RATE, 1.0)
+				saw += (phases[voice] * 2.0 - 1.0) * (1.0 if voice < 3 else 0.5)
+			var coefficient: float = lerpf(0.015, 0.3, swell)
+			first += (saw - first) * coefficient
+			second += (first - second) * coefficient
+			sub_phase += 27.5 * bend / RATE
+			var gate: float = minf(1.0, t * 20.0) * smoothstep(0.0, 0.012, hit_at - 0.045 - t)
+			value = (second * 0.9 + sin(TAU * sub_phase) * (0.4 + 0.6 * swell)) * swell * gate
+		else:
+			var local: float = t - hit_at
+			var noise: float = rng.randf_range(-1.0, 1.0)
+			dark += (noise - dark) * 0.22
+			thump_phase += (38.0 + 55.0 * exp(-local * 16.0)) / RATE
+			value = sin(TAU * thump_phase) * exp(-local * 3.0) * 2.2
+			value += dark * exp(-local * 9.0) * 2.0 + (noise - prev) * exp(-local * 260.0) * 0.45
+			value += sin(TAU * 148.0 * local) * exp(-local * 7.0) * 0.3
+			value *= minf(1.0, local * 700.0)
+			prev = noise
+		out[index] = value
+	return _fade_tail(_room(_soft_clip(out, 1.3), 0.87, 0.65), 0.4)
+
+
+## End-of-week sting, 3.8 s: a low, weighty hit, a suspended chord hanging for a beat, then it
+## resolves down to Cm9 and rings out over a soft pad and low C.
+func _sting_week_end() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 303
+	var length: float = 3.8
+	var out: PackedFloat32Array = _pad_layer(length, 1.0, [130.81, 196.0, 233.08, 311.13], 0.3, 0.55, 2.4, 0.05, 0.22)
+	var dark: float = 0.0
+	var prev: float = 0.0
+	var phase: float = 0.0
+	for index: int in range(int(1.6 * RATE)):
+		var t: float = float(index) / RATE
+		var noise: float = rng.randf_range(-1.0, 1.0)
+		dark += (noise - dark) * 0.12
+		phase += (34.0 + 52.0 * exp(-t * 14.0)) / RATE
+		out[index] += sin(TAU * phase) * exp(-t * 3.5) * 2.2 + dark * exp(-t * 16.0) * 1.6 + (noise - prev) * exp(-t * 400.0) * 0.4
+		prev = noise
+	for hz: float in [130.81, 174.61, 196.0, 261.63]:
+		_keys(out, 0.4, hz, 0.22, 2.6)
+	for hz: float in [130.81, 196.0, 233.08, 293.66, 311.13]:
+		_keys(out, 1.05, hz, 0.24, 0.75)
+	_bass_note(out, 1.05, 65.41, 0.7, 0.7)
+	return _fade_tail(_room(_soft_clip(out, 1.1), 0.85, 0.55), 0.9)
+
+
+## HQ banking, 1.0 s: the thud of a safe door and a latch, a short mechanical register "ching"
+## (inharmonic bell partials, struck twice), then a few paper-money riffle ticks.
+func _bank_thunk() -> PackedFloat32Array:
+	var events: Array = [[0.0, "thunk", 95.0, 1.2], [0.006, "thunk", 62.0, 0.8], [0.014, "clack", 620.0, 0.75], [0.085, "slide", 0.05, 0.2]]
+	for tick: Array in [[0.45, 0.6], [0.49, 0.85], [0.525, 0.7], [0.56, 0.95], [0.59, 0.75], [0.62, 0.9], [0.65, 0.6], [0.72, 1.0]]:
+		events.append([float(tick[0]), "paper", 0.0, float(tick[1])])
+	events.append([0.72, "thunk", 120.0, 0.35])
+	var out: PackedFloat32Array = _handling(events, 1.0, 306)
+	var ching: PackedFloat32Array = _bell([1865.0, 3290.0, 4980.0], 0.55, 9.0)
+	for strike: Array in [[0.16, 0.28], [0.205, 0.2]]:
+		var start: int = int(float(strike[0]) * RATE)
+		for index: int in range(mini(ching.size(), out.size() - start)):
+			out[start + index] += ching[index] * float(strike[1])
+	return _fade_tail(out, 0.06)
+
+
+## One DTMF key press of `low` + `high` Hz (defaults to the 5 key: 770 + 1336), 0.12 s, with the
+## high tone a touch hotter as on real telephones, squeezed into the phone band.
+func _dtmf_blip(low: float, high: float) -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 307
+	var out: PackedFloat32Array = _buffer(0.12)
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var env: float = minf(1.0, t * 600.0) * smoothstep(0.0, 0.006, 0.12 - t)
+		var click: float = rng.randf_range(-1.0, 1.0) * exp(-t * 900.0) * 0.25
+		out[index] = ((sin(TAU * low * t) * 0.45 + sin(TAU * high * t) * 0.55) * env + click)
+	return _phone_band(out)
+
+
+## North American busy signal: 480 + 620 Hz, 0.5 s on and 0.5 s off, two cycles (2 s total),
+## band-limited like a line.
+func _busy_signal() -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(2.0)
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var phase: float = fposmod(t, 1.0)
+		var gate: float = minf(1.0, phase * 300.0) * clampf((0.5 - phase) * 300.0, 0.0, 1.0)
+		out[index] = (sin(TAU * 480.0 * t) + sin(TAU * 620.0 * t)) * 0.5 * gate
+	return _phone_band(out)
+
+
+## Unfolding a newspaper, 0.84 s: three fold-and-open gestures, each a cloth swish with a swarm of
+## dry paper crinkles that swell and die away.
+func _paper_unfold() -> PackedFloat32Array:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 305
+	var events: Array = []
+	for gesture: Array in [[0.02, 0.26], [0.28, 0.28], [0.54, 0.24]]:
+		var begin: float = float(gesture[0])
+		var span: float = float(gesture[1])
+		events.append([begin, "cloth", span * 0.8, 0.3])
+		for crinkle: int in range(26):
+			var u: float = (float(crinkle) + rng.randf()) / 26.0
+			events.append([begin + u * span, "paper", 0.0, 0.2 + 0.7 * rng.randf() * sin(PI * u)])
+	return _handling(events, 0.84, 305)
+
+
+## Ringback heard by the caller while the far phone rings: one 2 s burst of 440 + 480 Hz with a
+## soft fade, in the phone band. (The real cadence is 2 s on, 4 s off: the caller loops it.)
+func _ringback_burst() -> PackedFloat32Array:
+	var out: PackedFloat32Array = _buffer(2.0)
+	for index: int in range(out.size()):
+		var t: float = float(index) / RATE
+		var env: float = smoothstep(0.0, 0.06, t) * smoothstep(0.0, 0.15, 2.0 - t)
+		out[index] = (sin(TAU * 440.0 * t) + sin(TAU * 480.0 * t)) * 0.5 * env
+	return _phone_band(out)

@@ -17,7 +17,7 @@ if ! command -v "$GODOT" >/dev/null 2>&1 && [ ! -x "$GODOT" ]; then
 	exit 2
 fi
 
-ALL="vehicle_art vehicles_06 integration free_roam wiring_05 map_interiors map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security voice week_flow stair_walk prefabs city_fill remote_player chat_ui net_lobby_ui soak"
+ALL="vehicle_art vehicles_06 integration free_roam wiring_05 map_interiors map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security voice voice_perf week_flow stair_walk prefabs city_fill crew_hq remote_player chat_ui net_lobby_ui soak"
 if [ $# -gt 0 ]; then SUITES="$*"; else SUITES="$ALL net_pair"; fi
 
 NOISE='BUG: Unreferenced static string|RID allocations|leaked at exit|Thread object is being destroyed|ObjectDB instances leaked|Pages in use exist at exit|Orphan StringName|WARNING: .*at: (cleanup|~)'
@@ -29,7 +29,7 @@ for s in $SUITES; do
 	if [ "$s" = "net_pair" ]; then
 		if [ ! -f tests/run_net_pair.sh ]; then SUMMARY+=("SKIP  net_pair (tests/run_net_pair.sh missing)"); continue; fi
 		echo "=== net_pair ==="
-		timeout 170 bash tests/run_net_pair.sh > "$TMP/net_pair.out" 2>&1; rc=$?
+		timeout 170 bash tests/run_net_pair.sh 24651 lobby,phone > "$TMP/net_pair.out" 2>&1; rc=$?
 		grep -a -v -E "$NOISE" "$TMP/net_pair.out" | tr -d '\r' | tail -n 8
 		res="$(grep -a -E 'NET PAIR (PASSED|FAILED)' "$TMP/net_pair.out" | tail -1 | tr -d '\r')"
 		[ "$rc" -ne 0 ] && FAILED=1

@@ -20,7 +20,7 @@ const BACK_Z: float = -10.0
 const ROUTE: Array[Vector3] = [Vector3(-4, 0.12, 19.5), Vector3(-4, 0.12, 14), Vector3(-4, 0.12, 9), Vector3(-9, 0.12, -6),
 	Vector3(-10, 0.12, -8.5), Vector3(-10, 0.12, -12), Vector3(-10, 0.12, -16.5), Vector3(-10, 0.12, -19.5)]
 const FIRE_ROUTE: Array[Vector3] = [Vector3(-9, 0.12, -6), Vector3(-12, 0.12, -8.2), Vector3(-15, 0.12, -8.2), Vector3(-17.8, 0.12, -8.2)]
-const MEZZ_ROUTE: Array[Vector3] = [Vector3(14.9, 0.12, 11.2), Vector3(14.9, 0.17, 10.5), Vector3(14.9, 3.72, 4.5), Vector3(14.9, 3.72, 4.0), Vector3(11.0, 3.72, 0), Vector3(11.0, 3.72, -8.4)]
+const MEZZ_ROUTE: Array[Vector3] = [Vector3(15.1, 0.12, 11.2), Vector3(15.1, 0.17, 10.5), Vector3(15.1, 3.72, 4.5), Vector3(15.1, 3.72, 4.0), Vector3(11.0, 3.72, 0), Vector3(11.0, 3.72, -8.4)]
 
 
 static func build(world: Node3D, plot: Dictionary) -> void:
@@ -61,7 +61,7 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	kit.floor_slab(mezz, MEZZ_Y, concrete)
 	kit.railing(Vector3(9.0, MEZZ_Y, BACK_Z + 0.2), Vector3(9.0, MEZZ_Y, 4.5))
 	kit.railing(Vector3(9.0, MEZZ_Y, 4.5), Vector3(14.05, MEZZ_Y, 4.5))
-	var stair: Dictionary = kit.stairs_straight(Vector3(14.9, FLOOR_Y, 10.5), Vector3.FORWARD, MEZZ_Y - FLOOR_Y, 1.5, kit.mat(Color(0.2, 0.2, 0.22), "metal", 0.6))
+	var stair: Dictionary = kit.stairs_straight(Vector3(15.1, FLOOR_Y, 10.5), Vector3.FORWARD, MEZZ_Y - FLOOR_Y, 1.5, kit.mat(Color(0.2, 0.2, 0.22), "metal", 0.6))
 	kit.node.set_meta("mezzanine_stair", stair)
 	for z: float in [-4.0, 2.0]:
 		kit.box(Vector3(9.3, MEZZ_Y * 0.5, z), Vector3(0.35, MEZZ_Y - 0.3, 0.35), kit.mat(Color(0.18, 0.18, 0.2), "metal", 0.5), true)

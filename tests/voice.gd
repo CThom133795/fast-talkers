@@ -47,7 +47,9 @@ func _run() -> void:
 	_gate()
 	_relay_pure()
 	_relay_occlusion()
+	_relay_phone()
 	_host_routing()
+	_host_phone_routing()
 	_voice_node()
 	await _end_to_end()
 	print("VOICE RESULT: %d checks, %d failures" % [checks, failures])
@@ -199,6 +201,122 @@ func _relay_occlusion() -> void:
 	peers[15]["crew"] = "a"
 	radio = Relay.targets(10, Relay.Mode.CREW, peers, Relay.PROXIMITY_RANGE, []).map(func(e: Array) -> int: return int(e[0]))
 	_check(radio == [15], "crew radio crosses walls and distance")
+
+
+## Phone relay (pure): who is picked up by a phone in a live call, and who hears the other phone.
+func _relay_phone() -> void:
+	_check(Relay.valid_mode(Relay.Mode.PHONE) and Relay.valid_mode(0) and Relay.valid_mode(1) and not Relay.valid_mode(3) and not Relay.valid_mode(-1), "the relay accepts modes 0, 1 and PHONE (2) and nothing else")
+	_check(Relay.valid_send_mode(0) and Relay.valid_send_mode(1) and not Relay.valid_send_mode(Relay.Mode.PHONE) and not Relay.valid_send_mode(3), "a client may send only proximity or crew: PHONE is made by the host")
+	_check(Relay.PHONE_PICKUP == 1.2 and Relay.PHONE_SPEAKER == 3.5, "pickup radius 1.2 m, speaker radius 3.5 m")
+	# Phone A (held by talker 10) at the origin; phone B at x = 200. A call is {"a", "b"} phone positions.
+	var a_at: Vector3 = Vector3(0, 0, 0)
+	var b_at: Vector3 = Vector3(200, 0, 0)
+	var peers: Dictionary = {
+		10: {"crew": "a", "pos": a_at, "dead": false},
+		11: {"crew": "b", "pos": Vector3(1.0, 0, 0), "dead": false},
+		12: {"crew": "b", "pos": Vector3(3.0, 0, 0), "dead": false},
+		13: {"crew": "b", "pos": Vector3(201, 0, 0), "dead": false},
+		14: {"crew": "b", "pos": Vector3(203.4, 0, 0), "dead": false},
+		15: {"crew": "b", "pos": Vector3(203.6, 0, 0), "dead": false},
+		16: {"crew": "b", "pos": Vector3(200, 0, 2), "dead": true},
+		17: {"crew": "c", "pos": Vector3(200.5, 0, 0), "dead": false},
+		20: {"crew": "b", "pos": Vector3(1.3, 0, 0), "dead": false},
+	}
+	var calls: Array = [{"a": a_at, "b": b_at}]
+	var ids_of: Callable = func(rows: Array) -> Array:
+		var ids: Array = rows.map(func(r: Array) -> int: return int(r[0]))
+		ids.sort()
+		return ids
+	var rows: Array = Relay.phone_targets(10, peers, calls)
+	_check(ids_of.call(rows) == [13, 14, 17], "a talker at phone A is heard by the living within 3.5 m of phone B, not by the dead or at 3.6 m (%s)" % str(ids_of.call(rows)))
+	var dist_of: Dictionary = {}
+	for row: Array in rows:
+		dist_of[int(row[0])] = float(row[1])
+	_check(absf(float(dist_of[13]) - 1.0) < 0.01 and absf(float(dist_of[14]) - 3.4) < 0.01, "the listener is told the distance to the speaking phone")
+	# People next to the talker's own phone get no phone copy (they hear the talker directly).
+	_check(not dist_of.has(12) and not dist_of.has(11), "people next to the talker's own phone get no phone copy")
+	# Pickup radius: 1.2 m picks up, 3 m (a bystander) does not.
+	_check(ids_of.call(Relay.phone_targets(11, peers, calls)) == [13, 14, 17], "someone standing 1.0 m from the phone is picked up too")
+	_check(Relay.phone_targets(12, peers, calls).is_empty() and Relay.phone_targets(20, peers, calls).is_empty(), "a bystander 3 m (or 1.3 m) from the phone is NOT picked up: it does not take in the room")
+	# The other direction: the far side talking is heard within 3.5 m of phone A.
+	var back: Array = ids_of.call(Relay.phone_targets(13, peers, calls))
+	_check(back == [10, 11, 12, 20], "the far side talking is heard at phone A, but not at the far phone's own side (%s)" % str(back))
+	# The dead cannot use phones.
+	peers[10]["dead"] = true
+	_check(Relay.phone_targets(10, peers, calls).is_empty(), "a dead talker is not picked up")
+	peers[10]["dead"] = false
+	# A dropped phone in a live call is a speakerphone on the table: radii come from the phone, not a person.
+	var table: Dictionary = {"a": Vector3(50, 0.3, 50), "b": b_at}
+	peers[18] = {"crew": "a", "pos": Vector3(50.6, 0, 50), "dead": false}
+	_check(ids_of.call(Relay.phone_targets(18, peers, [table])) == [13, 14, 17], "a dropped phone on the table still picks up someone standing 0.6 m from it")
+	_check(Relay.phone_targets(10, peers, [table]).is_empty(), "...and nobody else, however close to where the call started")
+	# Two calls and bad input.
+	var two: Array = [{"a": a_at, "b": b_at}, {"a": Vector3(0.5, 0, 0), "b": Vector3(300, 0, 0)}]
+	peers[19] = {"crew": "c", "pos": Vector3(300, 0, 1), "dead": false}
+	_check(ids_of.call(Relay.phone_targets(10, peers, two)) == [13, 14, 17, 19], "a talker by two phones in two calls reaches both far ends, once each")
+	_check(Relay.phone_targets(10, peers, []).is_empty() and Relay.phone_targets(99, peers, calls).is_empty(), "no live calls or an unknown talker route nowhere")
+	_check(Relay.phone_targets(10, peers, [{"a": Vector3.INF, "b": b_at}, "junk", {}]).is_empty(), "malformed call entries are ignored")
+	_check(Relay.targets(10, Relay.Mode.PHONE, peers).is_empty(), "the ordinary relay never routes the PHONE mode")
+
+
+## Host relay with a live call: proximity frames by a phone also go out as PHONE; radio never does.
+func _host_phone_routing() -> void:
+	net.voice_tap = _record
+	net.voice_space = Callable()
+	net.voice_doors = Callable()
+	net._strikes.clear(6)
+	net._voice_radio_until.erase(6)
+	# Talker 6 holds phone A at the origin. Phone B is at x = 200. 8 is 1 m from B, 7 is 3 m from B, the host (1)
+	# stands 3 m from the talker (it hears the talker directly and is nowhere near B).
+	var line_a: Vector3 = Vector3.ZERO
+	var line_b: Vector3 = Vector3(200, 0, 0)
+	net._latest[6] = {"pos": line_a, "flags": 0}
+	net._latest[8] = {"pos": Vector3(201, 0, 0), "flags": 0}
+	net._latest[7] = {"pos": Vector3(203, 0, 0), "flags": 0}
+	net._latest[1] = {"pos": Vector3(3, 0, 0), "flags": 0}
+	var frame: PackedByteArray = Codec.new().encode(_speech())
+	tap.clear()
+	net._h_voice(6, Relay.Mode.PROXIMITY, frame)
+	_check(tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE).is_empty(), "no live call: no PHONE frames")
+	net.voice_phones = func() -> Array: return [{"a": line_a, "b": line_b}]
+	tap.clear()
+	var sent: int = net._h_voice(6, Relay.Mode.PROXIMITY, frame)
+	var phone_rows: Array = tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE)
+	var direct_rows: Array = tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PROXIMITY)
+	var phone_ids: Array = phone_rows.map(func(r: Array) -> int: return int(r[0]))
+	phone_ids.sort()
+	_check(phone_ids == [7, 8], "host: a live call carries the talker's proximity frame to the two listeners at the other phone (%s)" % str(phone_ids))
+	_check(direct_rows.size() == 1 and int(direct_rows[0][0]) == 1 and sent == 3, "host: the normal proximity frame still goes out as before (people next to you hear you directly)")
+	_check(int(phone_rows[0][1]) == 6, "host: PHONE frames carry the real talker id")
+	# Crew radio never goes down a phone (the crew mate 8 hears it on the radio only).
+	tap.clear()
+	net._h_voice(6, Relay.Mode.CREW, frame)
+	_check(tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE).is_empty() and _targets_of([]) == [1, 8], "host: crew radio reaches the crew only and is never relayed to a phone")
+	net._voice_radio_until.erase(6)
+	# A bystander 3 m from the phone is not picked up.
+	net._latest[6] = {"pos": Vector3(3.0, 0, 0), "flags": 0}
+	tap.clear()
+	net._h_voice(6, Relay.Mode.PROXIMITY, frame)
+	_check(tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE).is_empty(), "host: someone 3 m from the phone does not get on the call")
+	# A dead talker cannot use a phone; a dead listener does not hear one.
+	net._latest[6] = {"pos": line_a, "flags": 4}
+	tap.clear()
+	net._h_voice(6, Relay.Mode.PROXIMITY, frame)
+	_check(tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE).is_empty(), "host: a dead talker is not carried down the phone")
+	net._latest[6] = {"pos": line_a, "flags": 0}
+	net._latest[8] = {"pos": Vector3(201, 0, 0), "flags": 4}
+	tap.clear()
+	net._h_voice(6, Relay.Mode.PROXIMITY, frame)
+	var living: Array = tap.filter(func(r: Array) -> bool: return int(r[2]) == Relay.Mode.PHONE).map(func(r: Array) -> int: return int(r[0]))
+	_check(living == [7], "host: a dead listener near the far phone does not hear it (%s)" % str(living))
+	net._latest[8] = {"pos": Vector3(201, 0, 0), "flags": 0}
+	# A client cannot ask for the PHONE mode itself.
+	var strikes: int = net._strikes.count(6)
+	tap.clear()
+	_check(net._h_voice(6, Relay.Mode.PHONE, frame) == 0 and tap.is_empty() and net._strikes.count(6) > strikes, "a client frame claiming the PHONE mode is rejected with a strike")
+	net.voice_phones = Callable()
+	net._strikes.clear(6)
+	net.voice_tap = Callable()
 
 
 func _record(target: int, sender: int, mode: int, dist: float, _frame: PackedByteArray, muffled: bool = false) -> void:
@@ -401,7 +519,24 @@ func _voice_node() -> void:
 	online_voice._on_voice_frame(9, 7, frame, 12.0)
 	online_voice._on_voice_frame(9, Relay.Mode.PROXIMITY, PackedByteArray([1]), 12.0)
 	_check(online_voice.peer_count() == 0 or online_voice.peer_count() == 1, "garbage frames are ignored without errors")
+	# Phone playback: needs a phone locator; the voice comes out of the phone, on the telephone bus.
+	online_voice.set_peer_muted(9, true)
+	online_voice.set_peer_muted(9, false)
+	online_voice._on_voice_frame(9, Relay.Mode.PHONE, frame, 2.0)
+	_check(online_voice.peer_count() == 0, "a PHONE frame with no phone locator is ignored")
+	var phone_spot: Vector3 = Vector3(5, 1.3, 5)
+	online_voice.phone_locator = func(_talker: int) -> Vector3: return phone_spot
+	online_voice._on_voice_frame(9, Relay.Mode.PHONE, frame, 2.0)
+	var handset: Node = (online_voice._peers[9] as Dictionary)["phone"] if online_voice.peer_count() == 1 else null
+	_check(handset is AudioStreamPlayer3D and (handset as AudioStreamPlayer3D).bus == "VoicePhone" and (handset as Node3D).global_position.is_equal_approx(phone_spot), "a PHONE frame plays from the phone's position on the VoicePhone bus")
+	_check(not online_voice.is_speaking(9) and online_voice.speakers().has("(phone) P9"), "phone voice is listed as (phone) and does not light the talker as speaking here")
+	var phone_bus: int = AudioServer.get_bus_index("VoicePhone")
+	_check(phone_bus >= 0 and AudioServer.get_bus_effect_count(phone_bus) == 3 and AudioServer.get_bus_effect(phone_bus, 0) is AudioEffectHighPassFilter and AudioServer.get_bus_effect(phone_bus, 1) is AudioEffectLowPassFilter, "the VoicePhone bus is a 300-3400 Hz band with a little crunch")
+	online_voice.phone_locator = func(_talker: int) -> Vector3: return Vector3.INF
+	online_voice._on_voice_frame(9, Relay.Mode.PHONE, frame, 2.0)
 	online_voice._process(0.016)
+	online_voice.set_peer_muted(9, true)
+	_check(online_voice.peer_count() == 0, "muting the talker drops the phone player too")
 	host_net.leave()
 
 
@@ -476,6 +611,29 @@ func _end_to_end() -> void:
 	await _wait(func() -> bool: return false, 0.3)
 	_check(near_heard and int(got["bob"][0][1]) == Relay.Mode.PROXIMITY and absf(float(got["bob"][0][2]) - 3.0) < 0.5, "e2e: open-mic proximity reaches the player 3 m away with the distance attached")
 	_check(got["carol"].is_empty() and got["host"].is_empty(), "e2e: proximity does not reach people 400 m and 500 m away")
+	# The host is a talker too: a client 3 m from the host hears it (clients once dropped frames from peer 1).
+	got["bob"].clear()
+	host.send_state(Vector3(3, 0, 2), 0.0, 0.0, 0, "", -1, -1, 100.0)
+	await _wait(func() -> bool: return (host.latest_state(1).get("pos", Vector3.ZERO) as Vector3).is_equal_approx(Vector3(3, 0, 2)), 2.0)
+	host.voice_space = Callable()
+	for i: int in range(6):
+		host.send_voice(Relay.Mode.PROXIMITY, frame)
+		await process_frame
+	var from_host: bool = await _wait(func() -> bool: return not got["bob"].is_empty(), 4.0)
+	_check(from_host and int(got["bob"][0][0]) == 1 and int(got["bob"][0][1]) == Relay.Mode.PROXIMITY, "e2e: a client hears the HOST talking (sender id 1 is accepted)")
+	# A live call: phone A is with Alice at the origin, phone B lies 400 m away next to Carol.
+	await _wait(func() -> bool: return false, float(FastNet.VOICE_RADIO_HOLD_MS) / 1000.0 + 0.2)
+	got["bob"].clear()
+	got["carol"].clear()
+	host.voice_phones = func() -> Array: return [{"a": Vector3(0, 0, 0), "b": Vector3(400, 0, 1)}]
+	for i: int in range(6):
+		alice.send_voice(Relay.Mode.PROXIMITY, frame)
+		await process_frame
+	var phone_heard: bool = await _wait(func() -> bool: return not got["carol"].is_empty() and not got["bob"].is_empty(), 4.0)
+	await _wait(func() -> bool: return false, 0.3)
+	_check(phone_heard and int(got["carol"][0][1]) == Relay.Mode.PHONE and int(got["carol"][0][0]) == alice.my_id() and absf(float(got["carol"][0][2]) - 1.0) < 0.5, "e2e: Carol beside the far phone hears Alice over the PHONE mode, stamped with Alice's id")
+	_check(int(got["bob"][0][1]) == Relay.Mode.PROXIMITY, "e2e: Bob next to Alice still hears her directly (and not a second, tinny copy)")
+	host.voice_phones = Callable()
 	for node: FastNet in [carol, bob, alice, host]:
 		node.leave()
 		node.get_parent().queue_free()

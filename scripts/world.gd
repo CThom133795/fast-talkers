@@ -23,6 +23,7 @@ const MeshKit = preload("res://scripts/mesh_kit.gd")
 const Interiors = preload("res://scripts/interiors.gd")
 const CityDetail = preload("res://scripts/city_detail.gd")
 const CityFill = preload("res://scripts/city_fill.gd")
+const CrewHQ = preload("res://scripts/buildings/crew_hq.gd")
 ## Kept for the city-limit tests: the Harbor mole's north quay is at z = -HALF on Halcyon
 ## Avenue, and Union Street ends at the West Slip quay at x = -HALF.
 const HALF: float = 200.0
@@ -79,15 +80,11 @@ var city_fill: RefCounted
 var _blockers_off: bool = false
 var _road_boxes: Array[Rect2] = []
 var _solid_grid: Dictionary = {}
-## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan chicanes.
+## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan its sightline props.
 var eye_blockers: Array[Rect2] = []
 ## Buildings the fill passes made, for the far-distance stand-ins (city_fill.gd builds one merged, vertex-coloured
 ## massing mesh per 96 m cell from these): {center (x/z), size (frontage, height, depth), yaw, color}.
 var lod_lots: Array[Dictionary] = []
-## Corner polygons of the traffic-calming kerb islands the fill pass put in the streets (see city_fill.gd).
-var calming_islands: Array[PackedVector2Array] = []
-## Per island: {center, u (along the street), n (across), width, side (which kerb), axis (the street's centre line at the island)}.
-var calming_info: Array[Dictionary] = []
 ## Beyond this distance a fill building is drawn as its massing box only.
 const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
@@ -95,8 +92,12 @@ var districts: Array[Dictionary] = []
 ## Named places for the map and mission sites: {name, at, neutral}.
 var landmarks: Array[Dictionary] = []
 ## Crew id -> {"car": Vector3, "yaw": float, "hq": Vector3, "spawn": Vector3,
-## "spawn_yaw": float, "door": Vector3}. `hq` is the delivery point on the HQ's doorstep;
-## `spawn`/`spawn_yaw` stand the crew just outside the door looking down the street.
+## "spawn_yaw": float, "door": Vector3, "phone": Vector3, "gate": Vector3}. The crew HQ is a walk-in
+## compound (scripts/buildings/crew_hq.gd): `hq` is the delivery point just inside its front door,
+## `spawn`/`spawn_yaw` stand the crew on the main room's open floor facing the door (8 players line up
+## across it, see online.gd `_apply_my_crew`), `door` is the direction out of the front door, `phone`
+## is where the crew phone sits (on the desk), `car` stays outside on the street, and `gate` is the
+## old doorstep where the crew leaves the compound (the fairness routes start there).
 var crew_spawns: Dictionary = {}
 ## Open paved squares and parks (x/z polygons) for the map.
 var plazas: Array[PackedVector2Array] = []
@@ -492,7 +493,7 @@ func door_near(at: Vector3, radius: float = 2.2) -> int:
 ## point on the road nearest `from` to the point on the road nearest `to` (y = 0).
 ## Empty if unreachable.
 func route(from: Vector3, to: Vector3) -> PackedVector3Array:
-	return _weave_islands(_route_raw(from, to))
+	return _route_raw(from, to)
 
 func _route_raw(from: Vector3, to: Vector3) -> PackedVector3Array:
 	if _graph_points.is_empty():
@@ -559,53 +560,16 @@ func wheelman_path(from: Vector3) -> PackedVector3Array:
 	path.append_array(road_loop)
 	return path
 
-## Adds waypoints in the open lane wherever the route runs into a traffic-calming kerb island, so the GPS line
-## and the practice wheelman thread each chicane instead of running down the centre line into it (`route()`
-## returns the woven path; the extra distance is a few metres per chicane).
-func _weave_islands(path: PackedVector3Array) -> PackedVector3Array:
-	if calming_info.is_empty():
-		return path
-	var woven: PackedVector3Array = PackedVector3Array()
-	for index: int in range(path.size()):
-		woven.append(path[index])
-		if index + 1 >= path.size():
-			break
-		var a: Vector2 = Vector2(path[index].x, path[index].z)
-		var b: Vector2 = Vector2(path[index + 1].x, path[index + 1].z)
-		var length: float = a.distance_to(b)
-		if length < 0.5:
-			continue
-		var hits: Array = []
-		for info: Dictionary in calming_info:
-			var centre: Vector2 = info["center"]
-			if centre.distance_to((a + b) * 0.5) > length * 0.5 + 8.0:
-				continue
-			var half_reach: float = float(info["width"]) * 0.5 + 1.6
-			var t: float = (centre - a).dot((b - a) / length)
-			if t < 0.0 or t > length:
-				continue
-			var closest: Vector2 = a + (b - a) / length * t
-			var offset: Vector2 = closest - centre
-			if absf(offset.dot(info["n"])) < half_reach and absf(offset.dot(info["u"])) < 4.0:
-				hits.append([t, info])
-		hits.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) < float(q[0]))
-		for hit: Array in hits:
-			var info: Dictionary = hit[1]
-			var free: Vector2 = (info["axis"] as Vector2) - (info["n"] as Vector2) * float(info["side"]) * float(info["width"]) * 0.5
-			# Approach and exit points 9 m either side of the island, in the open lane (the pure-pursuit bot
-			# switches waypoint 7 m early, so it clears the island's edge before it turns for the next one).
-			var heading: Vector2 = (b - a) / length
-			var approach: Vector2 = free - heading * 9.0
-			var leave: Vector2 = free + heading * 9.0
-			woven.append(Vector3(approach.x, 0.0, approach.y))
-			woven.append(Vector3(free.x, 0.0, free.y))
-			woven.append(Vector3(leave.x, 0.0, leave.y))
-	return woven
-
 ## Length in metres of `route(from, to)` plus the walk from each point to its road (INF if
 ## there is no way through).
 func route_length(from: Vector3, to: Vector3) -> float:
-	# The street-graph distance (the crews' fairness metric); `route()` adds a few metres of chicane weave.
+	# The street-graph distance (the crews' fairness metric).
+	# A crew's delivery point is inside its walk-in compound, so its fairness routes start at the compound's
+	# gate (the old doorstep on the street side), not deep inside the building.
+	for base: Dictionary in crew_spawns.values():
+		if base.has("gate") and from.is_equal_approx(base["hq"]):
+			from = base["gate"]
+			break
 	var path: PackedVector3Array = _route_raw(from, to)
 	if path.is_empty():
 		return INF
@@ -1123,6 +1087,17 @@ func _lamp(at: Vector3, toward: Vector3) -> void:
 	_box(at + toward * 0.7 + Vector3(0, 6.94, 0), Vector3(1.5 if absf(toward.x) > 0.5 else 0.12, 0.12, 0.12 if absf(toward.x) > 0.5 else 1.5), steel)
 	_box_with(at + toward * 1.4 + Vector3(0, 6.86, 0), Vector3(0.6, 0.14, 0.34) if absf(toward.x) > 0.5 else Vector3(0.34, 0.14, 0.6), _glow(Color(1.0, 0.66, 0.28), 2.4))
 
+## True if a world x/z point lies on a carriageway (within half a street's width + `margin` of its centre line).
+## Street furniture and lamps use it to keep off the road surface.
+func _on_carriageway(at: Vector2, margin: float = 0.0) -> bool:
+	for road: Dictionary in roads:
+		var half: float = float(road["width"]) * 0.5 + margin
+		var points: PackedVector2Array = road["points"]
+		for index: int in range(points.size() - 1):
+			if at.distance_squared_to(Geometry2D.get_closest_point_to_segment(at, points[index], points[index + 1])) < half * half:
+				return true
+	return false
+
 ## True if a registered door lies within `radius` (x/z) of a world point.
 func door_within(at: Vector2, radius: float) -> bool:
 	for door: Dictionary in interactable_doors:
@@ -1154,7 +1129,7 @@ func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 				_:
 					at = Vector3(rect.end.x - 1.1, 0.16, rect.position.y + rect.size.y * t)
 					toward = Vector3.RIGHT
-			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6):
+			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6) and not _on_carriageway(_w2(Vector2(at.x, at.z)), 0.3):
 				_lamp(at, toward)
 
 ## A city block: raised paved plinth with lamps. Returns the buildable interior.
@@ -1248,6 +1223,8 @@ func _mesh_at(mesh: Mesh, at: Vector3, material: Material, angle: float = 0.0, t
 # --- Street life: furniture, litter, puddles and steam -------------------------------------
 
 func _free_spot(at: Vector2, clearance: float) -> bool:
+	if _on_carriageway(at, clearance + 0.3):
+		return false
 	for footprint: Rect2 in footprints:
 		if footprint.grow(clearance).has_point(at):
 			return false
@@ -1377,10 +1354,10 @@ func _build_midtown_life() -> void:
 	_payphone(Vector3(9.9, 0.16, -26.5), PI * 0.5)
 	_news_box(Vector3(-9.6, 0.16, -26.0), -PI * 0.5, Color(0.8, 0.2, 0.18))
 	_news_box(Vector3(-9.6, 0.16, -24.8), -PI * 0.5, Color(0.2, 0.45, 0.75))
-	_trash_bags(Vector3(-11.2, 0.16, -48.0 + 4.0))
+	_trash_bags(Vector3(-11.2, 0.16, -42.5))
 	_hydrant(Vector3(9.6, 0.16, 26.0))
 	_hydrant(Vector3(-9.6, 0.16, -62.0))
-	_dumpster(Vector3(-11.0, 0.16, 30.5), -PI * 0.5, Color(0.25, 0.4, 0.3))
+	_dumpster(Vector3(-11.0, 0.16, 27.0), -PI * 0.5, Color(0.25, 0.4, 0.3))
 	_bench(Vector3(10.2, 0.16, 8.0), PI * 0.5)
 	_car_prop(Vector3(5.2, 0.03, -70.0), PI, Color(0.2, 0.32, 0.5))
 	_car_prop(Vector3(-40.0, 0.03, -47.2), PI * 0.5, Color(0.85, 0.72, 0.3))
@@ -1422,7 +1399,7 @@ const MAINLAND: PackedVector2Array = [
 	Vector2(411, 130), Vector2(406, 180), Vector2(410, 230),
 	# South-east: the south docks, then Halcyon Beach bulges south of the Strip.
 	Vector2(400, 275), Vector2(378, 320), Vector2(342, 356), Vector2(292, 384), Vector2(242, 398),
-	Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410), Vector2(24, 400),
+	Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(38, 416), Vector2(20, 412),
 	# South shore: Halcyon Avenue's end, Morris Marina and the Station's quay.
 	Vector2(8, 394), Vector2(-14, 384), Vector2(-34, 376), Vector2(-60, 372), Vector2(-100, 374), Vector2(-150, 376),
 	Vector2(-190, 380), Vector2(-240, 382), Vector2(-292, 372), Vector2(-338, 350), Vector2(-374, 324), Vector2(-396, 282),
@@ -1528,7 +1505,7 @@ func _define_roads() -> void:
 	_road("WEST END 150", [Vector2(-150, -100), Vector2(-150, 9)])
 	_road("WEST END NORTH", [Vector2(-212, -100), Vector2(-88, -100)])
 	_road("SLIP SIDE ROAD", [Vector2(-392, 62), Vector2(-190, 62)])
-	_road("SLIP SIDE LINK", [Vector2(-330, 62), Vector2(-330, 112), _ring_snap("station", Vector2(-322, 135))])
+	_road("SLIP SIDE LINK", [Vector2(-330, 62), Vector2(-330, 112), _ring_snap("station", Vector2(-330, 135))])
 	_road("WHARF NORTH", [Vector2(-380, -195), Vector2(-320, -195), Vector2(-235, -196)])
 	_road("WHARF SPINE", [Vector2(-320, -238), Vector2(-320, -195), _ring_snap("lantern", Vector2(-320, -140))])
 	_road("DOCK ROAD", [Vector2(215, 268), Vector2(215, 300), Vector2(330, 300), Vector2(385, 300)])
@@ -1675,7 +1652,7 @@ func _signed_area(poly: PackedVector2Array) -> float:
 		area += a.x * b.y - b.x * a.y
 	return area * 0.5
 
-const BEACH: PackedVector2Array = [Vector2(24, 400), Vector2(33, 391), Vector2(197, 391), Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410)]
+const BEACH: PackedVector2Array = [Vector2(24, 400), Vector2(33, 391), Vector2(197, 391), Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(38, 416)]
 
 ## Quay edges round a land mass: a stone face down to the water, a coping kerb and a rail on
 ## posts. Collision is exactly what you see: the coping is solid, the top rail is a thin bar,
@@ -2020,11 +1997,12 @@ func _build_district() -> void:
 		for z: float in [-66.0, -33.0, 9.0, 60.0]:
 			var height: float = _rng.randf_range(13.0, 27.0)
 			if not shop_sites.has(Vector2(side * 61.0, z)) and not SQUARE_SITES.has(Vector2(side * 61.0, z)):
-				_building(Vector3(side * 61.0, 0, z), Vector3(22, height, 21), Color(0.42, 0.46, 0.45), int(height / 3.2))
+				# The z -66 tower sits 0.5 m north so its face stops at the kerb of Meridian Street (z -56), not in the carriageway.
+				_building(Vector3(side * 61.0, 0, z - (0.5 if z < -60.0 else 0.0)), Vector3(22, height, 21), Color(0.42, 0.46, 0.45), int(height / 3.2))
 	# Midtown Parking: the old armory lot is a pay-and-display car park (the range moved to Halcyon Arms).
 	_box(Vector3(20, 0.02, -34), Vector3(21, 0.035, 22), Color(0.2, 0.22, 0.23), false, "asphalt")
 	_box(Vector3(21, 0.10, -43), Vector3(18, 0.20, 1.2), Color(0.70, 0.63, 0.45), true)
-	_box(Vector3(22, 1.6, -45), Vector3(20, 3.2, 0.5), Color(0.46, 0.43, 0.35), true, "panel")
+	_box(Vector3(22, 1.6, -43.5), Vector3(20, 3.2, 0.5), Color(0.46, 0.43, 0.35), true, "panel")
 	_label("MIDTOWN PARKING  /  PAY AT THE MACHINE", Vector3(22, 2.0, -44.70), 34, Color(0.94, 0.79, 0.48))
 	for at: Array in [[Vector3(15.9, 0.03, -34.4), 0.0, Color(0.55, 0.14, 0.14), "sedan"], [Vector3(24.1, 0.03, -34.4), 0.0, Color(0.2, 0.28, 0.4), "coupe"]]:
 		_car_prop(at[0], float(at[1]), at[2], str(at[3]), "MIDTOWN LOT")
@@ -2102,11 +2080,11 @@ func _build_squares() -> void:
 			dial.rotation = Vector3(PI * 0.5, atan2(face.x, face.z), 0)
 		_box(at + Vector3(0, 7.5, 0), Vector3(1.6, 0.3, 1.6), Color(0.3, 0.28, 0.26), false, "roof")
 		_landmark(str(square["name"]), at)
-	for spot: Vector3 in [Vector3(58, 0, -78), Vector3(54, 0, -72), Vector3(78, 0, -56), Vector3(-58, 0, 72), Vector3(-60, 0, 80), Vector3(-80, 0, 54)]:
+	for spot: Vector3 in [Vector3(58, 0, -78), Vector3(54, 0, -72), Vector3(80, 0, -60.5), Vector3(-58, 0, 72), Vector3(-60, 0, 80), Vector3(-80, 0, 54)]:
 		_tree(spot)
-	for spot: Array in [[Vector3(66, 0, -80), PI], [Vector3(70, 0, -55), 0.0], [Vector3(-76, 0, 47), PI], [Vector3(-66, 0, 78), 0.0]]:
+	for spot: Array in [[Vector3(66, 0, -80), PI], [Vector3(76.5, 0, -59.5), 0.0], [Vector3(-76, 0, 47), PI], [Vector3(-66, 0, 78), 0.0]]:
 		_bench(spot[0], spot[1])
-	for spot: Vector3 in [Vector3(56, 0, -80), Vector3(62, 0, -54), Vector3(-58, 0, 66)]:
+	for spot: Vector3 in [Vector3(56, 0, -80), Vector3(60, 0, -76), Vector3(-58, 0, 66)]:
 		_planter(spot)
 	# Canal Walk: the old west half of Canal Street, paved over, planted and closed to
 	# traffic by bollards at both ends. The pawn shop and Meridian Imports open onto it.
@@ -2134,6 +2112,47 @@ func _crew_spawn(crew: String, car: Vector3, yaw: float, hq: Vector3, door: Vect
 	crew_spawns[crew] = {"car": _w(car), "yaw": yaw + _xf_yaw, "hq": home, "door": out,
 		"spawn": home + out * 2.5 + Vector3(0, 0.1, 0), "spawn_yaw": atan2(-out.x, -out.z)}
 
+## Builds a crew's walk-in compound (scripts/buildings/crew_hq.gd) on the footprint of the solid `_tower` it
+## replaces (same centre, size and front, authored in the current kit's frame) and returns its world-space
+## spawn data for `_crew_spawn_inside`. The builder works in the building's own frame; the kit frame the
+## district was being authored in is restored afterwards.
+func _crew_compound(crew: String, center: Vector2, size: Vector3, front: Vector3) -> Dictionary:
+	var world_front: Vector3 = (_xf.basis * front).normalized()
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = size.x if across else size.z
+	var depth: float = size.z if across else size.x
+	var saved_xf: Transform3D = _xf
+	var saved_yaw: float = _xf_yaw
+	var saved_target: Node3D = _target
+	var rng_state: int = _rng.state
+	_roofs.append({"center": _w2(center), "size": size, "yaw": _xf_yaw, "top": size.y + 0.32, "front": _xf.basis * front, "business": false})
+	_begin_building("crew_hq", true, CrewHQ.title(crew))
+	var info: Dictionary = CrewHQ.build(self, crew, {"center": _w2(center), "size": Vector2(frontage, depth), "height": size.y,
+		"front": world_front, "district": str(Factions.get_crew(crew)["district"])})
+	_end_building()
+	# The rest of the city must come out the same as when this plot held a solid `_tower`: put the shared
+	# random stream back where it was and skip the draws that tower's window grid used to take.
+	_rng.state = rng_state
+	for face: Vector3 in [Vector3.BACK, Vector3.FORWARD, Vector3.RIGHT, Vector3.LEFT]:
+		var span: float = size.x if absf(face.z) > 0.5 else size.z
+		for floor_index: int in range(int((size.y - 1.2) / 3.1)):
+			if 2.4 + float(floor_index) * 3.1 + 1.0 > size.y:
+				continue
+			for column: int in range(maxi(1, int(span / 3.4))):
+				_rng.randf()
+	_xf = saved_xf
+	_xf_yaw = saved_yaw
+	_target = saved_target
+	plot_nodes["crew_hq_" + crew] = info["node"]
+	return info
+
+## Registers a crew base whose HQ is a walk-in compound: `info` is what `_crew_compound` returned, `car`
+## and `gate` (the old doorstep) are authored in the current kit's frame.
+func _crew_spawn_inside(crew: String, car: Vector3, yaw: float, gate: Vector3, info: Dictionary) -> void:
+	var out: Vector3 = info["door"]
+	crew_spawns[crew] = {"car": _w(car), "yaw": yaw + _xf_yaw, "hq": info["hq"], "door": out, "spawn": info["spawn"],
+		"spawn_yaw": atan2(-out.x, -out.z), "phone": info["phone"], "gate": _w(gate)}
+
 ## Lantern Row (Kojimoto893, NW): dense, narrow and vertical. Stacked neon, lanterns,
 ## dark timber and slate roofs.
 func _build_lantern_row() -> void:
@@ -2145,7 +2164,7 @@ func _build_lantern_row() -> void:
 	var slate: Color = Color(0.16, 0.16, 0.2)
 	# HQ block: the Kojimoto Building with a walled front garden and a timber gate.
 	var hq: Rect2 = _block(Rect2(-200, -200, 44, 44), Color(0.36, 0.35, 0.38), "cobble")
-	_tower(Vector2(-181, -184), Vector3(28, 22, 22), Color(0.17, 0.16, 0.2), "panel", Vector3.BACK, "", Color.WHITE, slate, 0.5)
+	var hq_info: Dictionary = _crew_compound("kojimoto", Vector2(-181, -184), Vector3(28, 22, 22), Vector3.BACK)
 	_neon("KOJIMOTO", Vector3(-166.6, 13, -176), PI * 0.5, violet, 110, true, true)
 	_neon("KARAOKE  MURASAKI", Vector3(-181, 4.4, -172.6), 0.0, Color(0.95, 0.35, 0.85), 70)
 	for side: float in [-1.0, 1.0]:
@@ -2156,7 +2175,7 @@ func _build_lantern_row() -> void:
 		_box(Vector3(x, 1.1, -166), Vector3(0.5, 2.2, 12), plaster, true, "stucco")
 	_label("KOJIMOTO893", Vector3(-176, 3.6, -160.1), 44, Color(0.95, 0.9, 1.0))
 	_landmark("KOJIMOTO BUILDING", Vector3(-181, 0, -172), false)
-	_crew_spawn("kojimoto", Vector3(-152.6, 0.5, -170), PI, Vector3(-176, 0.2, -163))
+	_crew_spawn_inside("kojimoto", Vector3(-152.6, 0.5, -170), PI, Vector3(-176, 0.2, -163), hq_info)
 	# Pachinko and bar row with stacked vertical neon.
 	_block(Rect2(-144, -200, 50, 44), Color(0.36, 0.35, 0.38), "cobble")
 	var fronts: Array = [["PACHINKO", Color(0.3, 0.9, 1.0)], ["RAMEN", Color(1.0, 0.35, 0.3)], ["HOTEL", Color(0.95, 0.45, 0.9)], ["BAR KOI", Color(1.0, 0.8, 0.3)]]
@@ -2208,7 +2227,7 @@ func _build_solana_heights() -> void:
 	_box(Vector3(189.5, 1.3, -158.8), Vector3(15.5, 2.6, 0.6), wall, true, "stucco")
 	for side: float in [-1.0, 1.0]:
 		_box(Vector3(178 + side * 3.9, 2.0, -158.8), Vector3(0.9, 4.0, 0.9), wall.darkened(0.1), true, "stucco")
-	_tower(Vector2(178, -187), Vector3(30, 8.2, 14), Color(0.94, 0.86, 0.72), "stucco", Vector3.BACK, "", Color.WHITE, terracotta, 0.55)
+	var hq_info: Dictionary = _crew_compound("solnegro", Vector2(178, -187), Vector3(30, 8.2, 14), Vector3.BACK)
 	_neon("SOL NEGRO IMPORTS", Vector3(178, 5.2, -158.3), 0.0, gold, 66, true)
 	_cylinder(Vector3(178, 0.55, -170), 2.4, 0.9, Color(0.8, 0.72, 0.6), 12)
 	_cylinder(Vector3(178, 0.95, -170), 2.0, 0.1, Color(0.2, 0.4, 0.45), 12, _material(Color(0.2, 0.4, 0.45), 0.1, "water"))
@@ -2216,7 +2235,7 @@ func _build_solana_heights() -> void:
 	for at: Vector3 in [Vector3(164, 0.16, -174), Vector3(192, 0.16, -174), Vector3(164, 0.16, -165), Vector3(192, 0.16, -165)]:
 		_tree(at, "palm")
 	_landmark("SOL NEGRO COMPOUND", Vector3(178, 0, -170), false)
-	_crew_spawn("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161))
+	_crew_spawn_inside("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161), hq_info)
 	# Cantina and auto shop.
 	_block(Rect2(94, -200, 50, 44), Color(0.7, 0.6, 0.48), "tiles")
 	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7, "bar")
@@ -2254,12 +2273,12 @@ func _build_morris_park() -> void:
 	var green: Color = Color(0.16, 0.34, 0.24)
 	# HQ: the Morris Social Club with its garage.
 	_block(Rect2(-200, 156, 44, 44), Color(0.46, 0.43, 0.4), "cobble")
-	_tower(Vector2(-180, 172), Vector3(30, 11, 18), bricks[0], "brick", Vector3.FORWARD, "", Color.WHITE, Color(0.25, 0.2, 0.2), 0.5)
+	var hq_info: Dictionary = _crew_compound("morris", Vector2(-180, 172), Vector3(30, 11, 18), Vector3.FORWARD)
 	_awning(Vector3(-180, 3.3, 163), 28.0, Vector3.FORWARD, crimson, cream)
 	_neon("MORRIS  SOCIAL CLUB", Vector3(-180, 6.4, 162.6), PI, crimson, 64, true)
 	_tower(Vector2(-166, 190), Vector3(16, 5.5, 14), bricks[3], "brick", Vector3.RIGHT, "GARAGE", cream, Color(0.25, 0.2, 0.2), 0.0)
 	_landmark("MORRIS SOCIAL CLUB", Vector3(-180, 0, 162), false)
-	_crew_spawn("morris", Vector3(-147.4, 0.5, 178), 0.0, Vector3(-180, 0.2, 160.5), Vector3.FORWARD)
+	_crew_spawn_inside("morris", Vector3(-147.4, 0.5, 178), 0.0, Vector3(-180, 0.2, 160.5), hq_info)
 	# Bakery and tenements with fire escapes.
 	_block(Rect2(-144, 156, 50, 44), Color(0.46, 0.43, 0.4), "cobble")
 	for index: int in range(3):
@@ -2305,7 +2324,7 @@ func _build_kingsway() -> void:
 	var tags: Array[Color] = [teal, Color(0.95, 0.3, 0.7), Color(0.98, 0.82, 0.2), Color(0.35, 0.55, 1.0)]
 	# HQ: Kingsway Courts, an L of slab towers around a courtyard.
 	_block(Rect2(156, 156, 44, 44), Color(0.5, 0.5, 0.49), "tiles")
-	_tower(Vector2(165, 178), Vector3(12, 25, 36), concrete, "panel", Vector3.RIGHT, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.4)
+	var hq_info: Dictionary = _crew_compound("kingsway", Vector2(165, 178), Vector3(12, 25, 36), Vector3.RIGHT)
 	_tower(Vector2(184, 190), Vector3(26, 19, 12), concrete.darkened(0.08), "panel", Vector3.FORWARD, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.4)
 	for floor_index: int in range(1, 8):
 		_box(Vector3(171.2, floor_index * 3.1, 178), Vector3(0.4, 0.25, 36), teal)
@@ -2315,7 +2334,7 @@ func _build_kingsway() -> void:
 		_box(Vector3(177.5 + index * 4.4, 1.6, 166.28), Vector3(3.6, 2.6, 0.06), tags[index])
 	_label("KINGSWAY COURTS", Vector3(184, 2.9, 165.7), 40, Color(1, 1, 1), PI)
 	_landmark("KINGSWAY COURTS", Vector3(184, 0, 176), false)
-	_crew_spawn("kingsway", Vector3(178, 0.5, 152.6), -PI * 0.5, Vector3(184, 0.2, 162), Vector3.FORWARD)
+	_crew_spawn_inside("kingsway", Vector3(178, 0.5, 152.6), -PI * 0.5, Vector3(184, 0.2, 162), hq_info)
 	# The Cage: fenced basketball court.
 	_block(Rect2(94, 156, 50, 44), Color(0.5, 0.5, 0.49), "tiles")
 	_box(Vector3(119, 0.19, 176), Vector3(28, 0.04, 16), Color(0.22, 0.38, 0.42), false, "asphalt")
@@ -2578,7 +2597,7 @@ func _build_waterfronts() -> void:
 				if not _on_land(at) or _near_other_road(at, roads.find(road), 1.0):
 					at = points[index] - outward * 7.2
 					outward = -outward
-				if _on_land(at) and not _near_other_road(at, roads.find(road), 1.0):
+				if _on_land(at) and not _near_other_road(at, roads.find(road), 1.0) and not _on_carriageway(at, 0.3):
 					_lamp(Vector3(at.x, 0.0, at.y), Vector3(-outward.x, 0, -outward.y).normalized().round())
 
 ## Open squares and parks between the neighbourhoods: fountains, statues, trees, benches
@@ -2627,15 +2646,17 @@ func _build_plazas() -> void:
 	# Eastside Park round the square: lawns, trees, benches and low stone walls.
 	plazas.append(PackedVector2Array([Vector2(103, -94), Vector2(221, -94), Vector2(221, -27), Vector2(103, -27)]))
 	_box(Vector3(162, 0.02, -60), Vector3(118, 0.03, 66), Color(0.3, 0.42, 0.27), false, "grass")
-	for at: Vector2 in [Vector2(112, -86), Vector2(126, -84), Vector2(112, -34), Vector2(128, -36), Vector2(180, -88), Vector2(186, -40), Vector2(180, -30), Vector2(138, -86), Vector2(176, -76)]:
+	for at: Vector2 in [Vector2(112, -86), Vector2(126, -84), Vector2(112, -34), Vector2(128, -36), Vector2(180, -88), Vector2(186, -40), Vector2(180, -30), Vector2(138, -86), Vector2(176, -84)]:
 		_tree(Vector3(at.x, 0.0, at.y))
-	for wall: Array in [[Vector3(120, 0, -70), 10.0, 0.0], [Vector3(186, 0, -70), 12.0, 0.0], [Vector3(182, 0, -44), 10.0, PI * 0.5], [Vector3(128, 0, -44), 8.0, PI * 0.5]]:
+	for wall: Array in [[Vector3(120, 0, -70), 10.0, 0.0], [Vector3(186, 0, -65.5), 12.0, 0.0], [Vector3(182, 0, -44), 10.0, PI * 0.5], [Vector3(128, 0, -44), 8.0, PI * 0.5]]:
 		_box_with((wall[0] as Vector3) + Vector3(0, 0.45, 0), Vector3(float(wall[1]), 0.9, 0.5), _material(stone, 0.9, "stucco"), true, float(wall[2]))
-	for at: Vector3 in [Vector3(120, 0, -73), Vector3(186, 0, -73), Vector3(140, 0, -30)]:
+	for at: Vector3 in [Vector3(120, 0, -73), Vector3(186, 0, -68.5), Vector3(140, 0, -30)]:
 		_bench(at, 0.0)
+	# A clipped hedge across the lawn between Meridian Street's end and Park Road, closing the 480 m view down the avenue.
+	_box_with(Vector3(150, 0.85, -56), Vector3(0.9, 1.7, 10.0), _material(Color(0.2, 0.36, 0.2), 0.95, "grass"), true)
 	_landmark("EASTSIDE PARK", Vector3(190, 0, -58))
 	# Eastgate: a hotel and a bank tower face the park from the north-east.
-	for at: Vector2 in [Vector2(196, -80), Vector2(206, -70), Vector2(214, -84)]:
+	for at: Vector2 in [Vector2(196, -73), Vector2(206, -70), Vector2(214, -84)]:
 		_tree(Vector3(at.x, 0.0, at.y))
 	_tower(Vector2(204, -38), Vector3(16, 30, 18), Color(0.46, 0.5, 0.52), "panel", Vector3.LEFT, "HALCYON SAVINGS", Color(0.6, 0.9, 1.0), Color(0.28, 0.3, 0.3), 0.35)
 
@@ -2934,7 +2955,7 @@ func _build_nightlife() -> void:
 			else:
 				_district_block(rect, "neon" if (row + column) % 2 == 0 else "midrise", Color(0.36, 0.35, 0.38))
 	_parking_row(Vector3(30, 0.16, 251), 10, Vector3.RIGHT, [Color(0.9, 0.2, 0.5), Color(0.15, 0.15, 0.2), Color(0.85, 0.85, 0.9), Color(0.2, 0.5, 0.7)], 2)
-	_pylon(Vector3(74, 0.16, 214), "NIGHTLIFE", Color(1.0, 0.3, 0.8), 0.0, 11.0)
+	_pylon(Vector3(64.5, 0.16, 204.3), "NIGHTLIFE", Color(1.0, 0.3, 0.8), 0.0, 11.0)
 	_landmark("NIGHTLIFE", Vector3(100, 0, 154))
 
 ## West End: rowhouses, lofts and corner shops where Lantern Row used to stand, between the
@@ -2977,9 +2998,9 @@ func _build_slip_side() -> void:
 		_district_block(Rect2(column.x, 68, column.y, 60), "warehouse", Color(0.44, 0.44, 0.42))
 	# Boats hauled out on the quay.
 	for index: int in range(5):
-		var at: Vector3 = Vector3(-380 + index * 34, 0.16, 57)
-		_box(at + Vector3(0, 0.6, 0), Vector3(2.6, 1.2, 7.0), Color(0.9, 0.9, 0.88), true, "panel")
-		_box(at + Vector3(0, 1.5, -0.6), Vector3(1.8, 0.8, 2.6), Color(0.2, 0.34, 0.45))
+		var at: Vector3 = Vector3(-380 + index * 34, 0.16, 54.5)
+		_box(at + Vector3(0, 0.6, 0), Vector3(7.0, 1.2, 2.6), Color(0.9, 0.9, 0.88), true, "panel")
+		_box(at + Vector3(-0.6, 1.5, 0), Vector3(2.6, 0.8, 1.8), Color(0.2, 0.34, 0.45))
 	_landmark("SLIP SIDE", Vector3(-290, 0, 62))
 
 ## The Old Wharf (north-west): a working shipyard and cannery west of the Canal Market.
@@ -2997,12 +3018,13 @@ func _build_old_wharf() -> void:
 				continue
 			for level: int in range(1 + (row + column) % 3):
 				_container(Vector3(-374 + column * 8.2, level * 2.7, -184 + row * 3.2 * 1.0), colors[(row * 2 + column + level) % colors.size()], false)
-	_fence(Vector3(-382, 0.16, -156), Vector3(-320, 0.16, -156))
-	_fence(Vector3(-320, 0.16, -156), Vector3(-320, 0.16, -190))
+	# The yard fence ends at the kerb of the wharf spine (x -326) and of Wharf North (z -189), not across them.
+	_fence(Vector3(-382, 0.16, -156), Vector3(-327, 0.16, -156))
+	_fence(Vector3(-327, 0.16, -156), Vector3(-327, 0.16, -188.5))
 	for at: Vector3 in [Vector3(-360, 0, -170), Vector3(-296, 0, -170), Vector3(-296, 0, -215)]:
 		_box(at + Vector3(0, 8, 0), Vector3(0.5, 16, 0.5), Color(0.3, 0.3, 0.32), true)
 		_box_with(at + Vector3(0, 16.3, 0), Vector3(2.2, 0.8, 0.5), _glow(Color(1.0, 0.85, 0.6), 2.4))
-	_pylon(Vector3(-326, 0.16, -199), "OLD WHARF", Color(0.6, 0.9, 1.0), PI * 0.5, 9.0)
+	_pylon(Vector3(-327.6, 0.16, -203.6), "OLD WHARF", Color(0.6, 0.9, 1.0), PI * 0.5, 9.0)
 	_landmark("OLD WHARF", Vector3(-320, 0, -200))
 
 ## South Docks: quays, container stacks and cold stores between Kingsway and the Strip.
@@ -3040,7 +3062,7 @@ func _build_east_shore() -> void:
 	for index: int in range(10):
 		var angle: float = 0.6 + index * 0.25
 		_fence(Vector3(284 + cos(angle) * 30.0, 0.16, 72 - sin(angle) * 34.0 + 6.0), Vector3(284 + cos(angle + 0.25) * 30.0, 0.16, 72 - sin(angle + 0.25) * 34.0 + 6.0), 2.4)
-	for at: Vector2 in [Vector2(244, 30), Vector2(252, 90), Vector2(324, 30), Vector2(324, 90), Vector2(264, 28), Vector2(304, 92)]:
+	for at: Vector2 in [Vector2(244, 27), Vector2(252, 90), Vector2(324, 27), Vector2(324, 90), Vector2(264, 28), Vector2(304, 92)]:
 		_tree(Vector3(at.x, 0.0, at.y))
 	_bench(Vector3(262, 0.0, 60), PI * 0.5)
 	_bench(Vector3(306, 0.0, 58), -PI * 0.5)
