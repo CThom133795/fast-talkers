@@ -1,0 +1,997 @@
+class_name BuildingPrefabs
+extends RefCounted
+## BuildingPrefabs: reusable, parametric, seeded, ENTERABLE buildings for the city fill (Map 0.8).
+##
+## One call builds a whole building: `BuildingPrefabs.build(world, kind, center, size, yaw, floors, seed, style)`.
+## The building is authored in a BuildingKit frame (local +Z = the street front, +X along the facade), and the
+## kit's node is turned so that the front faces `Basis(UP, yaw) * Vector3.FORWARD`: yaw 0 puts the front on
+## world -Z, PI puts it on +Z (`front_yaw()` converts from a facing direction). Exteriors are merged per
+## building (one draw per material) with real breakable glass only on the shopfront; interiors sit on the
+## interior render layer (visible within INTERIOR_RANGE), furniture that is not cover is collision-free and
+## merged, and every building keeps at most two interior lamps.
+##
+## Kinds (all enterable): corner_store, row_shop, walkup, warehouse, office, bar, auto_shop, church_hall,
+## diner_small. `min_size()` and `max_floors()` describe what each can be; `build()` clamps to them.
+## Every building publishes meta: "enterable" (true), "kind", "floors", "size" (the clamped footprint),
+## "floor_ys" (walking-surface heights, local), "doors" (door records), "stairs" (flight records with local
+## bottom/top points), "routes" (walk polylines in the kit's local frame, like the trademark buildings),
+## "roof_y", "front_yaw" and "sign".
+
+const Kit = preload("res://scripts/buildings/building_kit.gd")
+
+const KIND_LIST: PackedStringArray = ["walkup"]
+## Storey height, floor slab, exterior wall, partition and parapet thickness/height (metres).
+const FH: float = 3.4
+const SLAB: float = 0.3
+const WALL_T: float = 0.3
+const PART_T: float = 0.16
+const PARAPET: float = 1.0
+## Interior meshes are drawn within this range (the kit uses 45; prefabs are placed many times).
+const INTERIOR_RANGE: float = 32.0
+const DOOR_H: float = 2.6
+
+const WALLS: Array = [
+	{"c": Color(0.55, 0.27, 0.21), "t": "brick"}, {"c": Color(0.46, 0.3, 0.24), "t": "brick"}, {"c": Color(0.64, 0.44, 0.31), "t": "brick"},
+	{"c": Color(0.5, 0.25, 0.2), "t": "brick"}, {"c": Color(0.74, 0.68, 0.53), "t": "stucco"}, {"c": Color(0.56, 0.63, 0.56), "t": "stucco"},
+	{"c": Color(0.76, 0.6, 0.55), "t": "stucco"}, {"c": Color(0.52, 0.55, 0.58), "t": "panel"}, {"c": Color(0.64, 0.6, 0.5), "t": "brick"},
+]
+const TRIMS: Array[Color] = [Color(0.86, 0.82, 0.7), Color(0.9, 0.9, 0.86), Color(0.28, 0.36, 0.3), Color(0.32, 0.32, 0.36), Color(0.78, 0.7, 0.5)]
+const ACCENTS: Array[Color] = [Color(0.16, 0.36, 0.3), Color(0.5, 0.14, 0.12), Color(0.14, 0.24, 0.42), Color(0.7, 0.5, 0.14), Color(0.3, 0.2, 0.35), Color(0.12, 0.38, 0.4)]
+const SIGNS: Dictionary = {
+	"corner_store": ["LUCKY SEVEN DELI", "ORCHARD PHARMACY", "MERCADO LOPEZ", "BLUE MOON LIQUORS", "HARBOR PAWN & LOAN", "TWO BROTHERS MARKET"],
+	"row_shop": ["FRANKIE'S BARBERS", "ALTERATIONS  TAILOR", "PARK TV REPAIR", "GROOVE RECORDS", "SUDS N DUDS LAUNDRY", "CORNER CLEANERS"],
+	"walkup": ["THE MARLOWE", "ELM COURT", "BELLA VISTA APTS", "PINE ARMS", "THE CARLTON HOUSE", "ROSEDALE MANOR"],
+	"warehouse": ["KESSLER FREIGHT", "DOCKSIDE SUPPLY", "TRI COUNTY WHOLESALE", "MERCER CARTAGE", "NORTHSIDE STORAGE"],
+	"office": ["OAKLEY & FINCH LAW", "BAYVIEW INSURANCE", "ROSSI TITLE CO", "HARLAN FREIGHT AGENCY"],
+	"bar": ["THE RUSTY ANCHOR", "SIDE POCKET LOUNGE", "O'MALLEY'S", "CLUB EIGHT BALL", "THE LAST DROP"],
+	"auto_shop": ["VINNY'S AUTO REPAIR", "PIT STOP GARAGE", "DELTA TIRE & LUBE", "MAPLE BRAKE & MUFFLER"],
+	"church_hall": ["GRACE COMMUNITY HALL", "OUR LADY OF THE HARBOR", "ST BRIDGET PARISH HALL"],
+	"diner_small": ["MABEL'S DINER", "SUNRISE COFFEE SHOP", "THE BLUE PLATE"],
+}
+
+
+static func kinds() -> PackedStringArray:
+	return KIND_LIST
+
+
+## Smallest footprint in metres for a kind: x = frontage width, y = depth.
+static func min_size(kind: String) -> Vector2:
+	match kind:
+		"corner_store":
+			return Vector2(10, 12)
+		"row_shop":
+			return Vector2(6.5, 14)
+		"walkup":
+			return Vector2(16, 14)
+		"warehouse":
+			return Vector2(16, 20)
+		"office":
+			return Vector2(14, 16)
+		"bar":
+			return Vector2(12, 14)
+		"auto_shop":
+			return Vector2(14, 16)
+		"church_hall":
+			return Vector2(10, 16)
+		"diner_small":
+			return Vector2(10, 10)
+	return Vector2(10, 10)
+
+
+## Tallest storey count a kind supports (the ground floor counts). walkup and office need at least 2.
+static func max_floors(kind: String) -> int:
+	match kind:
+		"corner_store", "bar":
+			return 2
+		"row_shop":
+			return 2
+		"walkup":
+			return 4
+		"office":
+			return 4
+		"warehouse":
+			return 2
+	return 1
+
+
+static func min_floors(kind: String) -> int:
+	return 2 if kind == "walkup" or kind == "office" else 1
+
+
+## The yaw that makes a building's front face the world direction `front` (flat).
+static func front_yaw(front: Vector3) -> float:
+	# The front is local -Z (FORWARD), so Basis(UP, yaw) * FORWARD = front.
+	return atan2(-front.x, -front.z)
+
+
+## Builds one enterable building. `center` is the world x/z of the footprint centre; `size` is the frontage
+## and depth in metres (raised to min_size); `yaw` turns it, local -Z (FORWARD) being the street front;
+## `floors` counts the storeys including the ground (clamped to min_floors..max_floors); `seed` drives all
+## variety. Registers the footprint (world.footprints), doors (world.interactable_doors) and shopfront
+## glass (world.glass_panes) like the kit does and returns the building's root Node3D, with meta
+## "enterable" = true, "kind" = kind and "floors" = floors (see the header for the rest).
+## `style` may carry "palette" (Array of Colour: wall, trim, accent), "sign" (String), "tex" (String),
+## "lit" (float, share of lit windows) and "district" (String).
+static func build(world: Node3D, kind: String, center: Vector2, size: Vector2, yaw: float, floors: int, seed: int, style: Dictionary = {}) -> Node3D:
+	if not KIND_LIST.has(kind):
+		push_error("BuildingPrefabs.build: unknown kind '%s'" % kind)
+		return null
+	var least: Vector2 = min_size(kind)
+	var clamped: Vector2 = Vector2(maxf(size.x, least.x), maxf(size.y, least.y))
+	var storeys: int = clampi(floors, min_floors(kind), max_floors(kind))
+	var saved_target: Node3D = world._target
+	var saved_xf: Transform3D = world._xf
+	var saved_yaw: float = world._xf_yaw
+	var c: Ctx = Ctx.new(world, kind, center, clamped, yaw, storeys, seed, style)
+	match kind:
+		"walkup":
+			_walkup(c)
+		_:
+			push_error("BuildingPrefabs.build: '%s' is not built yet" % kind)
+	c.finish()
+	world._target = saved_target
+	world._xf = saved_xf
+	world._xf_yaw = saved_yaw
+	return c.kit.node
+
+
+# --- The build context -----------------------------------------------------------------------------
+
+## Everything a kind builder needs: the kit, a seeded rng, palette materials, storey heights, placement
+## claims (so furniture never blocks a doorway or a stair) and the records published as meta.
+class Ctx extends RefCounted:
+	var world: Node3D
+	var kit: Kit
+	var kind: String
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	var style: Dictionary
+	var W: float
+	var D: float
+	var hx: float
+	var hz: float
+	var floors: int
+	var f0: float
+	var roof_y: float
+	var lit: float = 0.25
+	var sign_text: String = ""
+	var wall_col: Color
+	var trim_col: Color
+	var accent_col: Color
+	var wall_tex: String
+	var m_wall: StandardMaterial3D
+	var m_trim: StandardMaterial3D
+	var m_roof: StandardMaterial3D
+	var m_accent: StandardMaterial3D
+	var m_dark: StandardMaterial3D
+	var m_floor: StandardMaterial3D
+	var m_part: StandardMaterial3D
+	var m_metal: StandardMaterial3D
+	var m_pane_in: StandardMaterial3D
+	var m_ceil: StandardMaterial3D
+	var doors: Array = []
+	var stairs: Array = []
+	var routes: Dictionary = {}
+	var zones: Dictionary = {}
+	var props: Array = []
+	var lamps: int = 0
+
+	func _init(w: Node3D, kind_name: String, center: Vector2, sz: Vector2, yaw: float, storeys: int, seed_value: int, style_in: Dictionary) -> void:
+		world = w
+		kind = kind_name
+		style = style_in
+		W = sz.x
+		D = sz.y
+		hx = W * 0.5
+		hz = D * 0.5
+		floors = storeys
+		rng.seed = seed_value * 7919 + kind_name.hash()
+		var ground: float = world.surface_height(center)
+		f0 = maxf(ground, 0.16) + 0.01
+		roof_y = f0 + storeys * FH
+		lit = float(style.get("lit", 0.25))
+		var picks: Array = SIGNS.get(kind_name, ["MAIN STREET"])
+		sign_text = str(style.get("sign", picks[rng.randi() % picks.size()]))
+		var wall_pick: Dictionary = WALLS[rng.randi() % WALLS.size()]
+		wall_col = wall_pick["c"]
+		wall_tex = str(wall_pick["t"])
+		trim_col = TRIMS[rng.randi() % TRIMS.size()]
+		accent_col = ACCENTS[rng.randi() % ACCENTS.size()]
+		var palette: Array = style.get("palette", [])
+		if palette.size() >= 1:
+			wall_col = palette[0]
+		if palette.size() >= 2:
+			trim_col = palette[1]
+		if palette.size() >= 3:
+			accent_col = palette[2]
+		if style.has("tex"):
+			wall_tex = str(style["tex"])
+		var plot: Dictionary = {"center": center, "size": sz, "yaw": yaw + PI, "district": str(style.get("district", ""))}
+		kit = Kit.new(world, kind_name.capitalize().replace("_", ""), plot)
+		m_wall = kit.mat(wall_col, wall_tex, 0.9)
+		m_trim = kit.mat(trim_col, "", 0.8)
+		m_roof = kit.mat(Color(0.2, 0.21, 0.22), "roof", 0.9)
+		m_accent = kit.mat(accent_col, "", 0.7)
+		m_dark = kit.mat(Color(0.15, 0.16, 0.18), "", 0.5)
+		m_floor = kit.mat(Color(0.66, 0.6, 0.5), "tiles", 0.9)
+		m_part = kit.mat(Color(0.82, 0.78, 0.68).lerp(accent_col, 0.08), "stucco", 0.95)
+		m_metal = kit.mat(Color(0.22, 0.23, 0.24), "metal", 0.5)
+		m_pane_in = kit.mat(Color(0.62, 0.72, 0.8), "", 0.3)
+		m_ceil = kit.mat(Color(0.86, 0.83, 0.76), "stucco", 0.95)
+		kit.footprint(Rect2(-hx, -hz, W, D))
+
+	## Top of the walking surface of storey `i` (0 = ground floor).
+	func fy(i: int) -> float:
+		return f0 + i * FH
+
+	func storey_at(y: float) -> int:
+		return maxi(0, roundi((y - f0) / FH))
+
+	func mat(color: Color, tex: String = "", rough: float = 0.85) -> StandardMaterial3D:
+		return kit.mat(color, tex, rough)
+
+	func glow(color: Color, energy: float = 1.3) -> StandardMaterial3D:
+		return kit.glow(color, energy)
+
+	# --- placement claims ---
+
+	func reserve(s: int, r: Rect2) -> void:
+		if not zones.has(s):
+			zones[s] = []
+		(zones[s] as Array).append(r)
+
+	## Claims a floor rectangle on storey `s` if it is free of doors, stairs and earlier furniture.
+	func claim(s: int, r: Rect2) -> bool:
+		if not zones.has(s):
+			zones[s] = []
+		for other: Rect2 in zones[s]:
+			if other.intersects(r):
+				return false
+		(zones[s] as Array).append(r)
+		return true
+
+	## The first candidate rectangle inside `room` that can be claimed, or an empty Rect2.
+	func fit(s: int, room: Rect2, candidates: Array) -> Rect2:
+		for candidate: Rect2 in candidates:
+			if room.encloses(candidate) and claim(s, candidate):
+				return candidate
+		return Rect2()
+
+	# --- boxes with a rotation about the furniture origin ---
+
+	## A visible box at `off` (furniture-local) around `origin`, the furniture turned by `angle` about Y.
+	func fbox(origin: Vector3, angle: float, off: Vector3, box_size: Vector3, material: Material, solid: bool = false) -> void:
+		kit.box(origin + Basis(Vector3.UP, angle) * off, box_size, material, solid, angle)
+
+	## The same as a collision-free prop (merged into the props node, hidden in potato mode).
+	func fprop(origin: Vector3, angle: float, off: Vector3, box_size: Vector3, material: Material) -> void:
+		props.append([origin + Basis(Vector3.UP, angle) * off, box_size, material, angle])
+
+	func deco(at: Vector3, box_size: Vector3, material: Material, angle: float = 0.0) -> void:
+		props.append([at, box_size, material, angle])
+
+	## A cylinder (water tanks, vents, drums); collision is the caller's business.
+	func cyl(center: Vector3, radius: float, height: float, material: Material, segments: int = 10) -> void:
+		var instance: MeshInstance3D = MeshInstance3D.new()
+		var mesh: CylinderMesh = CylinderMesh.new()
+		mesh.top_radius = radius
+		mesh.bottom_radius = radius
+		mesh.height = height
+		mesh.radial_segments = segments
+		mesh.rings = 1
+		instance.mesh = mesh
+		instance.material_override = material
+		instance.position = center
+		kit._current.add_child(instance)
+
+	## Collision only, around a furniture origin.
+	func fcollide(origin: Vector3, angle: float, off: Vector3, box_size: Vector3) -> void:
+		kit.collider(origin + Basis(Vector3.UP, angle) * off, box_size, angle)
+
+	# --- structure ---
+
+	func to_interior() -> void:
+		kit.begin_interior()
+
+	func to_shell() -> void:
+		kit.end_interior()
+
+	## The four outer walls to parapet height. Openings are kit openings whose "at" is the local x (front, back)
+	## or z (left, right) of the opening's centre.
+	func walls(front: Array = [], back: Array = [], left: Array = [], right: Array = []) -> void:
+		var top: float = roof_y + PARAPET
+		kit.wall(Vector2(-hx + WALL_T, hz - WALL_T * 0.5), Vector2(hx - WALL_T, hz - WALL_T * 0.5), top, m_wall, _shift(front, hx - WALL_T))
+		kit.wall(Vector2(-hx + WALL_T, -hz + WALL_T * 0.5), Vector2(hx - WALL_T, -hz + WALL_T * 0.5), top, m_wall, _shift(back, hx - WALL_T))
+		kit.wall(Vector2(-hx + WALL_T * 0.5, -hz), Vector2(-hx + WALL_T * 0.5, hz), top, m_wall, _shift(left, hz))
+		kit.wall(Vector2(hx - WALL_T * 0.5, -hz), Vector2(hx - WALL_T * 0.5, hz), top, m_wall, _shift(right, hz))
+		# The parapet cap and the front cornice.
+		var cap_y: float = top + 0.07
+		kit.box(Vector3(0, cap_y, hz - 0.2), Vector3(W + 0.2, 0.14, 0.5), m_trim)
+		kit.box(Vector3(0, cap_y, -hz + 0.2), Vector3(W + 0.2, 0.14, 0.5), m_trim)
+		kit.box(Vector3(-hx + 0.2, cap_y, 0), Vector3(0.5, 0.14, D - 0.4), m_trim)
+		kit.box(Vector3(hx - 0.2, cap_y, 0), Vector3(0.5, 0.14, D - 0.4), m_trim)
+		if rng.randf() < 0.6:
+			kit.box(Vector3(0, roof_y - 0.25, hz + 0.12), Vector3(W + 0.1, 0.42, 0.28), m_trim)
+
+	func _shift(openings: Array, offset: float) -> Array:
+		var shifted: Array = []
+		for spec: Dictionary in openings:
+			var copy: Dictionary = spec.duplicate()
+			copy["at"] = float(spec["at"]) + offset
+			shifted.append(copy)
+		return shifted
+
+	## A floor plate for storey `i` whose top is fy(i), with holes (stairwells). Interior layer, solid.
+	func slab(i: int, holes: Array = []) -> void:
+		kit.floor_slab(Rect2(-hx + 0.03, -hz + 0.03, W - 0.06, D - 0.06), fy(i), m_floor, holes)
+
+	## The roof: shell layer, solid, with holes for a roof stair.
+	func roof_slab(holes: Array = []) -> void:
+		kit.floor_slab(Rect2(-hx + 0.03, -hz + 0.03, W - 0.06, D - 0.06), roof_y, m_roof, holes)
+
+	## A pale ceiling plate just under the roof slab (the roof itself is dark tar), with the same holes.
+	func roof_ceiling(holes: Array = []) -> void:
+		kit.floor_slab(Rect2(-hx + WALL_T, -hz + WALL_T, W - WALL_T * 2.0, D - WALL_T * 2.0), roof_y - SLAB - 0.001, m_ceil, holes, 0.03)
+
+	## An interior partition wall on storey `s` (from the floor to the underside of the next slab).
+	func part(s: int, a: Vector2, b: Vector2, openings: Array = [], thickness: float = PART_T) -> void:
+		kit.wall(a, b, FH - SLAB, m_part, openings, fy(s), thickness)
+
+	## A partition with `at` given as the coordinate along the wall (x for walls along X, z for walls along Z).
+	func partx(s: int, x0: float, x1: float, z: float, openings_x: Array = []) -> void:
+		var specs: Array = []
+		for spec: Dictionary in openings_x:
+			var copy: Dictionary = spec.duplicate()
+			copy["at"] = float(spec["at"]) - x0
+			specs.append(copy)
+		part(s, Vector2(x0, z), Vector2(x1, z), specs)
+
+	func partz(s: int, z0: float, z1: float, x: float, openings_z: Array = []) -> void:
+		var specs: Array = []
+		for spec: Dictionary in openings_z:
+			var copy: Dictionary = spec.duplicate()
+			copy["at"] = float(spec["at"]) - z0
+			specs.append(copy)
+		part(s, Vector2(x, z0), Vector2(x, z1), specs)
+
+	## A doorway opening description with `at` as the coordinate along the wall.
+	func gap(at: float, width: float = 1.0, top: float = 2.4) -> Dictionary:
+		return Kit.opening(at, width, 0.0, top, "door")
+
+	# --- doors ---
+
+	## A frame (jambs and header) around a doorway; `along_x` when the wall runs along X.
+	func frame(center: Vector3, width: float, height: float, along_x: bool, depth: float = WALL_T) -> void:
+		var jamb: float = 0.09
+		var d: float = depth + 0.05
+		if along_x:
+			kit.box(center + Vector3(-(width * 0.5 + jamb * 0.5), height * 0.5, 0), Vector3(jamb, height, d), m_trim)
+			kit.box(center + Vector3(width * 0.5 + jamb * 0.5, height * 0.5, 0), Vector3(jamb, height, d), m_trim)
+			kit.box(center + Vector3(0, height + jamb * 0.5, 0), Vector3(width + jamb * 2.0, jamb, d), m_trim)
+		else:
+			kit.box(center + Vector3(0, height * 0.5, -(width * 0.5 + jamb * 0.5)), Vector3(d, height, jamb), m_trim)
+			kit.box(center + Vector3(0, height * 0.5, width * 0.5 + jamb * 0.5), Vector3(d, height, jamb), m_trim)
+			kit.box(center + Vector3(0, height + jamb * 0.5, 0), Vector3(d, jamb, width + jamb * 2.0), m_trim)
+
+	## A hinged door in a wall opening, registered with the world, with a frame and a placement clearance on both
+	## sides. `facing` is the direction people arrive from. Returns the interactable_doors index.
+	func door(center: Vector3, width: float, height: float, facing: Vector3, label: String, kind_name: String = "door", inner: bool = false, leaf_mat: Material = null, thickness: float = WALL_T) -> int:
+		var index: int = kit.add_door(center, width, height, facing, label, kind_name, leaf_mat, 0)
+		var along_x: bool = absf(facing.z) > 0.5
+		frame(center, width, height, along_x, thickness)
+		if inner:
+			for hinge: Node in world._door_nodes[index]:
+				for body: Node in hinge.get_children():
+					for part_node: Node in body.get_children():
+						if part_node is GeometryInstance3D:
+							(part_node as GeometryInstance3D).visibility_range_end = 26.0
+		var s: int = storey_at(center.y)
+		var reach: Vector2 = Vector2(width * 0.5 + 0.3, 1.7)
+		if along_x:
+			reserve(s, Rect2(center.x - reach.x, center.z - reach.y, reach.x * 2.0, reach.y * 2.0))
+		else:
+			reserve(s, Rect2(center.x - reach.y, center.z - reach.x, reach.y * 2.0, reach.x * 2.0))
+		doors.append({"index": index, "label": label, "storey": s, "local": center, "facing": facing, "width": width, "kind": kind_name, "inner": inner})
+		return index
+
+	## A roll-up door (a shutter that lifts): a wide opening that starts open. Registered as a door.
+	func roller(center: Vector3, width: float, height: float, facing: Vector3, label: String) -> int:
+		var out: Vector3 = Vector3(facing.x, 0, facing.z).normalized()
+		var shutter: Node3D = Node3D.new()
+		kit._current.add_child(shutter)
+		shutter.position = center
+		shutter.rotation.y = atan2(out.x, out.z)
+		shutter.set_meta("roller", height - 0.2)
+		shutter.position.y = center.y + height - 0.2
+		var body: StaticBody3D = StaticBody3D.new()
+		var shape: CollisionShape3D = CollisionShape3D.new()
+		var box_shape: BoxShape3D = BoxShape3D.new()
+		box_shape.size = Vector3(width, height, 0.08)
+		shape.shape = box_shape
+		body.add_child(shape)
+		var visual: MeshInstance3D = MeshInstance3D.new()
+		var mesh: BoxMesh = BoxMesh.new()
+		mesh.size = box_shape.size
+		visual.mesh = mesh
+		visual.material_override = kit.mat(Color(0.5, 0.52, 0.5), "metal", 0.6)
+		visual.visibility_range_end = 80.0
+		body.add_child(visual)
+		body.position = Vector3(0, height * 0.5, 0)
+		shutter.add_child(body)
+		var index: int = world.interactable_doors.size()
+		world.interactable_doors.append({"index": index, "label": label, "kind": "door", "position": kit.to_world(center), "inside": kit.to_world(center - out * 1.6),
+			"outside": kit.to_world(center + out * 1.6), "open": true, "district": str(style.get("district", "")), "width": width})
+		world._door_nodes.append([shutter])
+		var along_x: bool = absf(out.z) > 0.5
+		frame(center, width, height, along_x, WALL_T)
+		var s: int = storey_at(center.y)
+		if along_x:
+			reserve(s, Rect2(center.x - width * 0.5 - 0.3, center.z - 2.0, width + 0.6, 4.0))
+		else:
+			reserve(s, Rect2(center.x - 2.0, center.z - width * 0.5 - 0.3, 4.0, width + 0.6))
+		doors.append({"index": index, "label": label, "storey": s, "local": center, "facing": facing, "width": width, "kind": "roller", "inner": false})
+		return index
+
+	# --- facade dressing ---
+
+	## A painted window on an outer wall: frame, glass (dark, or lit warm), sill and a pale pane on the inside.
+	## `pos` is the window centre on the wall's outer face; `normal` is the outward unit vector.
+	func window(pos: Vector3, normal: Vector3, w: float, h: float, is_lit: bool, with_ac: bool = false) -> void:
+		var angle: float = atan2(normal.x, normal.z)
+		var glass: StandardMaterial3D = glow(Color(1.0, 0.78, 0.46), 1.3) if is_lit else kit.mat(Color(0.16, 0.24, 0.29), "", 0.3)
+		kit.box(pos + normal * 0.03, Vector3(w + 0.26, h + 0.26, 0.06), m_trim, false, angle)
+		kit.box(pos + normal * 0.05, Vector3(w, h, 0.04), glass, false, angle)
+		kit.box(pos + normal * 0.09 - Vector3(0, h * 0.5 + 0.17, 0), Vector3(w + 0.4, 0.07, 0.24), m_trim, false, angle)
+		kit.box(pos - normal * (WALL_T + 0.01), Vector3(w, h, 0.04), m_pane_in, false, angle)
+		if with_ac:
+			kit.box(pos + normal * 0.3 - Vector3(0, h * 0.5 + 0.35, 0), Vector3(0.72, 0.44, 0.5), kit.mat(Color(0.74, 0.73, 0.68), "metal", 0.6), false, angle)
+
+	## Rows of windows along one outer wall. side: "front", "back", "left" or "right". `avoid` holds Vector2(min, max)
+	## ranges along the wall (local x or z) that stay clear (doors, storefronts). `storeys` lists the storeys.
+	func windows_on(side: String, storeys: Array, spacing: float = 3.2, avoid: Array = [], w: float = 1.3, h: float = 1.5, sill: float = 0.95) -> void:
+		var length: float = W if side == "front" or side == "back" else D
+		var count: int = maxi(1, floori((length - 1.6) / spacing))
+		for s: int in storeys:
+			for index: int in range(count):
+				var t: float = -length * 0.5 + (index + 0.5) * length / count
+				var blocked: bool = false
+				for range_v: Vector2 in avoid:
+					if t > range_v.x - w * 0.5 - 0.15 and t < range_v.y + w * 0.5 + 0.15:
+						blocked = true
+				if blocked:
+					continue
+				var y: float = fy(s) + sill + h * 0.5
+				var pos: Vector3
+				var normal: Vector3
+				match side:
+					"front":
+						pos = Vector3(t, y, hz)
+						normal = Vector3.BACK
+					"back":
+						pos = Vector3(t, y, -hz)
+						normal = Vector3.FORWARD
+					"left":
+						pos = Vector3(-hx, y, t)
+						normal = Vector3.LEFT
+					_:
+						pos = Vector3(hx, y, t)
+						normal = Vector3.RIGHT
+				var is_lit: bool = rng.randf() < lit
+				var with_ac: bool = s > 0 and not is_lit and rng.randf() < 0.22
+				window(pos, normal, w, h, is_lit, with_ac)
+
+	## A sign board with painted text over the front, centred at local x.
+	func fascia(at_x: float, y: float, width: float, height: float = 0.7, font: int = 42) -> void:
+		kit.box(Vector3(at_x, y, hz + 0.16), Vector3(width, height, 0.14), m_accent)
+		kit.sign_label(sign_text, Vector3(at_x, y, hz + 0.25), font, Color(0.96, 0.92, 0.8))
+
+	## A tilted awning over the front: a slab pitched out and down.
+	func awning(at_x: float, y: float, width: float, out: float = 1.3) -> void:
+		var awning_mesh: MeshInstance3D = MeshInstance3D.new()
+		var mesh: BoxMesh = BoxMesh.new()
+		mesh.size = Vector3(width, 0.06, out)
+		awning_mesh.mesh = mesh
+		awning_mesh.material_override = m_accent
+		awning_mesh.transform = Transform3D(Basis(Vector3.RIGHT, 0.32), Vector3(at_x, y, hz + out * 0.5 - 0.05))
+		kit._current.add_child(awning_mesh)
+		kit.box(Vector3(at_x, y - 0.2, hz + out - 0.1), Vector3(width, 0.36, 0.05), m_accent)
+
+	## A door step and low cheek walls in front of a street door (collision on the cheeks only).
+	func stoop(at_x: float, width: float) -> void:
+		var base: float = f0 - 0.01
+		kit.box(Vector3(at_x, base - 0.06, hz + 0.55), Vector3(width + 0.5, 0.12, 1.1), m_trim, true)
+		for side: float in [-1.0, 1.0]:
+			kit.box(Vector3(at_x + side * (width * 0.5 + 0.3), base + 0.35, hz + 0.6), Vector3(0.22, 0.6, 1.0), m_trim, true)
+
+	## A visual-only fire escape on the front: platforms with rails and stairs between them (no collision, so nobody
+	## can climb it; the drop ladder stops short of the ground).
+	func fire_escape(at_x: float, from_storey: int, to_storey: int) -> void:
+		var steel: StandardMaterial3D = m_metal
+		for s: int in range(from_storey, to_storey + 1):
+			var y: float = fy(s)
+			kit.box(Vector3(at_x, y - 0.05, hz + 0.6), Vector3(2.4, 0.06, 1.2), steel)
+			kit.box(Vector3(at_x, y + 1.0, hz + 1.17), Vector3(2.4, 0.05, 0.05), steel)
+			for side: float in [-1.0, 1.0]:
+				kit.box(Vector3(at_x + side * 1.17, y + 1.0, hz + 0.6), Vector3(0.05, 0.05, 1.1), steel)
+			for post: int in range(4):
+				kit.box(Vector3(at_x - 1.17 + post * 0.78, y + 0.5, hz + 1.17), Vector3(0.04, 1.0, 0.04), steel)
+			if s < to_storey:
+				kit.bar(Vector3(at_x - 0.9, y, hz + 0.9), Vector3(at_x + 0.9, fy(s + 1) - 0.05, hz + 0.9), 0.1, steel, false)
+				kit.bar(Vector3(at_x - 0.7, y, hz + 0.8), Vector3(at_x + 1.1, fy(s + 1) - 0.05, hz + 0.8), 0.06, steel, false)
+		kit.bar(Vector3(at_x + 1.0, fy(from_storey) - 0.05, hz + 0.9), Vector3(at_x + 1.0, 2.4, hz + 0.9), 0.05, steel, false)
+
+	## A lamp on the interior layer (at most two per building).
+	func lamp(at: Vector3, energy: float = 2.0, light_range: float = 13.0) -> void:
+		if lamps >= 2:
+			return
+		lamps += 1
+		kit.interior_light(at, Color(1.0, 0.86, 0.62), energy, light_range)
+
+	# --- finishing ---
+
+	func finish() -> void:
+		var node: Node3D = kit.node
+		# Props first (they need the interior node): one collision-free, merged, layer-2 node.
+		if not props.is_empty():
+			if kit.interior == null:
+				kit.begin_interior()
+			kit.begin_props()
+			for entry: Array in props:
+				kit.prop(entry[0], entry[1], entry[2], float(entry[3]))
+			kit.end_props()
+		if kit.props != null:
+			var prop_node: Node3D = kit.props
+			world.MeshMerge.merge_children(prop_node)
+			for child: Node in prop_node.get_children():
+				if child is GeometryInstance3D:
+					var geometry: GeometryInstance3D = child as GeometryInstance3D
+					geometry.layers = 1 << (world.INTERIOR_LAYER - 1)
+					geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					geometry.visibility_range_end = Kit.PROP_RANGE
+					geometry.visibility_range_end_margin = 3.0
+			prop_node.add_to_group("potato_optional")
+			prop_node.set_meta("prop_node", true)
+			prop_node.set_meta("finished", true)
+		BuildingPrefabs._consolidate(node)
+		if kit.interior != null:
+			BuildingPrefabs._consolidate(kit.interior)
+		# No multimesh batching: one merged mesh per material is fewer draws for a unique building.
+		node.set_meta("finished", true)
+		world.MeshMerge.merge_children(node)
+		world.MeshMerge.shadow_proxy(node)
+		if kit.interior != null:
+			var interior: Node3D = kit.interior
+			interior.set_meta("finished", true)
+			world.MeshMerge.merge_children(interior)
+			for child: Node in interior.get_children():
+				if child is GeometryInstance3D:
+					var geometry: GeometryInstance3D = child as GeometryInstance3D
+					geometry.layers = 1 << (world.INTERIOR_LAYER - 1)
+					geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					geometry.visibility_range_end = INTERIOR_RANGE
+					geometry.visibility_range_end_margin = 4.0
+		var floor_ys: Array[float] = []
+		for i: int in range(floors):
+			floor_ys.append(fy(i))
+		node.set_meta("enterable", true)
+		node.set_meta("kind", kind)
+		node.set_meta("floors", floors)
+		node.set_meta("size", Vector2(W, D))
+		node.set_meta("floor_ys", floor_ys)
+		node.set_meta("doors", doors)
+		node.set_meta("stairs", stairs)
+		node.set_meta("routes", routes)
+		node.set_meta("roof_y", roof_y)
+		node.set_meta("sign", sign_text)
+		node.set_meta("walk_in", true)
+		node.set_meta("interior_half", Vector2(hx, hz))
+		node.set_meta("front_yaw", kit.yaw)
+
+
+## Folds the plain single-shape static bodies directly under `parent` into one body (the kit makes one body per
+## wall piece and slab; a building has hundreds). Stair flights, glass and scripted bodies are left alone.
+static func _consolidate(parent: Node3D) -> void:
+	var merged: StaticBody3D = StaticBody3D.new()
+	merged.name = "Solid"
+	var moved: int = 0
+	for child: Node in parent.get_children():
+		if not (child is StaticBody3D) or child.get_script() != null or str(child.name).begins_with("Flight") or child == merged:
+			continue
+		var body: StaticBody3D = child as StaticBody3D
+		var plain: bool = true
+		for part: Node in body.get_children():
+			if not (part is CollisionShape3D):
+				plain = false
+		if not plain:
+			continue
+		for part: Node in body.get_children():
+			var shape_node: CollisionShape3D = part as CollisionShape3D
+			var carried: Transform3D = body.transform * shape_node.transform
+			body.remove_child(shape_node)
+			merged.add_child(shape_node)
+			shape_node.transform = carried
+			moved += 1
+		parent.remove_child(body)
+		body.queue_free()
+	if moved > 0:
+		parent.add_child(merged)
+	else:
+		merged.free()
+
+
+# --- WALKUP: apartments with a lobby, two U-stair bays, a corridor core and two flats a floor ---------
+
+const BAY_W: float = 1.05
+const BAY_GAP: float = 0.1
+const CORE_HALF: float = 2.45
+## A U-stair's depth: nine 0.3 m steps plus the landing.
+const U_DEPTH: float = 3.9
+
+
+static func _walkup(c: Ctx) -> void:
+	var hx: float = c.hx
+	var hz: float = c.hz
+	var z_back: float = -hz + WALL_T
+	var z_s: float = z_back + U_DEPTH + 0.02
+	# Bay x ranges: A on the left of the core, B on the right, with a spacer wall on x = 0.
+	var bays: Array[Rect2] = [Rect2(-2.3, z_back, 2.2, z_s - z_back + 0.3), Rect2(0.1, z_back, 2.2, z_s - z_back + 0.3)]
+	var flights: int = c.floors
+	# --- exterior ---
+	var door_w: float = 1.8
+	var rear_x: float = 1.2
+	c.walls([Kit.opening(0.0, door_w, 0.0, DOOR_H, "door")], [Kit.opening(rear_x, 1.4, 0.0, DOOR_H, "door")])
+	c.roof_slab(_roof_holes(c, bays, flights - 1))
+	var front_gap: Vector2 = Vector2(-CORE_HALF - 0.1, CORE_HALF + 0.1)
+	c.windows_on("front", [0], 3.4, [front_gap])
+	c.windows_on("front", range(1, c.floors), 3.4, [])
+	c.windows_on("back", range(c.floors), 3.6, [Vector2(rear_x - 0.9, rear_x + 0.9)])
+	c.windows_on("left", range(c.floors), 3.6)
+	c.windows_on("right", range(c.floors), 3.6)
+	c.door(Vector3(0, c.f0, hz - WALL_T * 0.5), door_w, DOOR_H, Vector3.BACK, c.sign_text + " entrance")
+	c.door(Vector3(rear_x, c.f0, -hz + WALL_T * 0.5), 1.4, DOOR_H, Vector3.FORWARD, c.sign_text + " alley door")
+	c.stoop(0.0, door_w)
+	c.awning(0.0, c.f0 + 3.0, door_w + 1.0, 1.4)
+	c.fascia(0.0, c.f0 + 3.55, 3.6, 0.55, 30)
+	if c.floors >= 2 and c.rng.randf() < 0.75:
+		var side: float = -1.0 if c.rng.randf() < 0.5 else 1.0
+		c.fire_escape(side * (hx * 0.5 + 0.3), 1, c.floors - 1)
+	# --- interior ---
+	c.to_interior()
+	for s: int in range(c.floors):
+		var holes: Array = []
+		if s >= 1:
+			holes.append(bays[(s - 1) % 2])
+		c.slab(s, holes)
+	c.roof_ceiling(_roof_holes(c, bays, flights - 1))
+	for s: int in range(c.floors):
+		_walkup_storey(c, s, z_s, bays)
+	_walkup_stairs(c, z_s, bays)
+	c.lamp(Vector3(0, c.fy(0) + 2.6, z_s + 2.0), 2.2, 13.0)
+	if c.floors >= 3:
+		c.lamp(Vector3(0, c.fy(2) + 2.6, z_s + 2.0), 2.0, 13.0)
+	c.to_shell()
+	_roof_bulkhead(c, bays, z_s, flights - 1)
+	_roof_details(c)
+
+
+static func _roof_holes(c: Ctx, bays: Array[Rect2], flight: int) -> Array:
+	return [bays[flight % 2]]
+
+
+## One storey of the walkup: partitions round the core, a door to each flat, the flats and the lobby dressing.
+static func _walkup_storey(c: Ctx, s: int, z_s: float, bays: Array[Rect2]) -> void:
+	var hz: float = c.hz
+	var hx: float = c.hx
+	var z_back: float = -hz + WALL_T
+	var z_front: float = hz - WALL_T
+	var door_z: float = z_s + 2.0
+	var y: float = c.fy(s)
+	for side: float in [-1.0, 1.0]:
+		var x: float = side * CORE_HALF
+		c.partz(s, z_back, z_front, x, [c.gap(door_z, 1.1, DOOR_H)])
+		var facing: Vector3 = Vector3.RIGHT if side < 0.0 else Vector3.LEFT
+		c.door(Vector3(x, y, door_z), 1.1, DOOR_H, facing, "%s flat %d%s" % [c.sign_text, s * 2 + (1 if side < 0.0 else 2), ""], "door", true, null, PART_T)
+		var flat: Rect2
+		if side < 0.0:
+			flat = Rect2(-hx + WALL_T, z_back, hx - WALL_T - CORE_HALF - PART_T * 0.5, z_front - z_back)
+		else:
+			flat = Rect2(CORE_HALF + PART_T * 0.5, z_back, hx - WALL_T - CORE_HALF - PART_T * 0.5, z_front - z_back)
+		_flat(c, s, flat, flat.end.x if side < 0.0 else flat.position.x, door_z)
+	# The spacer between the two bays, and a rail over the flight-one half of any stairwell hole in this floor.
+	c.partz(s, z_back, z_s + 0.3, 0.0)
+	c.reserve(s, Rect2(-CORE_HALF, z_back, CORE_HALF * 2.0, z_s + 0.3 - z_back))
+	if s >= 1:
+		_hole_rail(c, (s - 1) % 2, y, z_s)
+	if s == 0:
+		_lobby(c, z_s)
+
+
+## A rail across the flight-one half of the arrival edge of a stairwell hole at floor height `y`.
+static func _hole_rail(c: Ctx, bay: int, y: float, z_s: float) -> void:
+	var z: float = z_s + 0.3 + 0.16
+	if bay == 0:
+		c.kit.railing(Vector3(-1.2, y, z), Vector3(-0.1, y, z))
+	else:
+		c.kit.railing(Vector3(1.2, y, z), Vector3(2.3, y, z))
+
+
+## The lobby: mailboxes on the right partition, a notice board on the left, a lamp, a radiator.
+static func _lobby(c: Ctx, z_s: float) -> void:
+	var y: float = c.fy(0)
+	var z: float = c.hz - WALL_T - 2.2
+	var brass: StandardMaterial3D = c.mat(Color(0.7, 0.58, 0.3), "metal", 0.4)
+	var tin: StandardMaterial3D = c.mat(Color(0.5, 0.52, 0.5), "metal", 0.5)
+	c.deco(Vector3(CORE_HALF - PART_T * 0.5 - 0.05, y + 1.35, z), Vector3(0.1, 0.9, 1.6), tin)
+	for row: int in range(3):
+		for col: int in range(4):
+			c.deco(Vector3(CORE_HALF - PART_T * 0.5 - 0.11, y + 1.05 + row * 0.28, z - 0.6 + col * 0.4), Vector3(0.03, 0.2, 0.3), brass)
+	c.deco(Vector3(-CORE_HALF + PART_T * 0.5 + 0.04, y + 1.6, z), Vector3(0.05, 0.9, 0.7), c.mat(Color(0.5, 0.36, 0.2), "planks", 0.8))
+	for note: int in range(4):
+		c.deco(Vector3(-CORE_HALF + PART_T * 0.5 + 0.075, y + 1.4 + (note % 2) * 0.4, z - 0.22 + (note / 2) * 0.4), Vector3(0.02, 0.24, 0.18), c.mat([Color(0.95, 0.94, 0.88), Color(0.95, 0.85, 0.4), Color(0.85, 0.5, 0.5), Color(0.6, 0.75, 0.85)][note], "", 0.9))
+
+
+## Both stair bays' flights: bay A from floor 0, bay B from floor 1, and so on, one flight per storey and one to the roof.
+static func _walkup_stairs(c: Ctx, z_s: float, bays: Array[Rect2]) -> void:
+	var steel: StandardMaterial3D = c.mat(Color(0.34, 0.3, 0.26), "planks", 0.8)
+	for k: int in range(c.floors):
+		var bay: Rect2 = bays[k % 2]
+		var x_start: float = bay.end.x - BAY_W * 0.5
+		var x_second: float = x_start - (BAY_W + BAY_GAP)
+		var floor_y: float = c.fy(k)
+		var start: Vector3 = Vector3(x_start, floor_y, z_s)
+		var flight: Dictionary = c.kit.stairs_u(start, Vector3.FORWARD, FH, BAY_W, BAY_GAP, steel)
+		var top: Vector3 = flight["top"]
+		var landing_y: float = float((flight["landing"] as Vector3).y)
+		c.stairs.append({"from": k, "to": k + 1, "bottom": start, "top": top, "landing": flight["landing"], "kind": "u"})
+		c.routes["stair_%d" % k] = [Vector3(x_start, floor_y, z_s + 1.0), Vector3(x_start, floor_y, z_s), Vector3(x_start, landing_y, z_s - 2.7),
+			Vector3(x_start, landing_y, z_s - 3.3), Vector3(x_second, landing_y, z_s - 3.3), Vector3(x_second, landing_y, z_s - 2.7),
+			Vector3(x_second, top.y, top.z), Vector3(x_second, top.y, top.z + 1.0)]
+		c.reserve(k, Rect2(bay.position.x, bay.position.y, bay.size.x, bay.size.y))
+	c.routes["rear"] = [Vector3(1.2, c.f0, -c.hz + 1.0), Vector3(1.2, c.f0, z_s + 1.0), Vector3(0.0, c.f0, c.hz - 1.0)]
+
+
+
+
+## The roof stair head: walls and a flat roof over the last flight's hole, a door out onto the roof and the hole rail.
+static func _roof_bulkhead(c: Ctx, bays: Array[Rect2], z_s: float, flight: int) -> void:
+	var bay: Rect2 = bays[flight % 2]
+	var y: float = c.roof_y
+	var z_back: float = -c.hz + WALL_T
+	var z_e: float = z_s + 0.3 + 1.7
+	var h: float = 2.9
+	for sx: float in [bay.position.x - 0.1, bay.end.x + 0.1]:
+		c.kit.wall(Vector2(sx, z_back), Vector2(sx, z_e), h, c.m_wall, [], y, 0.2)
+	c.kit.wall(Vector2(bay.position.x - 0.2, z_back + 0.1), Vector2(bay.end.x + 0.2, z_back + 0.1), h, c.m_wall, [], y, 0.2)
+	var x_door: float = bay.position.x + BAY_W * 0.5
+	var x0: float = bay.position.x - 0.2
+	c.kit.wall(Vector2(x0, z_e), Vector2(bay.end.x + 0.2, z_e), h, c.m_wall, [Kit.opening(x_door - x0, 1.0, 0.0, 2.5, "door")], y, 0.2)
+	c.kit.box(Vector3((bay.position.x + bay.end.x) * 0.5, y + h + 0.1, (z_back + z_e) * 0.5), Vector3(bay.size.x + 0.7, 0.2, z_e - z_back + 0.3), c.m_roof, true)
+	c.door(Vector3(x_door, y, z_e), 1.0, 2.5, Vector3.BACK, c.sign_text + " roof access", "door", false, null, 0.2)
+	_hole_rail(c, flight % 2, y, z_s)
+	c.reserve(c.floors, Rect2(bay.position.x - 0.4, z_back, bay.size.x + 0.8, z_e + 1.8 - z_back))
+	c.routes["roof"] = [Vector3(x_door, y, z_s + 1.0), Vector3(x_door, y, z_e + 1.4)]
+
+
+## Roof clutter: a wooden water tank on legs, a chimney, a vent or two and an AC condenser, all claimed so they keep
+## clear of the roof door. Solid, so the roof has cover.
+static func _roof_details(c: Ctx) -> void:
+	var y: float = c.roof_y
+	var wood: StandardMaterial3D = c.mat(Color(0.4, 0.28, 0.18), "planks", 0.9)
+	var metal: StandardMaterial3D = c.m_metal
+	var brick: StandardMaterial3D = c.mat(Color(0.5, 0.26, 0.2), "brick", 0.9)
+	var tank_at: Vector2 = Vector2(c.hx * 0.45 * (1.0 if c.rng.randf() < 0.5 else -1.0), -c.hz * 0.35)
+	if c.claim(c.floors, Rect2(tank_at.x - 1.6, tank_at.y - 1.6, 3.2, 3.2)):
+		for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+			c.kit.box(Vector3(tank_at.x + corner.x * 1.0, y + 0.9, tank_at.y + corner.y * 1.0), Vector3(0.14, 1.8, 0.14), metal)
+		c.cyl(Vector3(tank_at.x, y + 2.85, tank_at.y), 1.3, 2.1, wood, 12)
+		c.cyl(Vector3(tank_at.x, y + 4.0, tank_at.y), 1.4, 0.2, c.m_roof, 12)
+		c.kit.collider(Vector3(tank_at.x, y + 1.9, tank_at.y), Vector3(2.6, 3.8, 2.6))
+	var spot: Vector2 = Vector2(-c.hx * 0.3, c.hz * 0.35)
+	if c.claim(c.floors, Rect2(spot.x - 0.6, spot.y - 0.6, 1.2, 1.2)):
+		c.kit.box(Vector3(spot.x, y + 1.3, spot.y), Vector3(0.9, 2.6, 0.9), brick, true)
+		c.kit.box(Vector3(spot.x, y + 2.65, spot.y), Vector3(1.1, 0.12, 1.1), c.m_trim)
+	var unit: Vector2 = Vector2(c.hx * 0.3, c.hz * 0.3)
+	if c.claim(c.floors, Rect2(unit.x - 0.8, unit.y - 0.8, 1.6, 1.6)):
+		c.kit.box(Vector3(unit.x, y + 0.5, unit.y), Vector3(1.3, 1.0, 1.3), c.mat(Color(0.7, 0.71, 0.68), "metal", 0.6), true)
+		c.kit.box(Vector3(unit.x, y + 1.02, unit.y), Vector3(1.0, 0.06, 1.0), c.m_dark)
+	for index: int in range(2):
+		var at: Vector2 = Vector2(c.rng.randf_range(-c.hx + 2.0, c.hx - 2.0), c.rng.randf_range(-c.hz + 2.0, c.hz - 2.0))
+		if c.claim(c.floors, Rect2(at.x - 0.5, at.y - 0.5, 1.0, 1.0)):
+			c.cyl(Vector3(at.x, y + 0.45, at.y), 0.28, 0.9, metal, 8)
+			c.kit.collider(Vector3(at.x, y + 0.45, at.y), Vector3(0.56, 0.9, 0.56))
+			c.cyl(Vector3(at.x, y + 0.95, at.y), 0.4, 0.1, c.m_trim, 8)
+
+
+# --- Flats and furniture --------------------------------------------------------------------------
+
+## A flat filling `rect` (interior, x/z) on storey `s`, entered through the wall at x = `entry_x` at `entry_z`. Two rooms split
+## on z (the entry room is the living room), a bathroom in the far corner of the bedroom, furniture placed with claims.
+static func _flat(c: Ctx, s: int, rect: Rect2, entry_x: float, entry_z: float) -> void:
+	var min_edge: bool = absf(entry_x - rect.position.x) < absf(entry_x - rect.end.x)
+	var far_x: float = rect.end.x if min_edge else rect.position.x
+	var z_lo: float = rect.position.y
+	var z_hi: float = rect.end.y
+	var back_entry: bool = entry_z < (z_lo + z_hi) * 0.5
+	var z_p: float = clampf(entry_z + 1.9 if back_entry else entry_z - 1.9, z_lo + 3.6, z_hi - 3.6)
+	var living: Rect2 = Rect2(rect.position.x, z_lo, rect.size.x, z_p - z_lo) if back_entry else Rect2(rect.position.x, z_p, rect.size.x, z_hi - z_p)
+	var bedroom: Rect2 = Rect2(rect.position.x, z_p, rect.size.x, z_hi - z_p) if back_entry else Rect2(rect.position.x, z_lo, rect.size.x, z_p - z_lo)
+	var door_x: float = rect.position.x + 1.5 if min_edge else rect.end.x - 1.5
+	c.partx(s, rect.position.x, rect.end.x, z_p, [c.gap(door_x, 1.0, 2.4)])
+	c.reserve(s, Rect2(door_x - 0.8, z_p - 0.9, 1.6, 1.8))
+	# Bathroom in the bedroom's far corner: two walls, a doorway from the bedroom, and three fixtures.
+	var bath_w: float = 2.2
+	var bath_d: float = 2.4
+	var far_z: float = z_hi if back_entry else z_lo
+	var bath_x0: float = far_x - bath_w if far_x > rect.position.x + 0.1 else far_x
+	var bath_z0: float = z_lo if far_z == z_lo else z_hi - bath_d
+	var inner_x: float = far_x - bath_w if far_x > rect.position.x + 0.1 else far_x + bath_w
+	var inner_z: float = bath_z0 + bath_d if far_z == z_lo else bath_z0
+	c.partz(s, bath_z0, bath_z0 + bath_d, inner_x)
+	c.partx(s, bath_x0, bath_x0 + bath_w, inner_z, [c.gap(bath_x0 + bath_w * 0.5, 0.8, 2.3)])
+	c.reserve(s, Rect2(bath_x0 + bath_w * 0.5 - 0.6, inner_z - 0.9, 1.2, 1.8))
+	var bath: Rect2 = Rect2(bath_x0, bath_z0, bath_w, bath_d)
+	var bath_room: Rect2 = bath.grow(0.0)
+	var far_wall: String = "s" if far_z == z_hi else "n"
+	var side_wall: String = "e" if far_x > rect.position.x + 0.1 else "w"
+	_put(c, s, bath_room, "toilet", far_wall, 0.15)
+	_put(c, s, bath_room, "sink", side_wall, bath_d - 0.7 if far_wall == "n" else 0.1)
+	_put_any(c, s, bath_room, "tub", [[far_wall, 0.8], [far_wall, 0.3]])
+	c.reserve(s, bath)
+	# Bedroom.
+	var bed_along: float = 0.3 if far_x > rect.position.x + 0.1 else bedroom.size.x - 1.6 - 0.36
+	var bed_wall: String = far_wall
+	if not _put(c, s, bedroom, "bed", bed_wall, bed_along):
+		_put_any(c, s, bedroom, "bed", [["w", 0.6], ["e", 0.6]])
+	_put_any(c, s, bedroom, "dresser", [["w" if min_edge else "e", 0.3], ["e" if min_edge else "w", 0.3], ["n" if bed_wall == "s" else "s", 0.3]])
+	if c.rng.randf() < 0.7:
+		_put_any(c, s, bedroom, "nightstand", [[bed_wall, bed_along + 1.68], [bed_wall, bed_along - 0.55]])
+	# Living room.
+	var ext_wall: String = "n" if back_entry else "s"
+	_put_any(c, s, living, "counter", [[ext_wall, 0.1], [ext_wall, living.size.x - 2.3]], 2.2)
+	_put_any(c, s, living, "fridge", [[ext_wall, 2.4], [ext_wall, living.size.x - 3.2]])
+	var far_side: String = "e" if min_edge else "w"
+	var entry_side: String = "w" if min_edge else "e"
+	_put_any(c, s, living, "sofa", [[far_side, -1.0], [ext_wall, 3.0]])
+	_put_any(c, s, living, "tv", [[entry_side, 0.3], [entry_side, 3.6], [entry_side, 2.0], [("s" if ext_wall == "n" else "n"), 0.5]])
+	_free_table(c, s, living)
+
+
+## A free-standing table with chairs near the middle of a room.
+static func _free_table(c: Ctx, s: int, room: Rect2) -> void:
+	var cx: float = room.position.x + room.size.x * 0.5
+	var cz: float = room.position.y + room.size.y * 0.5
+	var spots: Array = [Rect2(cx - 0.65, cz - 0.45, 1.3, 0.9), Rect2(cx - 0.65, cz - 1.7, 1.3, 0.9), Rect2(cx - 0.65, cz + 0.8, 1.3, 0.9)]
+	var spot: Rect2 = c.fit(s, room, spots)
+	if spot.size.x > 0.0:
+		_furn(c, s, "table", spot, 0.0, spot.size)
+
+
+## Footprint (length along its wall, depth) of each furniture kind.
+static func _dims(kind: String, length: float = -1.0) -> Vector2:
+	match kind:
+		"bed":
+			return Vector2(1.6, 2.1)
+		"sofa":
+			return Vector2(1.9, 0.9)
+		"dresser":
+			return Vector2(1.0, 0.5)
+		"nightstand":
+			return Vector2(0.5, 0.45)
+		"tv":
+			return Vector2(1.0, 0.5)
+		"counter":
+			return Vector2(length if length > 0.0 else 2.0, 0.65)
+		"fridge":
+			return Vector2(0.75, 0.75)
+		"toilet":
+			return Vector2(0.5, 0.75)
+		"sink":
+			return Vector2(0.6, 0.5)
+		"tub":
+			return Vector2(1.7, 0.8)
+	return Vector2(1.0, 1.0)
+
+
+## Tries `[wall, along]` pairs in order until one fits.
+static func _put_any(c: Ctx, s: int, room: Rect2, kind: String, options: Array, length: float = -1.0) -> bool:
+	for option: Array in options:
+		if _put(c, s, room, kind, str(option[0]), float(option[1]), length):
+			return true
+	return false
+
+
+## Places furniture against a wall of `room` (wall: n = back / min z, s = front / max z, w = min x, e = max x) at `along`
+## metres from the wall's start (negative = centred). Returns false when the spot is not free.
+static func _put(c: Ctx, s: int, room: Rect2, kind: String, wall: String, along: float = -1.0, length: float = -1.0) -> bool:
+	var dims: Vector2 = _dims(kind, length)
+	var gap: float = 0.03
+	var rect: Rect2
+	var facing: Vector2
+	var span: float = room.size.x if wall == "n" or wall == "s" else room.size.y
+	var start: float = room.position.x if wall == "n" or wall == "s" else room.position.y
+	var at: float = start + (span - dims.x) * 0.5 if along < 0.0 else start + along + gap
+	match wall:
+		"n":
+			rect = Rect2(at, room.position.y + gap, dims.x, dims.y)
+			facing = Vector2(0, 1)
+		"s":
+			rect = Rect2(at, room.end.y - gap - dims.y, dims.x, dims.y)
+			facing = Vector2(0, -1)
+		"w":
+			rect = Rect2(room.position.x + gap, at, dims.y, dims.x)
+			facing = Vector2(1, 0)
+		_:
+			rect = Rect2(room.end.x - gap - dims.y, at, dims.y, dims.x)
+			facing = Vector2(-1, 0)
+	if not room.grow(0.001).encloses(rect):
+		return false
+	if not c.claim(s, rect):
+		return false
+	_furn(c, s, kind, rect, atan2(facing.x, facing.y), dims)
+	return true
+
+
+## Builds one piece of furniture: `rect` is its floor footprint, `angle` turns local +Z (its front) to face into the room.
+static func _furn(c: Ctx, s: int, kind: String, rect: Rect2, angle: float, dims: Vector2) -> void:
+	var o: Vector3 = Vector3(rect.get_center().x, c.fy(s), rect.get_center().y)
+	var wood: StandardMaterial3D = c.mat(Color(0.4, 0.26, 0.16), "planks", 0.8)
+	var pale: StandardMaterial3D = c.mat(Color(0.9, 0.9, 0.87), "", 0.5)
+	var fabrics: Array[Color] = [Color(0.5, 0.2, 0.18), Color(0.25, 0.4, 0.3), Color(0.28, 0.34, 0.45), Color(0.55, 0.45, 0.25), Color(0.4, 0.3, 0.42)]
+	var fabric: StandardMaterial3D = c.mat(fabrics[c.rng.randi() % fabrics.size()], "", 0.95)
+	match kind:
+		"bed":
+			c.fbox(o, angle, Vector3(0, 0.25, 0), Vector3(1.55, 0.4, 2.05), wood)
+			c.fbox(o, angle, Vector3(0, 0.52, 0.05), Vector3(1.45, 0.16, 1.9), fabric)
+			c.fbox(o, angle, Vector3(0, 0.75, -0.98), Vector3(1.6, 0.9, 0.06), wood)
+			c.fcollide(o, angle, Vector3(0, 0.3, 0), Vector3(1.55, 0.62, 2.05))
+			c.fprop(o, angle, Vector3(-0.35, 0.65, -0.72), Vector3(0.6, 0.12, 0.34), pale)
+			c.fprop(o, angle, Vector3(0.35, 0.65, -0.72), Vector3(0.6, 0.12, 0.34), pale)
+		"sofa":
+			c.fbox(o, angle, Vector3(0, 0.25, 0.05), Vector3(1.9, 0.42, 0.78), fabric)
+			c.fbox(o, angle, Vector3(0, 0.62, -0.32), Vector3(1.9, 0.5, 0.2), fabric)
+			for arm: float in [-0.88, 0.88]:
+				c.fbox(o, angle, Vector3(arm, 0.42, 0.05), Vector3(0.16, 0.24, 0.78), fabric)
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(1.9, 0.9, 0.86))
+		"dresser":
+			c.fbox(o, angle, Vector3(0, 0.42, 0), Vector3(1.0, 0.84, 0.5), wood)
+			c.fcollide(o, angle, Vector3(0, 0.42, 0), Vector3(1.0, 0.84, 0.5))
+			c.fprop(o, angle, Vector3(0, 0.9, 0.05), Vector3(0.4, 0.14, 0.2), c.mat(Color(0.75, 0.62, 0.3), "", 0.4))
+		"nightstand":
+			c.fbox(o, angle, Vector3(0, 0.3, 0), Vector3(0.5, 0.6, 0.45), wood)
+			c.fcollide(o, angle, Vector3(0, 0.3, 0), Vector3(0.5, 0.6, 0.45))
+			c.fprop(o, angle, Vector3(0, 0.75, 0), Vector3(0.16, 0.28, 0.16), c.glow(Color(1.0, 0.85, 0.6), 0.8))
+		"tv":
+			c.fbox(o, angle, Vector3(0, 0.3, 0), Vector3(1.0, 0.6, 0.5), wood)
+			c.fcollide(o, angle, Vector3(0, 0.3, 0), Vector3(1.0, 0.6, 0.5))
+			c.fprop(o, angle, Vector3(0, 0.84, 0), Vector3(0.6, 0.48, 0.45), c.mat(Color(0.2, 0.2, 0.22), "", 0.6))
+			c.fprop(o, angle, Vector3(0, 0.86, 0.23), Vector3(0.5, 0.36, 0.02), c.glow(Color(0.3, 0.45, 0.62), 0.6))
+		"counter":
+			c.fbox(o, angle, Vector3(0, 0.44, 0), Vector3(dims.x, 0.88, dims.y - 0.05), pale)
+			c.fbox(o, angle, Vector3(0, 0.92, 0), Vector3(dims.x + 0.02, 0.05, dims.y), wood)
+			c.fcollide(o, angle, Vector3(0, 0.47, 0), Vector3(dims.x, 0.94, dims.y))
+			c.fprop(o, angle, Vector3(-dims.x * 0.2, 0.96, 0.05), Vector3(0.5, 0.03, 0.36), c.mat(Color(0.7, 0.72, 0.74), "metal", 0.3))
+			c.fprop(o, angle, Vector3(-dims.x * 0.2, 1.08, -0.15), Vector3(0.04, 0.24, 0.04), c.mat(Color(0.75, 0.76, 0.78), "", 0.2))
+		"fridge":
+			c.fbox(o, angle, Vector3(0, 0.9, 0), Vector3(0.72, 1.8, 0.72), pale)
+			c.fcollide(o, angle, Vector3(0, 0.9, 0), Vector3(0.72, 1.8, 0.72))
+			c.fprop(o, angle, Vector3(0.28, 1.2, 0.37), Vector3(0.04, 0.5, 0.03), c.m_metal)
+		"table":
+			c.fbox(o, angle, Vector3(0, 0.72, 0), Vector3(1.2, 0.05, 0.8), wood)
+			c.fbox(o, angle, Vector3(0, 0.36, 0), Vector3(0.16, 0.7, 0.16), wood)
+			c.fcollide(o, angle, Vector3(0, 0.38, 0), Vector3(1.2, 0.76, 0.8))
+			for chair: Vector2 in [Vector2(-0.4, 0.62), Vector2(0.4, 0.62), Vector2(-0.4, -0.62), Vector2(0.4, -0.62)]:
+				c.fprop(o, angle, Vector3(chair.x, 0.44, chair.y), Vector3(0.4, 0.05, 0.4), wood)
+				c.fprop(o, angle, Vector3(chair.x, 0.7, chair.y + (0.18 if chair.y > 0.0 else -0.18)), Vector3(0.4, 0.42, 0.04), wood)
+			c.fprop(o, angle, Vector3(0.1, 0.76, 0.0), Vector3(0.24, 0.02, 0.24), c.mat(Color(0.9, 0.88, 0.8), "", 0.7))
+		"toilet":
+			c.fbox(o, angle, Vector3(0, 0.22, 0.05), Vector3(0.4, 0.44, 0.5), pale)
+			c.fbox(o, angle, Vector3(0, 0.55, -0.27), Vector3(0.42, 0.5, 0.2), pale)
+			c.fcollide(o, angle, Vector3(0, 0.35, 0), Vector3(0.45, 0.7, 0.72))
+		"sink":
+			c.fbox(o, angle, Vector3(0, 0.42, 0), Vector3(0.1, 0.84, 0.1), pale)
+			c.fbox(o, angle, Vector3(0, 0.86, 0), Vector3(0.6, 0.12, 0.45), pale)
+			c.fcollide(o, angle, Vector3(0, 0.45, 0), Vector3(0.6, 0.9, 0.48))
+			c.fprop(o, angle, Vector3(0, 1.3, -0.24), Vector3(0.5, 0.6, 0.02), c.mat(Color(0.6, 0.66, 0.7), "", 0.05))
+		"tub":
+			c.fbox(o, angle, Vector3(0, 0.3, 0), Vector3(1.7, 0.6, 0.8), pale)
+			c.fcollide(o, angle, Vector3(0, 0.3, 0), Vector3(1.7, 0.6, 0.8))
+			c.fprop(o, angle, Vector3(0, 0.62, 0), Vector3(1.5, 0.02, 0.6), c.mat(Color(0.75, 0.85, 0.9), "", 0.2))

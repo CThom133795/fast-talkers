@@ -20,7 +20,7 @@ const BACK_Z: float = -10.0
 const ROUTE: Array[Vector3] = [Vector3(-4, 0.12, 19.5), Vector3(-4, 0.12, 14), Vector3(-4, 0.12, 9), Vector3(-9, 0.12, -6),
 	Vector3(-10, 0.12, -8.5), Vector3(-10, 0.12, -12), Vector3(-10, 0.12, -16.5), Vector3(-10, 0.12, -19.5)]
 const FIRE_ROUTE: Array[Vector3] = [Vector3(-9, 0.12, -6), Vector3(-12, 0.12, -8.2), Vector3(-15, 0.12, -8.2), Vector3(-17.8, 0.12, -8.2)]
-const MEZZ_ROUTE: Array[Vector3] = [Vector3(14.9, 0.12, 11.2), Vector3(14.9, 3.72, 4.0), Vector3(11.0, 3.72, 0), Vector3(11.0, 3.72, -8.4)]
+const MEZZ_ROUTE: Array[Vector3] = [Vector3(14.9, 0.12, 11.2), Vector3(14.9, 0.17, 10.5), Vector3(14.9, 3.72, 4.5), Vector3(14.9, 3.72, 4.0), Vector3(11.0, 3.72, 0), Vector3(11.0, 3.72, -8.4)]
 
 
 static func build(world: Node3D, plot: Dictionary) -> void:
