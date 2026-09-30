@@ -263,3 +263,31 @@ Captures (`tests/capture_map06.gd -- only=pass2`, 640x360 JPEG q82 in
 Not done this pass (time): bus shelters with timetables, hydrant/newspaper-box audit on the
 avenues, avenue planters with trees, manhole/drain decals, crosswalk paint audit,
 floating-prop audit beyond what city_audit already covers.
+
+## GPU numbers: RTX 3080 (Claude Desktop, 2026-09-30)
+
+Setup: `tests/capture_perf.gd`, windowed at 1280x720, vsync off, dusk, Godot 4.4.1 Compatibility (OpenGL 3.3,
+NVIDIA 616.64). The POTATO column is the same script with `world.set_potato_mode(true)` after the free-roam start.
+The software-GL column is this doc's "Final" draw calls.
+
+| View | Draw calls | Frame time (fps) | POTATO draw calls | POTATO frame time (fps) | Software-GL draw calls |
+|---|---:|---:|---:|---:|---:|
+| midtown | 1,324 | 12.0 ms (83) | 1,299 | 12.4 ms (80) | 1,235 |
+| midtown_north_long | 1,589 | 13.5 ms (74) | 1,568 | 13.7 ms (72) | 1,499 |
+| harbor | 655 | 10.4 ms (96) | 643 | 9.9 ms (100) | 639 |
+| strip_beach | 845 | 10.7 ms (93) | 838 | 10.3 ms (97) | 832 |
+| lantern_row | 662 | 10.2 ms (97) | 633 | 9.7 ms (103) | 648 |
+| uptown | 762 | 10.3 ms (97) | 734 | 9.7 ms (102) | 639 |
+| motor_mile | 1,297 | 12.8 ms (78) | 1,277 | 11.4 ms (87) | 1,237 |
+| nightlife | 932 | 11.2 ms (89) | 901 | 10.5 ms (95) | 892 |
+| gunstore | 1,116 | 10.6 ms (94) | 1,109 | 10.2 ms (98) | 1,079 |
+| exchange_interior | 1,118 | 11.9 ms (83) | 1,102 | 11.5 ms (86) | 1,094 |
+| aerial | 1,574 | 13.9 ms (72) | 1,573 | 14.0 ms (71) | 1,495 |
+
+- Every view is above the 60 fps target. The worst are aerial (72) and the long north view (74).
+- Frame times sit in a narrow 10–14 ms band that tracks draw calls, so the game is CPU and draw-call bound, not GPU
+  bound. Further wins come from fewer draw calls: sign text into a texture, a shared prop palette material, and
+  more merging. Heavier GPU effects are not the lever.
+- POTATO MODE saves only 0–30 draw calls, because most of the cost is buildings and collision-bearing geometry,
+  which it must keep. To help minimum-spec PCs it would need a shorter draw distance and fewer shadows as well,
+  not only hidden decor.

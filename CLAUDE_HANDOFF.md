@@ -482,3 +482,17 @@ The user wants three distinct but compatible ways to test the same core game loo
    - This is the highest-value test for the core design thesis and should ultimately be the source of truth for balance decisions.
 
 Architect these as different population configurations of the **same match/round/contract state machine**, not three separate game modes with duplicated logic. The ideal flow is that the developer changes only the player/bot population and debug affordances, while Monday–Friday progression, objectives, economy, scoring, round resolution and week reset remain identical.
+
+## 2026-09-30 — Claude Desktop picked up the overnight heavy lift (results)
+Everything the cloud session left runs on Windows: all 19 suites and the two-process online round are green. On top of
+it, 0.7 adds:
+- GodotSteam (Spacewar 480), with the host verified on real Steam;
+- the Week;
+- crew phones;
+- one trade item with the sidearm rule;
+- SOLO WEEK;
+- the nervous client;
+- host telemetry.
+
+Exact results and the next queue: the COMPLETE entry at the end of `CODEX_HANDOFF.md`. Design choices:
+`docs/LEAD_DESIGN_DECISIONS.md`. The branch workflow is new (`dev` is the integration branch; PRs go there): `docs/WORKFLOW.md`.

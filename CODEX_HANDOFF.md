@@ -718,7 +718,7 @@ Queue (ticked as it lands):
   - Lead hooks from the map PR: `set_mode`, lifts.
   - Host authority for movement and wallet before any public play.
 
-## 2026-09-30 — Claude Desktop (lead): IN PROGRESS — playtest build, heavy-lift integration, design choices
+## 2026-09-30 — Claude Desktop (lead): COMPLETE — 0.7 playtest build, heavy-lift integration, design choices
 Branch: `cloud/overnight-heavy-lift` (Windows checkout). Never merge into master. Codex: please don't edit files on this
 branch until this entry says COMPLETE; put suggestions in CLAUDE_HANDOFF.md.
 Goal from the user: a demo exe in the morning and `Fast Talkers Playtest.zip` for a 2+ player Steam (Spacewar) playtest.
@@ -741,5 +741,22 @@ The user delegated design choices on improving the No Big Deal / Sub Rosa system
       `[steam] ready (app 480)` and SOLO WEEK starting. Walkthrough: `tools/playtest/HOW TO PLAY WITH FRIENDS.txt`.
 - [x] Workflow: `docs/WORKFLOW.md` (dev = integration branch, master = the user's), CLOUD.md / AGENT_BRIEF / README updated;
       master's design notes merged in.
-- [ ] Final full regression + GPU perf (running), then merge `lead/nervous-client` (nervous client + telemetry), rebuild the zip,
-      push, create `dev`, open the dev -> master PR for the user.
+- [x] Final regression on HEAD 43301b5 (Windows, one suite at a time), all 0 failures:
+  - integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18;
+  - vehicles_06 24, map_06 150, city_detail 217, city_audit 72, building_landmarks 204, sfx_audio 321;
+  - social_features 55, net_security 91, voice 87, remote_player 79, chat_ui 46, net_lobby_ui 84, week_flow 80;
+  - net_pair lobby,round PASSED (host 68, client 62).
+- [x] GPU perf on the RTX 3080: every view 71–103 fps (numbers in docs/OVERNIGHT_CITY_PERF.md, "GPU numbers"). The game is
+      draw-call bound; POTATO MODE saves little.
+- [x] `dev` created from this branch; the dev -> master PR is left for the user.
+
+### For Codex (next queue, in order; branch from `origin/dev`, PR into `dev`, see docs/WORKFLOW.md)
+1. After the playtest: read the host's `%APPDATA%\Godot\app_userdata\Project Fast Talkers\telemetry\*.jsonl`. It has one
+   line per Day. Tune the nervous-client timing and the contract values from it.
+2. Trust systems T1 (deals board, caller ID, host-side "broken deal") and then T2, per docs/DESIGN_WEEK_TRUST.md and
+   docs/LEAD_DESIGN_DECISIONS.md §10. online.gd is lead-owned, so propose hooks or take an explicit task.
+3. Known gaps:
+   - A rejoining player gets their crew bank back but not their personal cash or gear.
+   - Phone calls are text chat. Voice calls over the phone are future work.
+   - Movement and health are still client-side.
+4. City and perf (draw calls): sign text into a texture, a shared prop palette, and a POTATO draw distance.
