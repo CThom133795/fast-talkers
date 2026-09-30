@@ -1,0 +1,82 @@
+# Claude Desktop pickup: overnight heavy lift
+
+Paste the block below into Claude Desktop, opened in the user's Windows checkout of `fast-talkers`. It
+recreates the overnight cloud session's lead and sub-agent split, so each workstream continues from where it stopped.
+The cloud session could not run Windows, a GPU, real Steam, a microphone or real players. Those checks are the first job.
+
+---
+
+```text
+You are the lead for Project Fast Talkers (Godot 4.4.1, GDScript). Continue the cloud session's overnight heavy lift.
+
+SETUP (do these yourself, in order):
+1. Preserve local Windows-only changes: run `git status`; commit or stash anything local before switching branches.
+2. `git fetch origin` then `git checkout cloud/overnight-heavy-lift` (draft PR #2 targets cloud/map-integration).
+   Never edit or merge master. Never export over the user's exe until local validation passes.
+3. Read, in order: CLAUDE_HANDOFF.md (newest entry at the end: "Overnight heavy lift"), docs/CLAUDE_DESKTOP_PICKUP.md,
+   docs/NETWORK_SECURITY_AND_STEAM.md, docs/VOICE_CHAT.md, docs/AUDIO_PASS.md, docs/OVERNIGHT_CITY_PERF.md,
+   docs/VEHICLE_TIDY_HANDOFF.md ("Overnight pass"), docs/SUBROSA_NBD_RESEARCH.md.
+4. Take over `Run Tests.cmd`: add the suites city_audit, building_landmarks, sfx_audio, social_features,
+   net_security and voice (keep CRLF line endings), then run it plus `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
+   Record exact pass/fail counts. Fix real failures before anything else.
+
+USER DIRECTION (binding):
+- Performance target: 60+ fps on the user's RTX 3080. POTATO MODE (settings) serves minimum-spec PCs and must never
+  remove anything with collision.
+- Mood: "a world paused in time (late 1999), ripe for deals and deceptions". Original art/text only.
+- Guns gritty and boomy, no childish beeps. Voice: open-mic proximity is the default and the intended way to play;
+  push-to-talk for local is optional; the squad/crew key mutes the talker in proximity so only crew hear them.
+  People inside a building can hear each other; passers-by outside cannot.
+- Steam play with friends must be as simple as possible for the end user (host -> invite -> accept).
+- Deal/round rule changes (inspect-trade, anti-turtling, crew spectate, carrier cue) are proposals; ask the user first.
+- No NPCs or traffic. Keep deterministic world generation (seeded _rng, stable parked_vehicles order) and the
+  existing multiplayer APIs.
+
+SUB-AGENTS: spawn these in parallel with the Agent tool. One owner per file: no two agents edit the same file.
+Each agent must not commit; you review and commit per workstream. Tell each agent the others' file ownership so
+they can message each other (SendMessage) instead of editing each other's files. Give each a deadline.
+
+A. "windows-validation" (owns: nothing; read-only + running tests/captures): run every suite and
+   tests/capture_perf.gd windowed on the RTX 3080 (vsync off) with and without POTATO MODE; run
+   tests/capture_interiors.gd, tests/capture_cabins.gd, tests/capture_map06.gd -- only=detail; report fps and draw calls
+   per view vs the software-GL numbers in docs/OVERNIGHT_CITY_PERF.md, and list visual problems with coordinates.
+B. "steam-voice" (owns: scripts/net.gd, scripts/online.gd, scripts/lobby_ui.gd, scripts/steam_transport.gd,
+   scripts/net_security.gd, scripts/voice*.gd, scripts/remote_player.gd, net/voice tests, the two docs):
+   install GodotSteam for 4.4.1 per docs/NETWORK_SECURITY_AND_STEAM.md (steam_appid.txt = 480 next to project
+   and exe), run the 2-PC Steam checklist with the user, fix create_host/create_client argument mismatches,
+   then validate voice with real microphones: open mic, optional local PTT, squad key muting proximity,
+   indoor/outdoor occlusion. Keep ENet working as the fallback.
+C. "audio" (owns: scripts/sfx.gd, tests/sfx_audio.gd, docs/AUDIO_PASS.md): listen to work/audio/*.wav (regenerate
+   with SFX_DUMP=1 ... tests/sfx_audio.gd), tune the gun profiles (drive/sub/grit, GUN_TRIM_DB) by ear with the user,
+   then add surface-aware footsteps once a surface lookup exists (coordinate with D).
+D. "gameplay" (owns: scripts/main.gd, scripts/player.gd, scripts/character_model.gd, tests/social_features.gd,
+   tests/integration.gd, tests/free_roam.gd): wire the remaining audio hooks in docs/AUDIO_PASS.md, add gamepad
+   bindings for hands-up/binoculars, and prototype only the proposals the user approves.
+E. "city" (owns: scripts/world.gd, scripts/city_detail.gd, scripts/mesh_merge.gd, scripts/interiors.gd,
+   scripts/retro_textures.gd, tests/city_detail.gd, tests/city_audit.gd, tests/map_06.gd, capture scripts for the city):
+   fix the remaining city_audit REPORTs, the Strip ring vs beach rocks step at (24, 400), harsh texture tiling,
+   CRT TVs in shop windows, and use the GPU numbers from A to decide further draw-call work.
+F. "landmarks" (owns: scripts/buildings/*, tests/building_landmarks.gd, tests/capture_interiors.gd):
+   raise the lot props that sit 16 cm into plinths (use world.surface_height), then build the next pieces:
+   hotel guest floors + lift/stair, motel drained pool (needs plot space, ask E), high-rise floors 3+ / roof.
+   Every new floor needs walk/lift tests like building_landmarks.gd.
+G. "vehicles" (owns: scripts/car.gd, scripts/vehicle_kit.gd, tests/vehicle_art.gd, tests/capture_cabins.gd):
+   the leftovers in docs/VEHICLE_TIDY_HANDOFF.md (dash-top map, bike mirror stalks, kick panels) after A's GPU review.
+
+FINISH: re-run everything, update CLAUDE_HANDOFF.md with exact results, push the branch, and let the user decide on
+exporting and merging into cloud/map-integration (never master).
+```
+
+---
+
+## Where each overnight workstream stopped
+
+| Workstream | Last state on the branch | Next step |
+|---|---|---|
+| Landmarks | Club, strip club, hotel lobby floor, garage (drivable), high-rise (2 lifts, 2 stairs), motel upper floor, burger drive-through; `building_landmarks` 188/0 | Sunk lot props; hotel guest floors; motel pool; high-rise upper floors |
+| City and performance | Draw calls about −30% (software GL); `city_audit` 69/0; potato mode; 1999 dressing; Coast Road rerouted round the gun store | GPU numbers; the Strip ring step; texture tiling |
+| Vehicles | `vehicle_art` 110/0; footwell, seats, wheels, arches and z-fighting fixed | GPU cabin review; small leftovers |
+| Audio | 110 procedural sounds; guns rebuilt; `sfx_audio` 321/0; nothing listened to yet | Listen and tune; surface footsteps |
+| Network | Host-validated relays; handshake; rate limits; `net_security` 91/0; Steam transport written, untested | GodotSteam install and a 2-PC test |
+| Voice | See the voice section of CLAUDE_HANDOFF.md and docs/VOICE_CHAT.md | Real-mic and 2-PC validation |
+| Gameplay | Hands up, binoculars, round report, potato toggle, audio hooks; `social_features` 29/0 | Gamepad binds; decisions on the proposals |
