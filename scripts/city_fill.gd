@@ -1036,6 +1036,10 @@ func _site_ok(center: Vector2, reach: float) -> bool:
 			if Vector2(spot.x, spot.z).distance_to(center) < ((8.0 if key == "car" else 6.0) + reach):
 				_why("p-crew")
 				return false
+	# The crews' walks out of their compounds (published HQ routes, tests/crew_hq.gd walks them) stay open.
+	if _near_hq_route(center, reach + 2.0):
+		_why("p-crew-route")
+		return false
 	for vehicle: Dictionary in w.parked_vehicles:
 		var spot: Vector3 = vehicle["at"]
 		if Vector2(spot.x, spot.z).distance_to(center) < reach + 4.0:
@@ -1536,10 +1540,36 @@ func _park_car(center: Vector2, front: Vector2, u: Vector2, size: Vector2) -> vo
 			var spot: Vector3 = crew[key]
 			if Vector2(spot.x, spot.z).distance_to(at) < 12.0:
 				return
+	if _near_hq_route(at, 3.5):
+		return
 	# Heading along the street, parked nose-first either way.
 	var heading: float = atan2(u.x, u.y) + (0.0 if rng.randf() < 0.5 else PI)
 	w._car_prop(Vector3(at.x, 0.03, at.y), heading, CAR_COLORS[rng.randi() % CAR_COLORS.size()], CAR_TYPES[rng.randi() % CAR_TYPES.size()], "")
 	cars_added += 1
+
+
+## Segments of every crew compound's published walking routes (world space, flat), built once.
+var _hq_route_cache: Array = []
+var _hq_route_ready: bool = false
+
+
+func _near_hq_route(at: Vector2, clearance: float) -> bool:
+	if not _hq_route_ready:
+		_hq_route_ready = true
+		for key: String in w.plot_nodes.keys():
+			var node: Node3D = w.plot_nodes[key] as Node3D
+			if not str(key).begins_with("crew_hq_") or node == null or not node.has_meta("routes"):
+				continue
+			for route: Variant in (node.get_meta("routes") as Dictionary).values():
+				var points: Array = route
+				for index: int in range(points.size() - 1):
+					var a3: Vector3 = node.global_transform * (points[index] as Vector3)
+					var b3: Vector3 = node.global_transform * (points[index + 1] as Vector3)
+					_hq_route_cache.append([Vector2(a3.x, a3.z), Vector2(b3.x, b3.z)])
+	for segment: Array in _hq_route_cache:
+		if Geometry2D.get_closest_point_to_segment(at, segment[0], segment[1]).distance_to(at) < clearance:
+			return true
+	return false
 
 
 func _decor_node(at: Vector2) -> Node3D:
