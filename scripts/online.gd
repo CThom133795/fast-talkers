@@ -125,6 +125,9 @@ var _pending_hits: Dictionary = {}
 ## The round this peer last spawned for (a late joiner spawns mid-round).
 var _spawned_round: int = -1
 ## The Week this peer last started (a new Week resets money and gear), -1 before the first buy phase.
+## "HOW THE WEEK WORKS": a one-screen card beside the buy menu on the first morning of the first Week (once a session).
+var _week_card: PanelContainer
+var _week_card_done: bool = false
 var _seen_week: int = -1
 
 
@@ -296,6 +299,8 @@ func start_solo_week() -> void:
 
 func leave_match() -> void:
 	var was_active: bool = active
+	_hide_week_card()
+	_week_card_done = false
 	active = false
 	phase = ""
 	_spawned_round = -1
@@ -1069,6 +1074,61 @@ func _enter_buy() -> void:
 	for line: String in morning_paper():
 		_system(line)
 	g._message("%s.  %s" % [day_name(), role_line()], 8.0)
+	if phase == "buy" and week == 1 and day == 1 and not _week_card_done:
+		_week_card_done = true
+		_show_week_card()
+
+
+## The rules of the Week on one card (docs/GAME_VISION.md), with the keys for the device in use. One line per paragraph.
+func week_card_text() -> String:
+	var g: Node = game
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("%s TO FRIDAY. Each Day: 30 s to buy at HQ, then about 10 minutes on the street." % WEEKDAYS[weekday_index_of(1, week_days)])
+	lines.append("TO WIN, have the most money BANKED in your HQ safe by Friday night. Kills pay nothing.")
+	lines.append("THE CONTRACT: one crew sells the Ledger, another pays cash for it. Deal, bluff or take it. What you carry home and bank at your HQ (teal) is yours.")
+	lines.append("THE CREW PHONE sits by your spawn. %s grabs it, %s calls a crew. Talk close to it: they hear you." % [g._glyph("interact"), g._glyph("phone_call")])
+	lines.append("CARRYING a case means sidearm only. %s drops it. %s puts your hands up." % [g._glyph("drop"), g._glyph("hands_up")])
+	lines.append("DOWN? Back at HQ in 10 s with a pistol. Survivors keep their gear all Week.")
+	lines.append("FRIDAY IS THE DEAD DROP: the goods land in the street. No rules. Whoever banks it gets paid.")
+	return "\n".join(lines)
+
+
+func _show_week_card() -> void:
+	_hide_week_card()
+	var g: Node = game
+	if g.hud == null:
+		return
+	_week_card = PanelContainer.new()
+	_week_card.name = "WeekCard"
+	_week_card.add_theme_stylebox_override("panel", g._style(Color(0.035, 0.065, 0.075, 0.9), Color("53645d"), 16))
+	# Right of the buy menu, under the radar, clear of the ammo counter.
+	_week_card.position = Vector2(768, 250)
+	_week_card.custom_minimum_size = Vector2(484, 0)
+	_week_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 7)
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_week_card.add_child(stack)
+	var title: Label = Label.new()
+	title.text = "HOW THE WEEK WORKS"
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", g.GOLD)
+	stack.add_child(title)
+	for line: String in week_card_text().split("\n"):
+		var body: Label = Label.new()
+		body.text = line
+		body.custom_minimum_size = Vector2(452, 0)
+		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		body.add_theme_font_size_override("font_size", 13)
+		body.add_theme_color_override("font_color", g.INK)
+		stack.add_child(body)
+	g.hud.add_child(_week_card)
+
+
+func _hide_week_card() -> void:
+	if _week_card != null and is_instance_valid(_week_card):
+		_week_card.queue_free()
+	_week_card = null
 
 
 ## "The morning paper": yesterday's results, a line or two, so yesterday becomes today's grudges.
@@ -1084,6 +1144,7 @@ func morning_paper() -> PackedStringArray:
 
 func _enter_live() -> void:
 	var g: Node = game
+	_hide_week_card()
 	g.phase = g.Phase.LIVE
 	g.buy_menu_open = false
 	g.player.can_fire = not g.player.is_dead()
@@ -1095,6 +1156,7 @@ func _enter_live() -> void:
 
 func _enter_settle() -> void:
 	var g: Node = game
+	_hide_week_card()
 	_result_screen("END OF %s" % day_name(), "%s COMES NEXT" % WEEKDAYS[mini(weekday_index() + 1, WEEKDAYS.size() - 1)] if day < week_days else "END OF WEEK STANDINGS NEXT")
 	var lines: PackedStringArray = PackedStringArray()
 	for line: Variant in results:
@@ -1209,6 +1271,32 @@ func update_hud() -> void:
 			g.objective_label.text = role_line()
 		g.marker_label.text = _item_status() + "     " + slots
 	g.stats_label.text = _standings()
+
+
+## The action strip over the controls line (main.gd): what the phone, the case, your hands and the radio do right now.
+func action_prompts() -> String:
+	var g: Node = game
+	var parts: PackedStringArray = PackedStringArray()
+	var phone: int = my_phone_item()
+	if phone >= 0:
+		var view: Dictionary = _view_call_of(phone)
+		var key: String = g._glyph("phone_call")
+		if view.is_empty():
+			parts.append("[%s] CALL A CREW" % key)
+		elif int(view["state"]) == 0 and int(view["b"]) == phone:
+			parts.append("[%s] ANSWER THE PHONE" % key)
+		else:
+			parts.append("[%s] HANG UP" % key)
+		parts.append("[%s] DROP PHONE" % g._glyph("drop_phone"))
+	var mine: int = _my_trade_item()
+	if mine >= 0:
+		parts.append("[%s] DROP %s" % [g._glyph("drop"), _item_name(mine).to_upper()])
+	if phase == "live":
+		parts.append("[%s] %s" % [g._glyph("hands_up"), "HANDS DOWN" if g.player.hands_up else "HANDS UP"])
+	if not g.using_pad:
+		parts.append("[HOLD Y] CREW RADIO")
+		parts.append("[ENTER] CHAT")
+	return "     ".join(parts)
 
 
 func _item_status() -> String:

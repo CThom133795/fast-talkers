@@ -117,6 +117,8 @@ var marker_label: Label
 var stats_label: Label
 var prompt_label: Label
 var prompt_panel: PanelContainer
+## Online, on foot: the social verbs that matter right now (phone, case, hands up, radio), above the controls line.
+var action_label: Label
 var hint_label: Label
 var feed_label: Label
 var vitals_label: Label
@@ -170,6 +172,10 @@ var _chase_pitch: float = 0.0
 var _chase_idle: float = 10.0
 var _shake: float = 0.0
 var _title_angle: float = 0.6
+## First title of the session: a slow crane down from the Exchange roofline onto the lineup, with the title sting.
+const TITLE_INTRO_SECONDS: float = 5.5
+var _title_intro: float = -1.0
+var _title_intro_done: bool = false
 var _guard_respawns: Dictionary = {}
 var _rack_start: int = -1
 var rack_best: float = 0.0
@@ -2112,6 +2118,11 @@ func _show_title() -> void:
 	_reset_tip(-1.0)
 	for model: Node3D in lineup:
 		model.visible = true
+	if not _title_intro_done:
+		_title_intro_done = true
+		_title_intro = 0.0
+		if sfx != null and sfx.has_sound("sting_title"):
+			sfx.play("sting_title", 1.0, -4.0)
 	_orbit_title(0.0)
 	chase.fov = 50.0
 	chase.make_current()
@@ -2141,8 +2152,19 @@ func _show_title() -> void:
 func _orbit_title(delta: float) -> void:
 	# A slow handheld drift on the crew lineup under the Exchange neon.
 	_title_angle += delta * 0.35
-	chase.position = Vector3(-2.6 + sin(_title_angle) * 0.18, 1.5 + sin(_title_angle * 0.7) * 0.05, -34.4)
-	chase.look_at(Vector3(-0.2, 1.4, -41.0))
+	var rest: Vector3 = Vector3(-2.6 + sin(_title_angle) * 0.18, 1.5 + sin(_title_angle * 0.7) * 0.05, -34.4)
+	var target: Vector3 = Vector3(-0.2, 1.4, -41.0)
+	if _title_intro >= 0.0:
+		# The first time: start high over the street, looking down at the lineup, and settle in (ease out).
+		_title_intro += delta
+		var t: float = clampf(_title_intro / TITLE_INTRO_SECONDS, 0.0, 1.0)
+		var ease_t: float = 1.0 - pow(1.0 - t, 3.0)
+		rest = Vector3(-7.5, 11.0, -22.0).lerp(rest, ease_t)
+		target = Vector3(0.4, 0.8, -41.0).lerp(target, ease_t)
+		if t >= 1.0:
+			_title_intro = -1.0
+	chase.position = rest
+	chase.look_at(target)
 
 func _pause() -> void:
 	buy_menu_open = false
@@ -2997,6 +3019,9 @@ func _update_hud() -> void:
 	fps_label.text = "%d FPS" % Engine.get_frames_per_second()
 	prompt_label.text = ""
 	hint_label.text = ""
+	action_label.text = ""
+	if online.active and (phase == Phase.LIVE or phase == Phase.BUY) and not paused and not buy_menu_open and vehicle == null and not player.is_dead():
+		action_label.text = online.action_prompts()
 	if (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
 		if phase == Phase.BUY:
 			hint_label.text = "%s BUY MENU    %s LOOK    %s WEAPONS    WEAPONS STAY HOLSTERED UNTIL THE DOORS OPEN" % [_glyph("buy"), _glyph("look"), _glyph("weapons")]
@@ -3130,6 +3155,9 @@ func _build_ui() -> void:
 	hint_label = _hud_label(Vector2(0,694),12,MUTED)
 	hint_label.size.x = 1280
 	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_label = _hud_label(Vector2(0,672),14,INK)
+	action_label.size.x = 1280
+	action_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	fps_label = _hud_label(Vector2(0,258),13,MUTED)
 	fps_label.size.x = 1252
 	fps_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT

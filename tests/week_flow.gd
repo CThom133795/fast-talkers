@@ -318,6 +318,12 @@ func _monday() -> void:
 	online.update_hud()
 	_check(str(game.top_left.text).contains("MONDAY"), "the HUD names the weekday ('%s')" % str(game.top_left.text))
 	_check(online.briefing().contains("MONDAY, DAY 1 OF 5"), "the objective board opens with the weekday")
+	# First morning: the one-screen rules card sits beside the buy menu.
+	var card: Node = online._week_card
+	_check(card != null and is_instance_valid(card) and card.is_inside_tree(), "the first Monday shows the HOW THE WEEK WORKS card")
+	var card_text: String = online.week_card_text()
+	_check(card_text.contains("MONDAY TO FRIDAY") and card_text.contains("BANKED") and card_text.contains("Kills pay nothing") and card_text.contains("DEAD DROP"), "the card covers the Week, banking, no kill pay and the Dead Drop")
+	_check(card_text.contains("[P]") == false and card_text.contains(str(game._glyph("phone_call"))), "the card names the phone key for this device")
 	# The crew phone waits at the HQ spawn during the buy phase.
 	var phone: int = online.phone_item(_crew())
 	_check(phone >= 2 and online._loose(phone), "my crew's phone is on the ground at the HQ spawn")
@@ -337,6 +343,9 @@ func _monday() -> void:
 	await _teleport(_item(phone).get("pos", Vector3.ZERO))
 	online.interact()
 	await _wait_until(func() -> bool: return int(_item(phone).get("holder", 0)) == 1, 2.0)
+	await _frames(2)
+	_check(str(game.action_label.text).contains("CALL A CREW"), "the HUD action strip is on screen ('%s')" % str(game.action_label.text))
+	_check(online.action_prompts().contains("[%s] CALL A CREW" % str(game._glyph("phone_call"))) and online.action_prompts().contains("DROP PHONE"), "holding the phone, the action strip shows CALL and DROP PHONE ('%s')" % online.action_prompts())
 	await _phone_calls(phone)
 	await _teleport(_item(0).get("pos", Vector3.ZERO))
 	_check(not bool(online.interact()) and int(_item(0).get("holder", 0)) == 0, "trade items can't be picked up in the buy phase")
@@ -345,6 +354,8 @@ func _monday() -> void:
 	online.time_left = 0.0
 	var live: bool = await _wait_until(func() -> bool: return str(online.phase) == "live", 3.0)
 	_check(live, "the doors open when the buy timer runs out")
+	_check(online._week_card == null, "the rules card goes away when the doors open")
+	_check(online.action_prompts().contains("HANDS UP") and online.action_prompts().contains("CREW RADIO"), "on the street the action strip shows hands up and the radio ('%s')" % online.action_prompts())
 	# One trade item at a time; sidearm only while carrying. The cases start on my own HQ doorstep
 	# (inside the bank radius), so first carry the cash case out to a street and leave it there.
 	var street: Vector3 = (online.get_script().dead_drop_spot(game.world, 0) as Dictionary)["at"] + Vector3(0, 0.2, 0)
@@ -482,6 +493,7 @@ func _new_week() -> void:
 	var monday: bool = await _wait_until(func() -> bool: return str(online.phase) == "buy" and int(online.week) == 2, 4.0)
 	_check(monday, "Week 2 starts")
 	_check(int(online.day) == 1 and online.day_name() == "MONDAY", "Week 2 starts on MONDAY")
+	_check(online._week_card == null, "the rules card shows only on the first Monday of a session")
 	_check(int(online.bank.get(_crew(), -1)) == 0, "the crew bank resets for the new Week")
 	_check(int(game.cash) == int(online.START_CASH), "money resets to the starting $%d (got %d)" % [int(online.START_CASH), int(game.cash)])
 	_check(game.player.owned.size() == 1 and game.player.owned.has("pistol"), "gear resets to the pistol for the new Week")
