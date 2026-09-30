@@ -28,6 +28,8 @@ const JUMP_SPEED: float = 4.7
 const STAND_HEIGHT: float = 1.8
 const CROUCH_HEIGHT: float = 1.15
 const BODY_RADIUS: float = 0.30
+## Highest curb or single riser the player walks up without jumping (_try_step_up).
+const STEP_UP_MAX: float = 0.2
 const BASE_FOV: float = 85.0
 const STAND_EYE: float = 1.62
 const CROUCH_EYE: float = 1.02
@@ -420,9 +422,33 @@ func _physics_process(delta: float) -> void:
 		_stamina_delay = 0.65
 	else:
 		velocity.y = 0.0
+	_try_step_up(delta)
 	move_and_slide()
 	_track_steps(delta)
 	_weapon_input(controls_active)
+
+
+## Curbs, plinths and single risers up to STEP_UP_MAX: lift the body over a ledge that blocks the way
+## (stairs carry their own glide slabs in BuildingKit). A wall still blocks: lifted, the move must be clear.
+func _try_step_up(delta: float) -> void:
+	if not is_on_floor() or velocity.y > 0.01:
+		return
+	var motion: Vector3 = Vector3(velocity.x, 0.0, velocity.z) * delta
+	if motion.length() < 0.001:
+		return
+	var here: Transform3D = global_transform
+	if not test_move(here, motion):
+		return
+	# Probe a little ahead: one frame's motion would land the rounded capsule bottom on the ledge's edge,
+	# whose tilted contact normal reads as a wall.
+	var probe: Vector3 = motion.normalized() * maxf(motion.length(), 0.15)
+	var lifted: Transform3D = here.translated(Vector3.UP * STEP_UP_MAX)
+	if test_move(here, Vector3.UP * STEP_UP_MAX) or test_move(lifted, probe):
+		return
+	var landing: KinematicCollision3D = KinematicCollision3D.new()
+	var hit: bool = test_move(lifted.translated(probe), Vector3.DOWN * (STEP_UP_MAX + 0.02), landing)
+	if hit and landing.get_normal().y >= cos(floor_max_angle):
+		global_position.y += STEP_UP_MAX + landing.get_travel().y
 
 
 func _update_aim(delta: float, controls_active: bool) -> void:
