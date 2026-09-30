@@ -689,6 +689,7 @@ func _interact() -> void:
 	var shop_door: int = _shop_door_in_reach()
 	if shop_door >= 0:
 		world.toggle_door(shop_door)
+		online.door_changed(shop_door)
 		sfx.play("ui", 0.6)
 		return
 	var nearest: FastCar = _nearest_car(CENTRE_REACH)

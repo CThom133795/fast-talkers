@@ -91,6 +91,7 @@ func setup(owner_game: Node, owner_net: FastNet) -> void:
 	net.round_state.connect(_on_round_state)
 	net.grant.connect(_on_grant)
 	net.chat.connect(_on_chat)
+	net.world_event.connect(_on_world_event)
 	net.host_seat_request.connect(_host_seat_request)
 	net.host_seat_leave.connect(_host_seat_leave)
 	net.host_car_damage.connect(_host_car_damage)
@@ -475,6 +476,23 @@ func _on_remote_glass(car: int, index: int) -> void:
 	_applying_remote_glass = true
 	(game.cars[car] as FastCar).break_glass(index)
 	_applying_remote_glass = false
+
+
+# --------------------------------------------------------------------- shared world state
+
+## main._interact toggled a shop door: everyone else sees (and is blocked by) it too.
+func door_changed(index: int) -> void:
+	if active and index >= 0 and index < game.world.interactable_doors.size():
+		net.send_world_event("door", index, 1 if bool(game.world.interactable_doors[index]["open"]) else 0)
+
+
+func _on_world_event(kind: String, index: int, value: int) -> void:
+	if not active:
+		return
+	if kind == "door" and index < game.world.interactable_doors.size():
+		game.world.set_door_open(index, value == 1)
+	elif kind == "lift" and game.world.has_method("call_lift"):
+		game.world.call("call_lift", index, value)
 
 
 # --------------------------------------------------------------------- items (client side)

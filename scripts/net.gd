@@ -64,6 +64,9 @@ signal item_update(item: int, data: Dictionary)
 signal round_state(data: Dictionary)
 signal grant(amount: int, reason: String)
 signal chat(from_id: int, channel: String, text: String)
+## Shared world state changed by a player: kind "door" (value 1 open / 0 shut) or "lift"
+## (value = target floor). Cosmetic-plus-cover state; every peer applies it.
+signal world_event(kind: String, index: int, value: int)
 
 ## Host-only requests that main.gd decides (no game rules in this file)
 signal host_seat_request(from_id: int, car: int, seat: int)
@@ -963,6 +966,28 @@ func _grant(amount: int, reason: String) -> void:
 
 func _receive_grant(amount: int, reason: String) -> void:
 	grant.emit(clampi(amount, -100000, 100000), clean_text(reason, REASON_MAX))
+
+
+# ---------------------------------------------------------------- world events
+
+const WORLD_KINDS: PackedStringArray = ["door", "lift"]
+
+
+func send_world_event(kind: String, index: int, value: int) -> void:
+	if _can_send():
+		_world_event.rpc(kind, index, value)
+
+
+@rpc("any_peer", "reliable", "call_remote", 0)
+func _world_event(kind: String, index: int, value: int) -> void:
+	if _mode == Mode.OFFLINE:
+		return
+	var sender: int = multiplayer.get_remote_sender_id()
+	if sender <= 0 or sender == my_id() or not WORLD_KINDS.has(kind) or index < 0 or index > 1023 or value < -1 or value > 255:
+		return
+	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "req", LIMIT_REQUEST)):
+		return
+	world_event.emit(kind, index, value)
 
 
 # ---------------------------------------------------------------- chat
