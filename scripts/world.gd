@@ -33,6 +33,9 @@ const COPING_HEIGHT: float = 0.34
 const RAIL_HEIGHT: float = 1.12
 ## Visual layer for interior meshes: interior lamps only light this layer.
 const INTERIOR_LAYER: int = 2
+## Small static clutter renders on its own layer that the neon street lights skip: a merged
+## 60 m clutter cell would otherwise take an extra lighting pass per surface for every nearby sign.
+const CLUTTER_LAYER: int = 3
 ## Neighbourhood kits: authored around `from` (0.4 coordinates), placed at `to` turned by
 ## `yaw` (radians about +Y). Their outer frame is `from` ± `half`.
 const KITS: Dictionary = {
@@ -75,6 +78,17 @@ var plazas: Array[PackedVector2Array] = []
 ## Authored public spaces and their solid furniture; used by collision/playtest checks.
 var public_spaces: Array[Dictionary] = []
 var city_furniture: Array[Dictionary] = []
+## Static lived-in clutter (alley bins, bags, boxes, rooftop plant, oil stains): kind, at (x/z), radius, roof.
+var city_clutter: Array[Dictionary] = []
+## Flat tower roofs for rooftop plant: world centre, size, yaw, roof height, world front, business sign.
+var _roofs: Array[Dictionary] = []
+## Top faces of raised slabs (world polygon, height) so late dressing can sit on the real surface.
+var _slab_tops: Array[Dictionary] = []
+## Generic shop-sign uses per text, so no sign is stamped across the city more than twice.
+var _sign_uses: Dictionary = {}
+## Distance-culled detail meshes (public-space props, clutter): potato mode shortens their range.
+var _detail_ranges: Array[GeometryInstance3D] = []
+var potato_mode: bool = false
 ## Walk-in doors: {index, label, kind, position, inside, outside, open, district}.
 ## Doors start open; `set_door_open(index, open)` swings one (main.gd can bind E to it).
 var interactable_doors: Array[Dictionary] = []
@@ -504,6 +518,23 @@ func _screen_poly(poly: PackedVector2Array, to_screen: Callable) -> PackedVector
 
 # --- Lighting ------------------------------------------------------------------
 
+## Potato mode, for bare-minimum PCs (the settings toggle lives in main.gd). Hides the
+## collision-free dressing in the "potato_optional" group (posters, bags, cardboard, leaves,
+## bunting, rooftop plant, oil stains...) and draws the remaining small detail to 60 % of its
+## range. Nothing with collision is hidden or removed, so cover, routes and gameplay are the same
+## in both modes (multiplayer fairness); colliders never depend on visibility anyway.
+func set_potato_mode(enabled: bool) -> void:
+	potato_mode = enabled
+	for node: Node in get_tree().get_nodes_in_group("potato_optional"):
+		if node is Node3D and is_ancestor_of(node):
+			(node as Node3D).visible = not enabled
+	for geometry: GeometryInstance3D in _detail_ranges:
+		if not is_instance_valid(geometry):
+			continue
+		if not geometry.has_meta("full_range"):
+			geometry.set_meta("full_range", geometry.visibility_range_end)
+		geometry.visibility_range_end = float(geometry.get_meta("full_range")) * (0.6 if enabled else 1.0)
+
 func set_dusk(value: bool) -> void:
 	dusk = value
 	var sky_material: ProceduralSkyMaterial = environment.sky.sky_material as ProceduralSkyMaterial
@@ -639,6 +670,8 @@ func _finish(node: Node3D) -> void:
 	_batch_static_meshes(node)
 	# Remaining one-off boxes (walls, signs, kerbs) merge into one mesh per material.
 	MeshMerge.merge_children(node)
+	# The sun's shadow splits then draw the node's static casters in one call each.
+	MeshMerge.shadow_proxy(node)
 
 ## A named district for the map and the radar. `polys` overrides the rectangle's shape.
 func _district(title: String, rect: Rect2, color: Color, crew: String, polys: Array = []) -> void:
@@ -797,6 +830,7 @@ func _neon(words: String, at: Vector3, angle: float, color: Color, font_size: in
 		lamp.light_energy = 1.6
 		lamp.omni_range = 11.0
 		lamp.shadow_enabled = false
+		lamp.light_cull_mask = 0xFFFFF & ~(1 << (CLUTTER_LAYER - 1))
 		lamp.position = at + back * 1.6
 		_target.add_child(lamp)
 		_lights.append(lamp)
@@ -812,6 +846,18 @@ func _slab(rect: Rect2, color: Color, tex: String = "tiles", height: float = 0.1
 		Vector3(hx - bevel, height, hz - bevel), Vector3(-hx + bevel, height, hz - bevel)
 	])
 	_hull(Vector3(rect.get_center().x, 0, rect.get_center().y), corners, _material(color, 0.9, tex))
+	var top: PackedVector2Array = PackedVector2Array()
+	for corner: Vector2 in [Vector2(-hx + bevel, -hz + bevel), Vector2(hx - bevel, -hz + bevel), Vector2(hx - bevel, hz - bevel), Vector2(-hx + bevel, hz - bevel)]:
+		top.append(_w2(rect.get_center() + corner))
+	_slab_tops.append({"poly": top, "height": height})
+
+## Walking-surface height at a world x/z from the recorded slabs (0 on open ground or road).
+func surface_height(at: Vector2) -> float:
+	var best: float = 0.0
+	for slab: Dictionary in _slab_tops:
+		if float(slab["height"]) > best and Geometry2D.is_point_in_polygon(at, slab["poly"]):
+			best = float(slab["height"])
+	return best
 
 func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void:
 	var surface: SurfaceTool = SurfaceTool.new()
@@ -852,6 +898,7 @@ func _tower(center: Vector2, size: Vector3, color: Color, tex: String, front: Ve
 	_box(at + Vector3(0, size.y * 0.5, 0), size, color, true, tex)
 	_box(at + Vector3(0, 0.55, 0), Vector3(size.x + 0.14, 1.1, size.z + 0.14), color.darkened(0.3), false, tex)
 	_box(at + Vector3(0, size.y + 0.16, 0), Vector3(size.x + 0.45, 0.32, size.z + 0.45), roof, false, "roof")
+	_roofs.append({"center": _w2(center), "size": size, "yaw": _xf_yaw, "top": size.y + 0.32, "front": _xf.basis * front, "business": not sign_text.is_empty()})
 	var glass: StandardMaterial3D = _material(Color(0.16, 0.24, 0.29), 0.3)
 	var warm: StandardMaterial3D = _glow(Color(1.0, 0.78, 0.46), 1.3)
 	var floors: int = int((size.y - 1.2) / 3.1)
@@ -939,6 +986,9 @@ func _tree(at: Vector3, style: String = "plane") -> void:
 
 func _container(at: Vector3, color: Color, rotated: bool = false) -> void:
 	var size: Vector3 = Vector3(2.6, 2.7, 6.1) if rotated else Vector3(6.1, 2.7, 2.6)
+	# Yard stacks (levels of 2.7 m from the ground) stand on the paved plinth, not sunk into it.
+	if absf(at.y - roundf(at.y / 2.7) * 2.7) < 0.01:
+		at.y += surface_height(_w2(Vector2(at.x, at.z)))
 	_box(at + Vector3(0, 1.35, 0), size, color, true, "metal")
 
 ## Chain-link on steel posts. You can see and shoot through the mesh; what stops bodies is
@@ -1815,7 +1865,7 @@ func _build_props() -> void:
 	# Freight container in the back lot, recognizable corrugations included.
 	_box(Vector3(25, 1.35, -58), Vector3(6.1, 2.7, 2.6), Color(0.35, 0.48, 0.49), true, "metal")
 	_label("M / 028", Vector3(25, 1.5, -56.60), 38, Color(0.82, 0.83, 0.71))
-	for at: Vector3 in [Vector3(-10.1, 0, 7), Vector3(10.5, 0, -37), Vector3(10.5, 0, 58)]:
+	for at: Vector3 in [Vector3(-10.1, 0.16, 7), Vector3(10.5, 0.16, -37), Vector3(10.5, 0.16, 58)]:
 		_tree(at)
 	# Painted parking bays.
 	for x: float in [14.0, 18.0, 22.0, 26.0, 30.0]:
@@ -2217,14 +2267,16 @@ func _build_canal_market() -> void:
 	_street_palette = [Color(0.85, 0.3, 0.2), Color(0.25, 0.55, 0.8), Color(0.95, 0.8, 0.25), Color(0.3, 0.65, 0.4)]
 	var canopies: Array[Color] = [Color(0.85, 0.25, 0.2), Color(0.2, 0.55, 0.8), Color(0.95, 0.75, 0.2), Color(0.3, 0.65, 0.35)]
 	# West bank: the fish hall faces the inlet across its quay.
-	_block(Rect2(-229, -211, 42, 55), Color(0.5, 0.48, 0.44), "cobble")
+	# Both bank blocks stop short of North Shore Road's curve (their corners used to put a
+	# kerbed plinth on the carriageway at x -228 and x -100, z -206).
+	_block(Rect2(-229, -205, 42, 49), Color(0.5, 0.48, 0.44), "cobble")
 	_tower(Vector2(-210, -186), Vector3(17, 7, 36), Color(0.6, 0.64, 0.66), "metal", Vector3.RIGHT, "FISH HALL", Color(0.5, 0.9, 1.0), Color(0.3, 0.33, 0.35), 0.2)
 	for index: int in range(3):
 		_box(Vector3(-199.5, 2.2, -198 + index * 12), Vector3(0.2, 4.4, 6), Color(0.3, 0.33, 0.35), false, "metal")
-		_box(Vector3(-198.4, 0.6, -198 + index * 12), Vector3(2, 1.2, 6), Color(0.5, 0.5, 0.48), true, "panel")
+		_box(Vector3(-198.4, 0.76, -198 + index * 12), Vector3(2, 1.2, 6), Color(0.5, 0.5, 0.48), true, "panel")
 	_landmark("FISH HALL", Vector3(-196, 0, -186))
 	# East bank: warehouse lofts over the basin, with kiosks on the quay.
-	_block(Rect2(-149, -211, 55, 55), Color(0.5, 0.48, 0.44), "cobble")
+	_block(Rect2(-149, -201, 55, 45), Color(0.5, 0.48, 0.44), "cobble")
 	_tower(Vector2(-122, -190), Vector3(40, 13, 18), Color(0.6, 0.42, 0.3), "brick", Vector3.BACK, "CANAL LOFTS", Color(1.0, 0.8, 0.5), Color(0.28, 0.25, 0.24), 0.45)
 	for at: Vector3 in [Vector3(-142, 0.16, -170), Vector3(-130, 0.16, -166), Vector3(-196, 0.16, -150 + -14)]:
 		_box(at + Vector3(0, 1.4, 0), Vector3(4, 2.8, 3), Color(0.25, 0.42, 0.36), true, "planks")
@@ -2329,9 +2381,9 @@ func _build_plazas() -> void:
 	var west: Rect2 = Rect2(-182, 15, 59, 14)
 	_slab(west, Color(0.56, 0.53, 0.48), "tiles")
 	plazas.append(_rect_poly(west))
-	_box(Vector3(-152, 0.8, 20.5), Vector3(3.2, 1.6, 3.2), stone, true, "stucco")
-	_box(Vector3(-152, 2.9, 20.5), Vector3(0.9, 2.6, 0.7), Color(0.3, 0.42, 0.36), true, "metal")
-	_box(Vector3(-152, 4.5, 20.5), Vector3(0.5, 0.6, 0.5), Color(0.3, 0.42, 0.36), false, "metal")
+	_box(Vector3(-152, 0.96, 20.5), Vector3(3.2, 1.6, 3.2), stone, true, "stucco")
+	_box(Vector3(-152, 3.06, 20.5), Vector3(0.9, 2.6, 0.7), Color(0.3, 0.42, 0.36), true, "metal")
+	_box(Vector3(-152, 4.66, 20.5), Vector3(0.5, 0.6, 0.5), Color(0.3, 0.42, 0.36), false, "metal")
 	for x: float in [-174.0, -164.0, -138.0, -128.0]:
 		_tree(Vector3(x, 0.16, 20.5))
 	for x: float in [-171.0, -161.0, -143.0, -133.0]:
@@ -2430,6 +2482,12 @@ func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> voi
 			var title: String = ""
 			if not signs.is_empty() and _rng.randf() < 0.65:
 				title = str(signs[_rng.randi() % signs.size()])
+				# Same random draw as before; a third copy of a generic sign becomes the least-used one.
+				if int(_sign_uses.get(title, 0)) >= 2:
+					for option: Variant in signs:
+						if int(_sign_uses.get(str(option), 0)) < int(_sign_uses.get(title, 0)):
+							title = str(option)
+				_sign_uses[title] = int(_sign_uses.get(title, 0)) + 1
 			var sign_color: Color = spec["sign_color"]
 			if style == "neon":
 				sign_color = [Color(1.0, 0.45, 0.85), Color(0.3, 0.9, 1.0), Color(1.0, 0.85, 0.3), Color(0.5, 1.0, 0.45)][_rng.randi() % 4]
@@ -2442,6 +2500,8 @@ func _rooftop(center: Vector2, size: Vector2, height: float) -> void:
 	if size.x < 10.0 or size.y < 10.0 or _rng.randf() < 0.35:
 		return
 	var at: Vector3 = Vector3(center.x + _rng.randf_range(-0.25, 0.25) * size.x, height + 0.32, center.y + _rng.randf_range(-0.25, 0.25) * size.y)
+	if not _roofs.is_empty():
+		_roofs.back()["taken"] = _w2(Vector2(at.x, at.z))
 	if _rng.randf() < 0.5:
 		_cylinder(at + Vector3(0, 1.4, 0), 1.3, 2.4, Color(0.4, 0.3, 0.24), 8)
 		_cylinder(at + Vector3(0, 2.8, 0), 0.2, 0.7, Color(0.2, 0.2, 0.22), 6)
