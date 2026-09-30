@@ -30,6 +30,8 @@ const GlassScript = preload("res://scripts/breakable_glass.gd")
 const STEP_RISE_MAX: float = 0.18
 const STEP_RUN_MIN: float = 0.28
 const STEP_RUN: float = 0.30
+## Thickness of the invisible slope slab laid over every flight (see _glide_slab).
+const GLIDE_THICKNESS: float = 0.3
 const FLOOR_HEIGHT: float = 3.4
 const SLAB: float = 0.3
 const WALL: float = 0.3
@@ -292,6 +294,27 @@ func _flight(start: Vector3, heading: Vector3, steps: int, rise: float, width: f
 		shape.shape = box_shape
 		shape.transform = Transform3D(Basis(Vector3.UP, angle), center)
 		body.add_child(shape)
+	body.add_child(_glide_slab(start, heading, angle, steps, rise, width, run))
+
+
+## The invisible collision slope over a flight. A capsule pressed into a stack of square step boxes snags
+## on each nose (there is no step-up in the player), so the flight also carries one solid slab whose top
+## face runs along the nose line, from floor level one run ahead of the first riser to the last step's
+## nose (flush with that tread, so it never reaches past the top landing). The slope is atan(rise/run)
+## (about 30 degrees, under the 46 degree floor limit); the boxes stay underneath for shots and falls.
+func _glide_slab(start: Vector3, heading: Vector3, angle: float, steps: int, rise: float, width: float, run: float) -> CollisionShape3D:
+	var low: Vector3 = start - heading * run
+	var high: Vector3 = start + heading * ((steps - 1) * run) + Vector3(0, steps * rise, 0)
+	var span: Vector3 = high - low
+	var flat: float = Vector2(span.x, span.z).length()
+	var basis: Basis = Basis(Vector3.UP, angle) * Basis(Vector3.RIGHT, -atan2(span.y, flat))
+	var slab: CollisionShape3D = CollisionShape3D.new()
+	slab.name = "GlideSlab"
+	var slab_shape: BoxShape3D = BoxShape3D.new()
+	slab_shape.size = Vector3(width, GLIDE_THICKNESS, span.length())
+	slab.shape = slab_shape
+	slab.transform = Transform3D(basis, (low + high) * 0.5 - basis.y * (GLIDE_THICKNESS * 0.5))
+	return slab
 
 
 ## A straight flight of stairs. Returns {bottom, top, steps, rise, run, heading, length, width}; `top`
