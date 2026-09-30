@@ -46,7 +46,8 @@ static func desk(kit: Kit, at: Vector3) -> void:
 static func room_finish(kit: Kit, half: Vector2) -> void:
 	# Interior linings use layer 2, so the room lamp warms the room rather than the street.
 	var lining: Material = kit.mat(CREAM, "stucco")
-	kit.box(Vector3(0, 0.137, 0), Vector3(half.x * 2 - 0.35, 0.02, half.y * 2 - 0.35), kit.mat(CREAM, "tiles"))
+	# Sits just above the 0.16 m block plinth; at 0.137 it was buried and the street paving showed indoors.
+	kit.box(Vector3(0, 0.17, 0), Vector3(half.x * 2 - 0.35, 0.02, half.y * 2 - 0.35), kit.mat(CREAM, "tiles"))
 	kit.box(Vector3(0, 4.14, 0), Vector3(half.x * 2 - 0.3, 0.02, half.y * 2 - 0.3), lining)
 	for side: float in [-1.0, 1.0]:
 		kit.box(Vector3(side * (half.x - 0.16), 2.1, 0), Vector3(0.02, 4.15, half.y * 2 - 0.3), lining)
