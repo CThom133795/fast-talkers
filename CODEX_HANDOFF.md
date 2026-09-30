@@ -761,7 +761,7 @@ The user delegated design choices on improving the No Big Deal / Sub Rosa system
    - Movement and health are still client-side.
 4. City and perf (draw calls): sign text into a texture, a shared prop palette, and a POTATO draw distance.
 
-## 2026-09-30 night — Claude Desktop (lead): IN PROGRESS — Map 0.8 overnight pass
+## 2026-09-30 night — Claude Desktop (lead): COMPLETE — Map 0.8 overnight pass
 The brief is `docs/TASKS/MAP_0_8_BRIEF.md` (the user's asks). Codex: don't edit on these branches; suggestions go in CLAUDE_HANDOFF.md.
 Worktrees next to the project, one branch each; the lead merges into `dev`:
 - `../ft-stairs` on `lead/stairs` (Sonnet): walkable stairs everywhere (sloped colliders in BuildingKit), the Halcyon Trust
@@ -772,3 +772,30 @@ Worktrees next to the project, one branch each; the lead merges into `dev`:
 - `../ft-lead` on `lead/controller` (lead): DONE. Steam signs in only when the online lobby opens, because Steam Input for
   the Spacewar test app can take the pad. There is a warning with the fix, and the walkthrough is updated.
 Then: merge all into dev, run the full regression plus GPU perf, bump to 0.8, build the zip, update the local build, push.
+
+### Map 0.8 results (all merged into `dev`, config/version 0.8)
+- **Stairs:**
+  - The player has no step-up, so the capsule snagged on every box step. Before the fix, 7 of 7 upward flights failed.
+  - Fix: every BuildingKit flight carries an invisible ~30° glide slab, so every staircase walks.
+  - player.gd also steps up curbs and single risers up to 0.2 m (0.45 m still blocks).
+  - Halcyon Trust's west stair now continues to a railed roof deck with a plant room.
+- **Prefabs:** `scripts/buildings/prefabs.gd` (BuildingPrefabs) holds 9 enterable seeded kinds, with the real player walking all their stairs.
+- **City** (`scripts/city_fill.gd`, world.gd):
+  - Enterable buildings 20/136 (14.7%) -> 242/293 (82.6%). The largest empty square is 92 m -> 44 m.
+  - Frontage lots and 5 m alleys, 3 dead-end streets, 142 chicane islands and hoardings, and street life.
+  - The radar draw_map now culls off-canvas shapes; it had been the draw-call sink.
+- **Controller:** Steam signs in only when the online lobby opens, with a warning and the Steam Input fix.
+- **Network:** door-sync index limit 1023 -> 8191 (the city has about 1,270 doors). week_flow checks they fit.
+- **Tests** (Windows, HEAD before build), all 0 failures:
+  - integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18, vehicles_06 24;
+  - map_06 150, city_detail 221, city_audit 813, building_landmarks 2419, sfx_audio 321, social_features 55;
+  - net_security 91, voice 87, remote_player 79, chat_ui 46, net_lobby_ui 84, week_flow 82, stair_walk 37;
+  - prefabs 903, city_fill 11; net_pair PASSED (68 host / 62 client).
+- **Perf** (RTX 3080, windowed): worst view 68 fps at 1,538 draw calls; every view 68–117 fps.
+  - The exe takes about 14 s to reach the title (city build) and uses about 1.9 GB RAM.
+- **Known gaps / next:**
+  - The central grid still has 350–500 m road sightlines; the target was none over 150 m.
+  - Lantern Row and Kingsway towers are still solid (0% enterable).
+  - About a quarter of the land is open rim.
+  - Startup time: consider building interiors lazily.
+  - `free_roam` with --fixed-fps 60 fails one wheelman check. That predates 0.8; normal mode passes.
