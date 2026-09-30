@@ -937,15 +937,16 @@ func _march(p: Vector2, dir: Vector2) -> Array:
 
 
 func _calm_ok(p: Vector2, q: Vector2, road_index: int) -> bool:
-	# The practice wheelman's downtown ring (world.road_loop, a square at +-85 m) stays free of chicanes.
 	# Both islands lie on this one straight stretch of the street.
 	for spot: Vector2 in [p, q, (p + q) * 0.5]:
 		if _road_at(spot) != road_index:
 			_why("c-bend")
 			return false
+	# Midtown itself (the square inside its ring roads, where the practice wheelman loops and the shops stand
+	# right on the kerb) keeps its open boulevards: no chicanes inside |x|, |z| <= 100.
 	for spot: Vector2 in [p, q, (p + q) * 0.5]:
-		var outline: float = maxf(absf(spot.x), absf(spot.y))
-		if minf(absf(spot.x), absf(spot.y)) < 96.0 and absf(outline - 85.0) < 9.0:
+		if absf(spot.x) <= 100.0 and absf(spot.y) <= 100.0:
+			_why("c-midtown")
 			return false
 	# Nothing solid already stands in the carriageway here (a wall or prop that intrudes on the road).
 	var along: Vector2 = (q - p).normalized()
