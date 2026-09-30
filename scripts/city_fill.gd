@@ -774,7 +774,7 @@ func _massing_box(tool: SurfaceTool, center: Vector2, size: Vector3, yaw: float,
 	# Godot's front faces wind clockwise; the sides are shaded a little darker than the roof.
 	var faces: Array = [[4, 7, 6, 5, 1.0], [0, 4, 5, 1, 0.8], [1, 5, 6, 2, 0.7], [2, 6, 7, 3, 0.8], [3, 7, 4, 0, 0.7]]
 	for face: Array in faces:
-		var shade: Color = color * float(face[4])
+		var shade: Color = color * float(face[4]) * 0.7
 		shade.a = 1.0
 		var normal: Vector3 = (corners[face[1]] - corners[face[0]]).cross(corners[face[2]] - corners[face[0]]).normalized()
 		for index: int in [0, 2, 1, 0, 3, 2]:
