@@ -379,7 +379,8 @@ func is_speaking(id: int) -> bool:
 	if not _peers.has(id):
 		return false
 	var entry: Dictionary = _peers[id]
-	return Time.get_ticks_msec() - int(entry["last_ms"]) < 400 and int(entry["mode"]) != Relay.Mode.CREW
+	# last_ms 0 means "never spoke here" (only phone frames so far), however young the process clock is.
+	return int(entry["last_ms"]) > 0 and Time.get_ticks_msec() - int(entry["last_ms"]) < 400 and int(entry["mode"]) != Relay.Mode.CREW
 
 
 ## Names of remote players heard in the last half second (for the HUD).
@@ -389,7 +390,8 @@ func speakers() -> PackedStringArray:
 		return out
 	var now: int = Time.get_ticks_msec()
 	for id: int in _peers.keys():
-		if now - int((_peers[id] as Dictionary)["last_ms"]) < 500:
+		var last_ms: int = int((_peers[id] as Dictionary)["last_ms"])
+		if last_ms > 0 and now - last_ms < 500:
 			out.append(("%s%s" % ["[radio] " if int((_peers[id] as Dictionary)["mode"]) == Relay.Mode.CREW else "", net.name_of(id)]).replace("[", "(").replace("]", ")"))
 		elif now - int((_peers[id] as Dictionary)["phone_ms"]) < 500:
 			out.append("(phone) %s" % net.name_of(id))
