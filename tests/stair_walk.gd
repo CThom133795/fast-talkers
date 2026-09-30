@@ -148,7 +148,7 @@ func _rises(route: Array) -> bool:
 
 
 func _run() -> void:
-	create_timer(165.0).timeout.connect(func() -> void:
+	create_timer(160.0, true, false, true).timeout.connect(func() -> void:
 		push_error("Stair walk suite timed out")
 		quit(2))
 	game = (load("res://main.tscn") as PackedScene).instantiate()

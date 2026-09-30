@@ -250,6 +250,18 @@ func _run() -> void:
 		car.occupied = false
 		car.queue_free()
 		await _frames(2)
+	# Stairs: every flight carries an invisible slope slab under the 46 degree floor limit (the player has no step-up).
+	var flights: int = 0
+	var gentle: int = 0
+	for slab: Node in world.find_children("GlideSlab", "CollisionShape3D", true, false):
+		flights += 1
+		var tilt: float = rad_to_deg(acos(clampf(((slab as CollisionShape3D).global_transform.basis.y).dot(Vector3.UP), -1.0, 1.0)))
+		if tilt > 20.0 and tilt < 40.0:
+			gentle += 1
+	_check(flights >= 12 and gentle == flights, "%d stair flights carry a glide slab, %d of them tilted 20-40 degrees (13 flights in the game)" % [flights, gentle])
+	# Halcyon Trust roof: one plant room door, and the deck is a real floor at the office roof height.
+	_check(_doors_for("Halcyon Trust plant room").size() == 1, "Halcyon Trust has one plant room door for the roof stair to reach")
+	_check(absf(_floor_at(tower.global_transform * Vector3(-11.0, Highrise.OFFICE_TOP, 1.0)) - (tower.global_position.y + Highrise.OFFICE_TOP)) < 0.02, "The Halcyon Trust roof deck is a floor at the office roof height")
 	_check_props()
 	world.queue_free()
 	await _frames(3)
