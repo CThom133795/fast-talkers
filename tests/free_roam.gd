@@ -97,8 +97,8 @@ func _run() -> void:
 	await _frames(2)
 	var focused: Control = root.gui_get_focus_owner()
 	_check(focused is Button and game.menu.is_ancestor_of(focused), "A pad press focuses a title-menu button")
-	# CREW, then PLAY ONLINE, then FREE ROAM.
-	for step: int in range(2):
+	# CREW, then PLAY ONLINE, then SOLO WEEK, then FREE ROAM.
+	for step: int in range(3):
 		await _pad(JOY_BUTTON_DPAD_DOWN)
 		await _frames(2)
 	await _pad(JOY_BUTTON_A)
@@ -348,7 +348,8 @@ func _run() -> void:
 	_check(game.car == sedan and sedan.occupied and player.in_vehicle and player.camera.current, "E enters the driver's seat of the nearest vehicle")
 	_check(not game.avatar.visible, "The first-person driver camera is clear of the local avatar's head")
 	game.car.crashed.connect(func(_strength: float): crashes += 1)
-	sedan.reset_car(Vector3(game.world.HALF + 5.0, 0.1, 35))
+	# 0.6: the east shore is far out, so start 40 m short of the quay on Union Street's east end.
+	sedan.reset_car(Vector3(366.0, 0.1, 35))
 	sedan.rotation.y = -PI * 0.5
 	await _frames(10)
 	Input.action_press("move_forward")
@@ -522,7 +523,11 @@ func _run() -> void:
 	_check(game.menu.visible and game.menu_stack.get_child_count() > 6, "The MODS tab lists attachments")
 	_check(not player.switch_weapon("smg"), "Cannot switch to a weapon you do not own")
 	game.buy_time_left = 0.05
-	await _frames(6)
+	# Wait for the phase change itself (up to ~2 s) rather than a fixed 6 frames, which flaked under CPU load.
+	for wait: int in range(120):
+		await _frames(1)
+		if game.phase == game.Phase.LIVE:
+			break
 	_check(game.phase == game.Phase.LIVE and player.can_fire and not game.buy_menu_open, "The round goes live when the buy timer runs out")
 	_check(not game._purchase("armor", 650) and not game._purchase_attachment("rifle", "suppressor"), "Purchases require the HQ counter after deployment")
 	# Street tips: a payphone rings, the call reveals a stash, the stash banks at HQ.

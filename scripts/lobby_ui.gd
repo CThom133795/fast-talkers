@@ -32,6 +32,10 @@ var _address_edit: LineEdit
 var _host_button: Button
 var _join_button: Button
 var _back_button: Button
+## Steam (optional): hidden unless GodotSteam is installed and Steam is running.
+var _steam_host_button: Button
+var _steam_note: Label
+var _invite_button: Button
 var _connect_status: Label
 var _connect_hint: Label
 var _lobby_title: Label
@@ -39,6 +43,8 @@ var _lobby_status: Label
 var _player_list: VBoxContainer
 var _crew_buttons: Dictionary = {}
 var _start_button: Button
+## Host only: a 3-Day Week instead of 5 (net.week_days).
+var _week_toggle: CheckButton
 var _leave_button: Button
 var _info_label: Label
 var _wait_label: Label
@@ -111,7 +117,13 @@ func _build_connect(parent: Control) -> void:
 	_name_edit = _line_edit("Player", FastNet.NAME_MAX)
 	_name_edit.text_changed.connect(func(_text: String) -> void: _save_config())
 	_connect_box.add_child(_name_edit)
-	_host_button = _button("HOST GAME", _on_host_pressed)
+	_steam_host_button = _button("HOST ON STEAM  (INVITE FRIENDS)", _on_steam_host_pressed)
+	_steam_host_button.visible = false
+	_connect_box.add_child(_steam_host_button)
+	_steam_note = _label("", 13, MUTED, true)
+	_steam_note.visible = false
+	_connect_box.add_child(_steam_note)
+	_host_button = _button("HOST BY IP  (LAN / DIRECT)", _on_host_pressed)
 	_connect_box.add_child(_host_button)
 	_connect_box.add_child(HSeparator.new())
 	_connect_box.add_child(_label("HOST ADDRESS", 12, MUTED))
@@ -123,7 +135,7 @@ func _build_connect(parent: Control) -> void:
 	_connect_box.add_child(_join_button)
 	_connect_status = _label("", 14, ALERT, true)
 	_connect_box.add_child(_connect_status)
-	_connect_hint = _label("Playing over the internet? Both install Tailscale and join the host's 100.x address, or forward UDP %d." % FastNet.PORT, 13, MUTED, true)
+	_connect_hint = _label("No Steam? Same network: join the host's LAN address. Over the internet: the host forwards UDP %d (or both use a VPN such as Tailscale)." % FastNet.PORT, 13, MUTED, true)
 	_connect_box.add_child(_connect_hint)
 	_back_button = _button("BACK", _on_back_pressed)
 	_connect_box.add_child(_back_button)
@@ -153,12 +165,22 @@ func _build_lobby(parent: Control) -> void:
 		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
 		grid.add_child(button)
 		_crew_buttons[crew] = button
-	_start_button = _button("START MATCH", _on_start_pressed)
+	_week_toggle = CheckButton.new()
+	_week_toggle.text = "Quick Week: Wednesday to Friday (3 Days)"
+	_week_toggle.add_theme_font_size_override("font_size", 14)
+	_week_toggle.toggled.connect(func(on: bool) -> void:
+		if net != null:
+			net.week_days = 3 if on else 5)
+	_lobby_box.add_child(_week_toggle)
+	_start_button = _button("START THE WEEK", _on_start_pressed)
 	_lobby_box.add_child(_start_button)
 	_wait_label = _label("Waiting for the host to start the match...", 14, TEAL, true)
 	_lobby_box.add_child(_wait_label)
 	_info_label = _label("", 13, MUTED, true)
 	_lobby_box.add_child(_info_label)
+	_invite_button = _button("INVITE STEAM FRIENDS", _on_invite_pressed)
+	_invite_button.visible = false
+	_lobby_box.add_child(_invite_button)
 	_leave_button = _button("LEAVE", _on_leave_pressed)
 	_lobby_box.add_child(_leave_button)
 
@@ -252,13 +274,26 @@ func _refresh_connect() -> void:
 	_connect_status.text = status_text
 	_connect_status.add_theme_color_override("font_color", ALERT if status_is_error else TEAL)
 	_connect_status.visible = not status_text.is_empty()
+	# One Steam button when Steam can be used; otherwise one plain line saying why.
+	var steam_reason: String = net.steam_unavailable_reason() if net.has_method("steam_unavailable_reason") else "Steam add-on not installed"
+	_steam_host_button.visible = steam_reason.is_empty()
+	_steam_host_button.disabled = connecting
+	_steam_note.visible = true
+	_steam_note.text = "Steam: friends accept your Steam invite, no addresses or ports." if steam_reason.is_empty() else "Steam play unavailable: %s." % steam_reason
 
 
 func _refresh_lobby() -> void:
 	var hosting: bool = net.is_host()
 	var me: int = net.my_id()
 	_lobby_title.text = "LOBBY" if not net.in_match else "MATCH IN PROGRESS"
-	_lobby_status.text = "You are hosting on port %d." % _net_port() if hosting else "Connected to the host."
+	var on_steam: bool = String(net.get("transport")) == "steam"
+	if on_steam:
+		_lobby_status.text = "You are hosting on Steam." if hosting else "Connected to the host over Steam."
+	else:
+		_lobby_status.text = "You are hosting on port %d." % _net_port() if hosting else "Connected to the host."
+	_invite_button.visible = hosting and on_steam
+	if status_text.begins_with("Starting a Steam lobby"):
+		status_text = ""
 	if not status_text.is_empty():
 		_lobby_status.text = status_text
 	# Players list.
@@ -294,12 +329,16 @@ func _refresh_lobby() -> void:
 		button.add_theme_color_override("font_color", color.lightened(0.25) if selected else INK)
 		button.add_theme_stylebox_override("normal", _style(Color("35453d") if selected else Color("1c2d30"), color if selected else Color("53645d"), 12))
 	_start_button.visible = hosting
+	_week_toggle.visible = hosting and not net.in_match
+	_week_toggle.set_pressed_no_signal(net.week_days == 3)
 	_start_button.disabled = net.players.size() < 1 or net.in_match
 	_wait_label.visible = not hosting
 	_wait_label.text = "Match in progress." if net.in_match else "Waiting for the host to start the match..."
 	# Host info: addresses, UPnP, hint.
 	_info_label.visible = hosting
-	if hosting:
+	if hosting and on_steam:
+		_info_label.text = "Friends join by accepting your Steam invite (or right-click you in Steam > Join Game). No addresses or ports needed."
+	elif hosting:
 		var addresses: PackedStringArray = net.local_addresses()
 		var lines: PackedStringArray = PackedStringArray()
 		if addresses.is_empty():
@@ -326,6 +365,8 @@ func _focus_first() -> void:
 			target.grab_focus()
 	elif net.is_connecting():
 		_back_button.grab_focus()
+	elif _steam_host_button.visible and not _steam_host_button.disabled:
+		_steam_host_button.grab_focus()
 	else:
 		_host_button.grab_focus()
 
@@ -374,6 +415,24 @@ func _on_server_closed() -> void:
 
 
 # ---------------------------------------------------------------- actions
+
+func _on_steam_host_pressed() -> void:
+	if net == null:
+		return
+	_apply_name()
+	_save_config()
+	var err: Error = net.host_steam(true)
+	if err == OK:
+		_set_status("Starting a Steam lobby... the Steam invite window opens next.")
+	else:
+		_set_status("Could not host on Steam: %s." % (net.steam_status if not net.steam_status.is_empty() else error_string(err)), true)
+	_refresh()
+
+
+func _on_invite_pressed() -> void:
+	if net != null:
+		net.invite_steam_friends()
+
 
 func _on_host_pressed() -> void:
 	if net == null:

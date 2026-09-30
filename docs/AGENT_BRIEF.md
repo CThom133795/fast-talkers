@@ -8,7 +8,7 @@ the codebase. Keep it current when architecture changes.
 - Godot (console build): `..\..\work\tools\godot\Godot_v4.4.1-stable_win64_console.exe`, relative to the project.
   From bash: `/c/Users/CThom/Documents/Codex/2026-09-28/i-want-to-create-a-game/work/tools/godot/Godot_v4.4.1-stable_win64_console.exe`
 - Exported game: `..\play-fast-talkers\Fast Talkers.exe`. Only the lead exports.
-- Backups (for diffs): `..\..\work\backup-*`. The project is **not** a git repo.
+- The project is a git repo (`CThom133795/fast-talkers`). Branches, owners and PR rules: `docs/WORKFLOW.md`.
 
 ## Engine and style
 - Godot 4.4.1, GDScript, GL Compatibility renderer, 60 Hz physics, no physics interpolation.
@@ -64,7 +64,7 @@ Run from the project dir, for example:
 - Networking contract: `docs/NET_M1_SPEC.md`.
 
 ## Cloud sessions
-Claude Code cloud sessions (Linux sandbox cloning the GitHub repo) work on disjoint files and open PRs to `master`.
+Claude Code cloud sessions (Linux sandbox cloning the GitHub repo) work on disjoint files and open PRs to `dev` (branches and owners: `docs/WORKFLOW.md`).
 - Full guide and rules: `docs/CLOUD.md`.
 - `bash tools/cloud_setup.sh` installs Godot 4.4.1 into `~/.godot-4.4.1/` and primes the class cache; then `export GODOT=...`.
 - `bash tests/run_all.sh [suite ...]` runs all suites headless (`timeout 170` each, soak at `--fixed-fps 60`) and prints a

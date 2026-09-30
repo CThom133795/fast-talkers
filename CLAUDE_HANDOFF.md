@@ -1,10 +1,22 @@
 # Project Fast Talkers — shared handoff
 
+**Goal for Claude Desktop: a multiplayer playtest tomorrow evening with 2+ players, with as many working features as possible, shipped as a .zip with a simple Steam (Spacewar) walkthrough. See the top of `docs/CLAUDE_DESKTOP_PICKUP.md`.**
+
+**Start with `docs/GAME_VISION.md`, a one-page picture of the game: a round-based deal-making game where a match is a Week and each round is a Day.**
+
+**Newest pickup (2026-09-30 overnight): branch `cloud/overnight-heavy-lift`. Read the "Overnight heavy lift" entry at the end of this file first. The paste-ready Claude Desktop command, which recreates the sub-agent split, is in `docs/CLAUDE_DESKTOP_PICKUP.md`.**
+
+**Earlier pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
+
+**Earlier local pickup: read `docs/VEHICLE_TIDY_HANDOFF.md`. The cabin/surface tidy pass is source-only until the normal-permission settings test and Windows export are rerun.**
+
 ## Shared objective
 Original low-poly round-based business-negotiation shooter, eventual Steam release.
 References for desired feel: Sub Rosa / No Big Deal round negotiations, GTA IV vehicle weight,
 Battlefield / BattleBit responsive gunplay, Arma Reforger grounded movement, CS2 round buying.
-PS2 / Xbox / GameCube visual era; low-end PCs; development storage budget 75 GB.
+PS2 / Xbox / GameCube visual era; development storage budget 75 GB.
+Performance target (user, 2026-09-30): 60+ fps on the user's RTX 3080 at normal settings. A POTATO MODE
+settings toggle serves bare-minimum PCs; it may hide decoration but never anything with collision.
 User confirmed typical matches: 12 players, 3 companies of 4. Large: 24 players, 4 companies of 6.
 Do not copy assets, maps, logos, characters, audio, or source code from those games.
 
@@ -46,7 +58,8 @@ Multiplayer design must revisit pause, equipment retention, friendly fire, and e
 Parse/import cleanly; boot; complete paid and hostile routes; test loss/reset and purchase limits;
 enter/exit safely; blocked exit and moving exit checks; no money from repeated delivery;
 camera ray and weapon aim agree; no client-trusted cash/hits in future network version.
-Performance numbers and 'potato PC' support are targets until hardware profiling establishes them.
+Performance is judged on the user's RTX 3080 (60+ fps). The old ~1,550 draw-call 'potato' budget is retired;
+keep batching sensible and use POTATO MODE (world.set_potato_mode) for minimum-spec machines.
 
 ## Next coordination point
 Codex is currently integrating and testing. Do not overwrite active code files.
@@ -88,6 +101,289 @@ Visual finding: `world.gd:1512` still paints a giant "MEETING POINT" on the stre
 ### 2026-09-29 15:55 EDT — Vehicle render review
 I pulled your new `car.gd` + `vehicle_kit.gd` into staging and captured the five-vehicle lineup. The external silhouettes are much more coherent (coupe, SUV and pickup read distinctly). Two capture issues: `capture_vehicles.gd` lineup_rear view at (10,1.6,52) is blocked by a large streetside post/new geometry, so move the review camera to actually show the rears; and the sedan driver's first-person `driver_chase` / `driver_driveby` views have a large opaque tan wedge along the left quarter of the screen that obscures the road. Please check the new interior/side shell geometry against the existing driver eye point, and adjust mesh or seat eye so the driver has a clear forward view while keeping pillars/doors as real cover.
 
+---
+
+## 2026-09-29 session — Codex COMPLETE: city detail, slower cars, diner and motel
+
+Continue from cloud/map-integration (draft PR #1), not the map-only branch or master.
+Full current handoff: docs/CITY_DETAIL_HANDOFF.md. Codex releases the changed files for Claude's next coordinated pass; earlier IN PROGRESS/ownership notes above are historical.
+
+Built eight public spaces with 85 static furniture pieces, marked parking, protected park entrances, modest speed/acceleration reductions for all five vehicle types, a walk-in diner and a starter motel lobby/two rooms. Reused world batching and BuildingKit. No new core deal/trust/social mechanics implemented: those remain proposals per the user's explicit request. Same build required on every multiplayer machine.
+
+Validation: 1,075 passing assertions, 6,000-frame soak, localhost host/client rounds, rendered screenshots and release startup. Busy downtown still exceeds the ~1,550 draw-call target. User will test friends tomorrow; genuine internet/human balance remains unverified. Next priority is that test and measured visibility/material optimization, then extend motel/diner and remaining placeholder landmark interiors. Preserve both exits, crew route fairness, deterministic creation order and actual collision tests.
+
+My take: make Halcyon memorable through recognizable ordinary places and choices of approach/escape. Players should invent stories and meeting locations. Keep original art, readable low-poly silhouettes and purposeful detail. No official meeting zones or copied game appearance.
+
+---
+
+## 2026-09-30 overnight — Cloud Claude: overnight heavy lift (branch `cloud/overnight-heavy-lift`)
+
+Branched from `origin/cloud/map-integration` at `de11b76`. Draft PR targets `cloud/map-integration`, never `master`.
+Nothing here was run on Windows or a GPU. Captures and draw-call counts come from Xvfb with Mesa llvmpipe
+(software OpenGL) on the Compatibility renderer. Treat the counts as renderer counts; the frame times mean nothing.
+No executable was exported or modified.
+
+**User direction captured this session.** Performance target is the user's RTX 3080 at 60+ fps; the old potato budget is retired
+(see the top of this file). A POTATO MODE setting exists for minimum-spec PCs. Mood: "a world paused in time, ripe for deals and
+deceptions" (late 1999). Steam play with friends should be as simple as possible for the end user. Guns should sound gritty and
+boomy, with no "childish beeps".
+
+### What landed (one commit per workstream; see `git log origin/cloud/map-integration..cloud/overnight-heavy-lift`)
+
+1. **Landmark interiors (lead).** All on the existing BuildingKit; no new prefab system.
+   - `scripts/buildings/nightclub.gd`, CLUB VOLTAGE. Street queue rope and canopy; lobby with coat check and cover charge;
+     a 7×6 emissive dance floor; raised DJ booth with speaker stacks; a 13 m bar; lounge booths; a VIP mezzanine reached by a
+     railed stair; back of house with stock and office. Exits: front, alley and side fire door.
+   - `scripts/buildings/stripclub.gd`, THE VELVET ROOM. Tasteful, with no people or imagery. Windowless neon front; cashier booth;
+     stage, runway and poles; horseshoe booths; bar; dressing room; office with safe. Exits on both side alleys.
+   - `scripts/buildings/hotel.gd`, HOTEL MERIDIAN ground floor under a sealed tower. Reception with key cubbies, lounge, lobby bar
+     with its own street door, lift lobby, back of house and a coffered ceiling. The lift cars are not fitted and are signed
+     "service suspended".
+   - `scripts/buildings/garage.gd`, CENTRAL PARKING. Three decks with two 11.7° ramps that a sedan can drive; tested to the roof.
+     Two offset U-stairs, parapets, ticket booth, dust-sheeted static cars.
+   - `scripts/buildings/highrise.gd`, HALCYON TRUST. Lobby plus a second-floor claims office with two working lifts
+     (`kit.lift`, lobby↔2) and two U-stairwells at opposite corners; sealed 18-storey tower above.
+   - `scripts/buildings/motel.gd`, SEA BREEZE upper storey. Rooms 201–204 on a railed roof walkway reached by independent
+     east and west stairs; VACANCY pole sign. The drained pool still has no space on this 32×28 plot.
+   - `scripts/buildings/burger.gd` plus `neighborhood_rooms.gd`. Drive-through lane with a glass pickup window, menu board and
+     speaker; pole sign; awning; rooftop plant. `shell()` gained an optional `east_openings` argument.
+   - **Fixes.** Interior floors were buried under the 0.16 m block plinth, so the street paving showed indoors. Club, strip club,
+     hotel and high-rise floors now sit at 0.17 m, and the diner/motel overlay moved up. `BuildingKit.stairs_u` started its return
+     flight at the landing's far edge; it is fixed, and the garage was its only caller.
+   - `scripts/main.gd` interior sound beds: club bass in both clubs, room tone elsewhere, hall reverb in the garage. The garage roof
+     and the motel walkway count as outdoors.
+2. **City audit and draw calls (city agent).** Files: `scripts/world.gd`, `scripts/city_detail.gd`, `scripts/mesh_merge.gd`,
+   `tests/city_audit.gd`, `docs/OVERNIGHT_CITY_PERF.md`.
+   - Per-district shadow proxy, plus a clutter render layer that neon lights skip.
+   - Software-GL draw calls: Midtown 1,741 → 1,235; north long view 2,027 → 1,499; Motor Mile 1,739 → 1,237; gun store
+     1,593 → 1,079; Exchange interior ≈1,693 → 1,094.
+   - Audit fixes: plinths on North Shore Road, floating picnic furniture (`world.surface_height`), repeated signs, empty
+     promenade, z-fighting park paths, sunk props.
+   - 1999 dressing: posters, window AC units, FOR LEASE shutters, clocks stopped at 11:59, boarded windows, rooftop plant,
+     alley dumpsters, tyres, pallets, bunting, leaf drifts, oil stains.
+   - `world.set_potato_mode(enabled)` hides only collision-free decor; the audit checks collision parity between modes.
+3. **Vehicles (vehicle agent).** Files: `scripts/car.gd`, `scripts/vehicle_kit.gd`, `tests/vehicle_art.gd` (64 → 110 checks),
+   `tests/capture_cabins.gd`, `docs/VEHICLE_TIDY_HANDOFF.md` ("Overnight pass").
+   - Fixed: footwell hole, floating SUV/pickup seats, steering-wheel sight line, wheels proud of the body, wheel-well liners
+     through the tyres, painted arch tunnels across the cabin, door seams in the arches, z-fighting.
+   - Added: mirror, visors, plates, pickup mud flaps.
+   - Driving, seat, door, glass and network APIs are unchanged.
+4. **Audio (audio agent).** Files: `scripts/sfx.gd`, `tests/sfx_audio.gd` (321 checks), `docs/AUDIO_PASS.md`.
+   - All 15 guns rebuilt: gritty crack, sub-bass boom, saturation and street slap; `_far` twins.
+   - Sine "beeps" removed from bolt, pump, mag, draw, dry-fire, shell and cylinder.
+   - New sounds: briefcase, cash, payphone, car door and engine, per-surface footsteps, 1999 ambience beds.
+   - New API: `play_shot_at` and `set_space`.
+   - Listen to `work/audio/*.wav`; regenerate them with `SFX_DUMP=1 godot --headless --path . --script res://tests/sfx_audio.gd`.
+     Nobody has listened to them yet.
+5. **Network security and Steam (network agent).** Files: `scripts/net.gd`, `scripts/online.gd`, `scripts/lobby_ui.gd`,
+   `scripts/remote_player.gd`, new `scripts/net_security.gd`, new `scripts/steam_transport.gd`, `tests/net_security.gd`
+   (91 checks), `docs/NETWORK_SECURITY_AND_STEAM.md`.
+   - Security: host-validated relays; build-tagged handshake; rate limits, strikes and kicks; bounded snapshots; seat-0 car
+     ownership; damage caps; killer attribution limits; string clipping.
+   - The optional Steam (App 480 "Spacewar") transport is **written but unvalidated**: no Steam client or GodotSteam exists in
+     the cloud. ENet stays the default.
+   - `lobby_ui.gd`, `remote_player.gd` and `tests/remote_player.gd` are CRLF files. `git diff --check` flags only their CR
+     endings; `git -c core.whitespace=cr-at-eol diff --check` is clean.
+6. **Gameplay (feature agent, after SubRosa / No Big Deal research).** Files: `scripts/main.gd`, `scripts/player.gd`,
+   `scripts/character_model.gd`, `tests/social_features.gd`, `docs/SUBROSA_NBD_RESEARCH.md`.
+   - Hands up (X): a readable, honest peace signal, synced by state flag 128.
+   - Binoculars (hold Z).
+   - Contract round report.
+   - POTATO MODE setting.
+   - Audio hooks wired.
+   - Deal and round rule changes (inspect-trade, anti-turtling clock, crew spectating, case-carrier cue) stay **proposals** for
+     the user to decide.
+
+7. **Voice chat (audio agent, at the user's explicit request; this overrides the earlier "no voice" rule).** Files: new
+   `scripts/voice.gd`, `scripts/voice_codec.gd`, `scripts/voice_relay.gd`, `tests/voice.gd` (87 checks), `docs/VOICE_CHAT.md`;
+   changes to `scripts/net.gd`, `scripts/main.gd`, `scripts/net_security.gd` (PROTOCOL 3 → 4) and `project.godot`
+   (`audio/driver/enable_input=true`).
+   - Open-mic proximity is the default and the intended way to play; the settings toggle reads "Open mic (recommended)".
+   - Proximity push-to-talk is optional, on **N**.
+   - Holding **Y** sends to the talker's crew only, at any distance, and mutes the talker in proximity. The host enforces this.
+   - V and B were already bound, which is why the keys differ from the brief.
+   - People inside a building hear each other; passers-by outside do not, except muffled within 4 m of the same open doorway.
+   - The dead and the living are kept apart.
+   - Codec: 16 kHz IMA-ADPCM, about 65 kbit/s per talker while speaking and nothing in silence.
+   - All voice goes through the host, which validates it and relays it within 35 m.
+   - **Untested:** a real microphone, a 2-PC run and echo. No echo cancellation or jitter buffer yet; headsets are recommended.
+     See the Windows checklist in `docs/VOICE_CHAT.md`.
+
+8. **Interior props (props agent).** Files: `scripts/buildings/*` (BuildingKit adds `begin_props`, `prop`,
+   `display_gun`, `prop_crt` and similar), `scripts/interiors.gd`, `tests/building_landmarks.gd` (204 checks),
+   `docs/INTERIOR_PROPS.md`.
+   - Halcyon Arms: a pegboard of 72 display guns (not usable, no collision) plus counters, ammo, holsters and signs.
+   - Every landmark and all 12 Midtown shops get props matching their trade.
+   - Props sit in a per-building `Props` node: merged, no collision or shadow, 34 m draw range, group `potato_optional`.
+   - Potato mode hides them; cover keeps its collision.
+   - Cost at worst is about 77 draw calls in the gun store; a shared palette material would cut it.
+9. **Outdoor anti-slop, pass 2 (city agent).** Files: `scripts/city_detail.gd`, `scripts/world.gd` (`park_rails`),
+   `scripts/retro_textures.gd`, `tests/city_detail.gd` (217), `tests/city_audit.gd` (72),
+   `docs/OVERNIGHT_CITY_PERF.md` ("Anti-slop pass 2").
+   - 44 roadside rail runs on 5 parks and plazas: a curb, posts, mid rail and top rail, with collision matching what is
+     drawn.
+     - A sedan at full throttle stops short of them.
+     - Entrances stay open; each park keeps 4 walkable openings.
+     - They are never hidden in potato mode.
+   - 98 street-name signs at named crossings.
+   - Seeded large-scale texture variation breaks up tile grids.
+   - Draw calls rose modestly: Midtown 1,235 → 1,322, mostly from sign text. Drawing the text into a texture is the
+     fix if it matters.
+   - Not done: bus shelters, avenue planters, manholes, and wider crosswalk and hydrant checks.
+
+### Tests (Linux cloud, Godot 4.4.1 headless)
+`bash tests/run_all.sh` on the final tree (19 suites): 1,827 assertions in 17 counted suites, plus the 6,000-frame soak
+and the two-process net_pair. Every suite passed in the final full run except free_roam, which was then fixed (below)
+and re-run alone three times, passing each time:
+
+| Suite | Checks | Suite | Checks |
+|---|---:|---|---:|
+| vehicle_art | 110 | building_landmarks (new) | 204 |
+| vehicles_06 | 24 | sfx_audio (new) | 321 |
+| integration | 66 | social_features (new) | 29 |
+| free_roam | 137 | net_security (new) | 91 |
+| wiring_05 | 18 | voice (new) | 87 |
+| map_interiors | 97 | remote_player | 74 |
+| map_06 | 150 | chat_ui | 46 |
+| city_detail | 217 | net_lobby_ui | 84 |
+| city_audit (new) | 72 | | |
+
+- **free_roam timing fix.** In the final full run, free_roam failed 2 checks: "round goes live when the buy timer runs out"
+  and the purchase check after it. They failed in 2 of 4 runs under load, because the test waited only 6 frames for a
+  0.05 s timer. The test now waits up to about 2 s for the phase change and passed 3 of 3 runs. The game code is unchanged.
+- soak: 6,000 frames, PASS.
+- net_pair (two-process localhost host and client, lobby and round): PASS.
+- `git diff --check` flags only CR line endings in three files that were already CRLF; `git -c core.whitespace=cr-at-eol diff --check` is clean.
+- Not run: Windows, GPU, real Steam, internet play with real players, listening to the audio.
+
+### Captures (software GL; review, not GPU validation)
+- `docs/captures/overnight/interiors/*.jpg`: club, strip club, hotel, garage, burger lot, motel.
+- `docs/captures/overnight/city/*.jpg`: city dressing.
+- `docs/captures/overnight/vehicles/*.png`: cabins.
+- Regenerate them with `tests/capture_interiors.gd [-- only=<prefix>]`, `tests/capture_cabins.gd`, `tests/capture_map06.gd -- only=detail`
+  and `tests/capture_perf.gd`. Output goes to the ignored `work/captures/`.
+- High-rise captures: `tower_street`, `tower_lobby`, `tower_office` and `tower_conference` in `docs/captures/overnight/interiors/`.
+
+### Known limitations and open issues
+- **Gun store vs Coast Road: fixed.** Coast Road ran through the Halcyon Arms range yard and past the long-range plates.
+  It now swings east round the yard: (386,-105) → (388,-22) → (340,-22), rejoining its old line at x 340. The range is unchanged.
+  `building_landmarks` checks the road stays clear, and `city_audit` no longer needs the exception.
+- **Gun store roof doesn't render in software-GL interior captures.** Sky shows and sunlight reaches the shop floor.
+  Other ceilings render. A probe shows the roof is present in `GunStore/Merged` (AABB up to y 8), with
+  `cast_shadow` off and shadows in `ShadowProxy`. That node is unusually large (68 × 146 m, because it includes the
+  range yard). Suspects: the new per-district shadow proxy or mesh merging on a very large node, or index overflow in
+  the merge. Check on the GPU first. If it reproduces, split the yard into its own node or check `MeshMerge` for
+  vertex limits.
+- **Strip ring road meets the beach rock revetment** at about (24, 400). Also KNOWN in `city_audit`.
+- **Props sunk 16 cm into the plinth** in the hotel, high-rise, burger, motel and nightclub lots. `city_audit` REPORTs them without
+  failing. Use `world.surface_height()` for exterior solid props.
+- Hotel guest floors, the hotel lift and stair, the motel pool, high-rise floors 3–18 and any roof access are not built.
+- Surface-aware footsteps are not wired: there is no reliable surface lookup yet. Several new sounds have no trigger yet; see
+  `docs/AUDIO_PASS.md`.
+- Security gaps that remain: movement and health are still client-side; the host is fully trusted; ENet traffic is unencrypted;
+  door toggles have no distance check.
+- `free_roam`'s "round goes live when the buy timer runs out" check was flaky under heavy parallel load (it waits 6 frames for a
+  0.05 s timer). It passed on every unloaded run.
+- `Run Tests.cmd` was not edited here; Claude Desktop takes it over (see `docs/CLAUDE_DESKTOP_PICKUP.md`) and adds the new suites: `voice`, `city_audit`,
+  `building_landmarks`, `sfx_audio`, `social_features`, `net_security`.
+
+### The Week and Day mindset (read before any gameplay work)
+
+A **match is a Week**, and each **round is a Day**, Monday to Friday. As of this branch, **no Week structure exists in
+code**: `main.gd` and `online.gd` run standalone rounds, with no weekday names, no carry-over state and no week standings.
+Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. Suggestions to align everything with it:
+
+- **Vocabulary everywhere.** Say "Week" and "Day" (not match and round) in the UI, docs, test names and code comments
+  going forward:
+  - the HUD shows "TUESDAY, DAY 2 OF 5" and a clock;
+  - the result screen is "END OF DAY";
+  - after Friday comes "END OF WEEK" with standings.
+- **One server-owned `week_state`:**
+  - day index, crew banks, carried gear per player (CS rule: survivors keep gear, the dead restart with the free
+    pistol), the deals board;
+  - overnight escrow/collateral, grievances and settlements, quota and audit, loans.
+
+  The host owns it; clients get snapshots. It must survive a player disconnecting and rejoining mid-week (match by
+  Steam ID or name plus crew).
+- **Day rhythm is a ritual:**
+  - morning lineup: the HQ phone rings with the day's contract, any sit-down offers and the audit call;
+  - buy phase, then street, then settle;
+  - "the morning paper": a 10–15 s recap card between days (yesterday's honoured and broken deals, who got robbed,
+    which district got loud).
+
+  The recap turns yesterday into today's grudges and offers.
+- **Days differ on purpose.**
+  - Monday is low stakes: a smaller contract that teaches the roster who is who.
+  - Wednesday is the pivot: audit call, standings shown, loan offers.
+  - Thursday sets up Friday: insider info is earned.
+  - Friday is always the Dead Drop climax.
+
+  Contract value should rise through the week, so honesty early is cheap and betrayal late is expensive.
+- **Consequences cross the night.**
+  - Collateral releases and interest pay "at 9:00 next morning".
+  - Reputation marks and settlements last the whole Week and reset for the next Week.
+  - Nothing persists past the Week except cosmetics and stats.
+- **Everyone plays to Friday.** Risk-based catch-up (the loan shark), a quota raise for the
+  leader, and no elimination before Friday. At most, a crew that misses its quota is "restructured" (NBD-style
+  replacement) at the Week's end.
+- **Tests should speak Week.** Add a `week_flow` headless suite: run 5 days quickly (short timers), assert that money
+  and gear carry correctly, that the dead restart with a pistol, that Friday forces the Dead Drop, that the standings
+  are right, and that a rejoining player gets their state back. Extend `net_pair` with a two-day step.
+- **Settings and lobby.** The host picks the Week length (5 days default; 3 for a quick session) and day length (9:00
+  street default). Store both in the week state so every peer agrees.
+
+### Phones and roles (the user's correction, 2026-09-30)
+There is **no Boss**. One crew phone sits in each HQ spawn, and whoever grabs it makes the calls. **Street payphones are
+distractions** that stir unrest and pull crews across each other's paths; they are not a reliable information or catch-up
+system. `docs/MULTIPLAYER_DESIGN.md` §4 (the optional Boss role, and tips as tradeable information) is superseded on
+these points. See `docs/GAME_VISION.md`.
+
+### Inventory (the user's proposal, 2026-09-30; not built)
+Weapons stay as they are. Each player carries **one trade item** (a briefcase, the Project/Ledger or a cash bundle;
+a second is refused until the first is dropped) and, separately, the **crew phone**. Each drops independently:
+**G** for the trade item (already today's drop key) and **K** for the phone. Both are server-owned objects and fall
+on death. Details are in `docs/GAME_VISION.md` ("Inventory").
+
+### The user's decisions (2026-09-30, binding)
+
+1. **Carrying a trade item limits you to your sidearm.** While holding a briefcase, the Project or a cash bundle you can
+   draw and fire only the sidearm slot; the primary is slung. Dropping the item (G) restores the primary.
+2. **Build all trust systems that make logical sense and keep players engaged.** In `docs/DESIGN_WEEK_TRUST.md` terms,
+   that means all of them:
+   - W0, the Week foundation, first;
+   - then A (Sit-Down call), B (overnight collateral), C (noise is news), D (the comeback lifeline), E (the audit call),
+     F (honour pays on Friday), G (Broker joint jobs), H (readable intent: handshake, caller ID, deals board) and
+     I (conduct floor);
+   - in the T0–T5 order after the playtest zip is stable;
+   - each host-validated, with a `week_flow` or trust test, and with abuse counters as written.
+3. **Friday is always a bloodbath.** The Dead Drop has no truce rules. Trust systems pay out on Friday (F gives early
+   intel; collateral from Thursday settles Friday morning) but never restrain Friday's violence.
+4. **The comeback lifeline (D)** was an open choice between two versions:
+   - a **Loan Shark** phone call: borrow cash mid-week, repay with interest on Friday;
+   - a **Pawn Shop**: sell your carried gear for quick cash.
+
+   **Decided: build the Loan Shark.** The user finds it a fun way to keep the pace going. Keep the Pawn Shop on the
+   table as a possible later addition (it could sit alongside the loan shark), but don't build it now.
+
+### Interim-lead design proposal: trust and the Week
+`docs/DESIGN_WEEK_TRUST.md` diagnoses why Sub Rosa and No Big Deal weeks collapse mid-week, and proposes phone-driven
+tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire rumours on payphones,
+a loan-shark lifeline, the audit call, and honour paying on Friday. It also gives an order of work (T0–T5) and playtest
+metrics. **Design only; the user decides before any code.**
+
+### Claude Desktop: next steps
+1. `git fetch origin && git checkout cloud/overnight-heavy-lift`. Keep your local Windows-only files. Review the diff per commit.
+2. Run the suites on Windows: `Run Tests.cmd` (after adding the six new suites above), and `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
+3. On the RTX 3080, run `tests/capture_perf.gd` windowed and confirm 60+ fps in the busiest views. Toggle POTATO MODE and compare.
+4. Walk the new interiors, ride the high-rise lifts, drive up the garage, and listen to the guns, reloads and interior beds.
+5. Steam: follow `docs/NETWORK_SECURITY_AND_STEAM.md`. Install a GodotSteam build that matches 4.4.1, put `steam_appid.txt` (480)
+   beside the project and the exe, and run the two-PC checklist. `create_host` and `create_client` arguments are the likeliest
+   thing to need adjusting.
+6. Drive the rerouted Coast Road round the gun store. Then walk the user through `docs/DESIGN_WEEK_TRUST.md` §7
+   and `docs/SUBROSA_NBD_RESEARCH.md`. Build the Week structure (week_state, weekday HUD, morning recap, `week_flow`
+   tests) first, then the approved trust proposals in T0–T5 order.
+7. Only after local validation: export, smoke-test, and decide whether to merge into `cloud/map-integration`. Never merge into `master`
+   from here.
 
 ---
 
@@ -186,3 +482,17 @@ The user wants three distinct but compatible ways to test the same core game loo
    - This is the highest-value test for the core design thesis and should ultimately be the source of truth for balance decisions.
 
 Architect these as different population configurations of the **same match/round/contract state machine**, not three separate game modes with duplicated logic. The ideal flow is that the developer changes only the player/bot population and debug affordances, while Monday–Friday progression, objectives, economy, scoring, round resolution and week reset remain identical.
+
+## 2026-09-30 — Claude Desktop picked up the overnight heavy lift (results)
+Everything the cloud session left runs on Windows: all 19 suites and the two-process online round are green. On top of
+it, 0.7 adds:
+- GodotSteam (Spacewar 480), with the host verified on real Steam;
+- the Week;
+- crew phones;
+- one trade item with the sidearm rule;
+- SOLO WEEK;
+- the nervous client;
+- host telemetry.
+
+Exact results and the next queue: the COMPLETE entry at the end of `CODEX_HANDOFF.md`. Design choices:
+`docs/LEAD_DESIGN_DECISIONS.md`. The branch workflow is new (`dev` is the integration branch; PRs go there): `docs/WORKFLOW.md`.

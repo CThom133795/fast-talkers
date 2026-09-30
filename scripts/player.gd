@@ -14,6 +14,8 @@ signal died
 signal damaged(amount: float, source: Vector3)
 signal footstep(loud: bool)
 signal landed(speed: float)
+## Social gesture changed (hands up = weapon away, cannot fire). For replication to others.
+signal gesture_changed(hands_up: bool)
 
 const WALK_SPEED: float = 4.3
 const SPRINT_SPEED: float = 6.5
@@ -26,6 +28,8 @@ const JUMP_SPEED: float = 4.7
 const STAND_HEIGHT: float = 1.8
 const CROUCH_HEIGHT: float = 1.15
 const BODY_RADIUS: float = 0.30
+## Highest curb or single riser the player walks up without jumping (_try_step_up).
+const STEP_UP_MAX: float = 0.2
 const BASE_FOV: float = 85.0
 const STAND_EYE: float = 1.62
 const CROUCH_EYE: float = 1.02
@@ -154,6 +158,9 @@ var ammo: int = 12
 var reserve: int = 48
 var weapon_id: String = "pistol"
 var owned: Array[String] = ["pistol"]
+## Carrying a trade item (case, Ledger, cash): only the sidearm (pistol class) can be drawn or fired.
+## Owned primaries stay slung. Set through `set_sidearm_only`; cleared by death and `reset_player`.
+var sidearm_only: bool = false
 var infinite_reserve: bool = false
 var regenerate: bool = false
 var invulnerable: bool = false
@@ -162,6 +169,11 @@ var stamina: float = 100.0
 var camera: Camera3D
 var mouse_sensitivity: float = 0.0023
 var base_fov: float = BASE_FOV
+## Held binoculars: a narrow field of view for scouting a meeting; the weapon is lowered.
+var binoculars: bool = false
+const BINOCULAR_FOV: float = 16.0
+## Hands up: a readable peace signal. The weapon is put away and cannot fire or reload.
+var hands_up: bool = false
 var aiming: bool = false
 var crouching: bool = false
 var sprinting: bool = false
@@ -290,6 +302,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		# Aim is applied immediately; ADS scales sensitivity with the zoomed field of view.
 		var zoom_scale: float = lerpf(1.0, camera.fov / base_fov, ads_blend)
+		if binoculars:
+			zoom_scale = camera.fov / base_fov
 		var sensitivity: float = mouse_sensitivity * zoom_scale
 		_turn(-motion.screen_relative.x * sensitivity)
 		_pitch = clampf(_pitch - motion.screen_relative.y * sensitivity, -1.48, 1.48)
@@ -408,19 +422,43 @@ func _physics_process(delta: float) -> void:
 		_stamina_delay = 0.65
 	else:
 		velocity.y = 0.0
+	_try_step_up(delta)
 	move_and_slide()
 	_track_steps(delta)
 	_weapon_input(controls_active)
 
 
+## Curbs, plinths and single risers up to STEP_UP_MAX: lift the body over a ledge that blocks the way
+## (stairs carry their own glide slabs in BuildingKit). A wall still blocks: lifted, the move must be clear.
+func _try_step_up(delta: float) -> void:
+	if not is_on_floor() or velocity.y > 0.01:
+		return
+	var motion: Vector3 = Vector3(velocity.x, 0.0, velocity.z) * delta
+	if motion.length() < 0.001:
+		return
+	var here: Transform3D = global_transform
+	if not test_move(here, motion):
+		return
+	# Probe a little ahead: one frame's motion would land the rounded capsule bottom on the ledge's edge,
+	# whose tilted contact normal reads as a wall.
+	var probe: Vector3 = motion.normalized() * maxf(motion.length(), 0.15)
+	var lifted: Transform3D = here.translated(Vector3.UP * STEP_UP_MAX)
+	if test_move(here, Vector3.UP * STEP_UP_MAX) or test_move(lifted, probe):
+		return
+	var landing: KinematicCollision3D = KinematicCollision3D.new()
+	var hit: bool = test_move(lifted.translated(probe), Vector3.DOWN * (STEP_UP_MAX + 0.02), landing)
+	if hit and landing.get_normal().y >= cos(floor_max_angle):
+		global_position.y += STEP_UP_MAX + landing.get_travel().y
+
+
 func _update_aim(delta: float, controls_active: bool) -> void:
-	aiming = controls_active and allow_ads and Input.is_action_pressed("aim") and not reloading and _draw_time <= 0.0
+	aiming = controls_active and allow_ads and Input.is_action_pressed("aim") and not reloading and _draw_time <= 0.0 and weapon_ready()
 	var ads_time: float = float(_stats.get("ads_time", 0.18))
 	ads_blend = move_toward(ads_blend, 1.0 if aiming else 0.0, delta / ads_time)
 
 
 func _weapon_input(controls_active: bool) -> void:
-	if not controls_active:
+	if not controls_active or not weapon_ready():
 		return
 	if Input.is_action_just_pressed("reload"):
 		_start_reload()
@@ -507,6 +545,24 @@ func weapon_stats() -> Dictionary:
 	return _stats
 
 
+## False while the hands are up or the binoculars are raised: no firing, no reloading.
+func weapon_ready() -> bool:
+	return not hands_up and not binoculars
+
+
+## Raises or lowers the hands. Returns true when the state changed.
+func set_hands_up(value: bool) -> bool:
+	if value == hands_up or (value and (_dead or in_vehicle)):
+		return false
+	hands_up = value
+	if value:
+		aiming = false
+		ads_blend = 0.0
+		reloading = false
+	gesture_changed.emit(hands_up)
+	return true
+
+
 func is_scoped() -> bool:
 	return bool(_stats.get("scope", false)) and ads_blend > 0.82 and (not in_vehicle or seat_can_shoot) and not _dead
 
@@ -528,6 +584,8 @@ static func is_primary(id: String) -> bool:
 
 
 func _try_fire() -> void:
+	if not weapon_ready():
+		return
 	if _cooldown > 0.0 or _draw_time > 0.0 or not enabled or not can_fire or _dead or hold_fire:
 		return
 	if in_vehicle and not seat_can_shoot:
@@ -632,6 +690,13 @@ func equip(id: String) -> void:
 		id = "pistol"
 	if not owned.has(id):
 		owned.append(id)
+	if sidearm_only and is_primary(id):
+		# Bought while carrying a trade item: it goes slung, full, and the sidearm stays in hand.
+		var stats: Dictionary = compute_stats(id)
+		_ammo_state[id] = Vector2i(int(stats["capacity"]), int(stats["reserve"]))
+		if is_primary(weapon_id) or not owned.has(weapon_id):
+			_draw_sidearm()
+		return
 	_ammo_state.erase(id)
 	_select(id)
 	ammo = int(_stats["capacity"])
@@ -692,7 +757,35 @@ func set_loadout(ids: Array) -> void:
 	equip(owned[owned.size() - 1])
 
 
+## Trade-item rule: while `on`, primaries are slung and only the pistol class works. Turning it on with a
+## primary drawn switches to the owned sidearm (adding a P9 if there is none). Turning it off does not
+## auto-switch: the player draws the primary again themselves.
+func set_sidearm_only(on: bool) -> void:
+	sidearm_only = on
+	if on and is_primary(weapon_id):
+		_draw_sidearm()
+
+
+## Draws the pistol-class weapon for the trade-item rule.
+func _draw_sidearm() -> void:
+	var sidearm: String = owned_in_class("pistol")
+	if sidearm.is_empty():
+		sidearm = "pistol"
+		owned.append(sidearm)
+	if weapon_id == sidearm:
+		return
+	if not switch_weapon(sidearm):
+		# Dead, or otherwise unable to animate a draw: the state must still be sidearm-only.
+		_ammo_state[weapon_id] = Vector2i(ammo, reserve)
+		_select(sidearm)
+		var saved: Vector2i = _ammo_state.get(sidearm, Vector2i(int(_stats["capacity"]), int(_stats["reserve"])))
+		ammo = mini(saved.x, int(_stats["capacity"]))
+		reserve = saved.y
+
+
 func can_use(id: String) -> bool:
+	if sidearm_only and is_primary(id):
+		return false
 	if not in_vehicle:
 		return true
 	return seat_can_shoot and (not seat_one_hand or is_one_hand(id))
@@ -774,6 +867,7 @@ func take_damage(amount: float, source: Vector3 = Vector3.INF) -> void:
 	damaged.emit(amount, source)
 	if health <= 0.0:
 		_dead = true
+		sidearm_only = false
 		enabled = false
 		reloading = false
 		aiming = false
@@ -781,6 +875,7 @@ func take_damage(amount: float, source: Vector3 = Vector3.INF) -> void:
 
 
 func reset_player(pos: Vector3) -> void:
+	sidearm_only = false
 	global_position = pos
 	velocity = Vector3.ZERO
 	health = 100.0
@@ -791,6 +886,8 @@ func reset_player(pos: Vector3) -> void:
 	_dead = false
 	_death_tilt = 0.0
 	enabled = true
+	binoculars = false
+	set_hands_up(false)
 	aiming = false
 	ads_blend = 0.0
 	sprinting = false
@@ -947,6 +1044,8 @@ func _update_camera(delta: float) -> void:
 	var target_fov: float = lerpf(base_fov, float(_stats["fov"]), ads_blend * ads_blend * (3.0 - 2.0 * ads_blend))
 	if sprinting:
 		target_fov += 4.0
+	if binoculars and not _dead:
+		target_fov = BINOCULAR_FOV
 	camera.fov = lerpf(camera.fov, target_fov, 1.0 - exp(-delta * 20.0))
 
 
@@ -954,7 +1053,7 @@ func _update_weapon_visuals(delta: float) -> void:
 	if not is_instance_valid(_gun):
 		return
 	delta = minf(delta, 0.05)
-	_gun.visible = (not in_vehicle or seat_can_shoot) and not _dead and not is_scoped()
+	_gun.visible = (not in_vehicle or seat_can_shoot) and not _dead and not is_scoped() and weapon_ready()
 	_gun_kick = move_toward(_gun_kick, 0.0, delta * 9.0)
 	_flash_time = maxf(0.0, _flash_time - delta)
 	if is_instance_valid(_flash):

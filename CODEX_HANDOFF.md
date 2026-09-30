@@ -717,3 +717,109 @@ Queue (ticked as it lands):
   - In-game voice.
   - Lead hooks from the map PR: `set_mode`, lifts.
   - Host authority for movement and wallet before any public play.
+
+## 2026-09-30 — Claude Desktop (lead): COMPLETE — 0.7 playtest build, heavy-lift integration, design choices
+Branch: `cloud/overnight-heavy-lift` (Windows checkout). Never merge into master. Codex: please don't edit files on this
+branch until this entry says COMPLETE; put suggestions in CLAUDE_HANDOFF.md.
+Goal from the user: a demo exe in the morning and `Fast Talkers Playtest.zip` for a 2+ player Steam (Spacewar) playtest.
+The user delegated design choices on improving the No Big Deal / Sub Rosa systems to Claude as lead designer.
+- [x] Local tree was clean; checked out the branch.
+- [x] `Run Tests.cmd` rewritten: all 18 suites in a loop (CRLF kept).
+- [x] Windows baseline: all 18 suites green with counts identical to Linux (integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18, vehicles_06 24, map_06 150, city_detail 217, city_audit 72, building_landmarks 204, sfx_audio 321, social_features 29, net_security 91, voice 87, remote_player 74, chat_ui 46, net_lobby_ui 84); net_pair lobby,round PASSED (host 67, client 62).
+- [x] GodotSteam 4.22.1 GDExtension in `addons/godotsteam` (win64 + linux64), `steam_appid.txt` (480). Real Steam host
+      verified on this PC: init, friends-only lobby with tags, SteamMultiplayerPeer host. Join side untested (needs 2 accounts).
+- [x] Lead hooks: `net.los_check`, `net.map_half_extent` (implementer, main.gd); `net_pair` turns LOS off only for its
+      cross-city synthetic claims.
+- [x] `docs/LEAD_DESIGN_DECISIONS.md` (binding), and W0 in online.gd:
+  - the Week, the Dead Drop, the morning paper with "who shot whom", and END OF WEEK;
+  - crew phones with the call gate, and one trade item with the sidearm rule;
+  - SOLO WEEK and Quick Week;
+  - the belt phone and the speaking cue on remotes;
+  - the nervous client and host telemetry.
+  `tests/week_flow.gd` covers it.
+- [x] Export + zip: `tools/build_playtest.ps1` -> `outputs/Fast Talkers Playtest.zip`; exe smoke on the RTX 3080 shows
+      `[steam] ready (app 480)` and SOLO WEEK starting. Walkthrough: `tools/playtest/HOW TO PLAY WITH FRIENDS.txt`.
+- [x] Workflow: `docs/WORKFLOW.md` (dev = integration branch, master = the user's), CLOUD.md / AGENT_BRIEF / README updated;
+      master's design notes merged in.
+- [x] Final regression on HEAD 43301b5 (Windows, one suite at a time), all 0 failures:
+  - integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18;
+  - vehicles_06 24, map_06 150, city_detail 217, city_audit 72, building_landmarks 204, sfx_audio 321;
+  - social_features 55, net_security 91, voice 87, remote_player 79, chat_ui 46, net_lobby_ui 84, week_flow 80;
+  - net_pair lobby,round PASSED (host 68, client 62).
+- [x] GPU perf on the RTX 3080: every view 71–103 fps (numbers in docs/OVERNIGHT_CITY_PERF.md, "GPU numbers"). The game is
+      draw-call bound; POTATO MODE saves little.
+- [x] `dev` created from this branch; the dev -> master PR is left for the user.
+
+### For Codex (next queue, in order; branch from `origin/dev`, PR into `dev`, see docs/WORKFLOW.md)
+1. After the playtest: read the host's `%APPDATA%\Godot\app_userdata\Project Fast Talkers\telemetry\*.jsonl`. It has one
+   line per Day. Tune the nervous-client timing and the contract values from it.
+2. Trust systems T1 (deals board, caller ID, host-side "broken deal") and then T2, per docs/DESIGN_WEEK_TRUST.md and
+   docs/LEAD_DESIGN_DECISIONS.md §10. online.gd is lead-owned, so propose hooks or take an explicit task.
+3. Known gaps:
+   - A rejoining player gets their crew bank back but not their personal cash or gear.
+   - Phone calls are text chat. Voice calls over the phone are future work.
+   - Movement and health are still client-side.
+4. City and perf (draw calls): sign text into a texture, a shared prop palette, and a POTATO draw distance.
+
+## 2026-09-30 night — Claude Desktop (lead): COMPLETE — Map 0.8 overnight pass
+The brief is `docs/TASKS/MAP_0_8_BRIEF.md` (the user's asks). Codex: don't edit on these branches; suggestions go in CLAUDE_HANDOFF.md.
+Worktrees next to the project, one branch each; the lead merges into `dev`:
+- `../ft-stairs` on `lead/stairs` (Sonnet): walkable stairs everywhere (sloped colliders in BuildingKit), the Halcyon Trust
+  stairwell to nowhere, and `tests/stair_walk.gd`.
+- `../ft-prefabs` on `lead/prefabs` (Sonnet): `scripts/buildings/prefabs.gd`, enterable seeded prefabs (walkup, row_shop,
+  warehouse, corner_store, office, bar, auto_shop), plus `tests/prefabs.gd`.
+- `../ft-city` on `lead/city-fill` (Sonnet): fill the gaps, alleys, break sightlines, 50–75% enterable, plus `tests/city_fill.gd`.
+- `../ft-lead` on `lead/controller` (lead): DONE. Steam signs in only when the online lobby opens, because Steam Input for
+  the Spacewar test app can take the pad. There is a warning with the fix, and the walkthrough is updated.
+Then: merge all into dev, run the full regression plus GPU perf, bump to 0.8, build the zip, update the local build, push.
+
+### Map 0.8 results (all merged into `dev`, config/version 0.8)
+- **Stairs:**
+  - The player has no step-up, so the capsule snagged on every box step. Before the fix, 7 of 7 upward flights failed.
+  - Fix: every BuildingKit flight carries an invisible ~30° glide slab, so every staircase walks.
+  - player.gd also steps up curbs and single risers up to 0.2 m (0.45 m still blocks).
+  - Halcyon Trust's west stair now continues to a railed roof deck with a plant room.
+- **Prefabs:** `scripts/buildings/prefabs.gd` (BuildingPrefabs) holds 9 enterable seeded kinds, with the real player walking all their stairs.
+- **City** (`scripts/city_fill.gd`, world.gd):
+  - Enterable buildings 20/136 (14.7%) -> 242/293 (82.6%). The largest empty square is 92 m -> 44 m.
+  - Frontage lots and 5 m alleys, 3 dead-end streets, 142 chicane islands and hoardings, and street life.
+  - The radar draw_map now culls off-canvas shapes; it had been the draw-call sink.
+- **Controller:** Steam signs in only when the online lobby opens, with a warning and the Steam Input fix.
+- **Network:** door-sync index limit 1023 -> 8191 (the city has about 1,270 doors). week_flow checks they fit.
+- **Tests** (Windows, HEAD before build), all 0 failures:
+  - integration 66, free_roam 137, soak PASS, map_interiors 97, vehicle_art 110, wiring_05 18, vehicles_06 24;
+  - map_06 150, city_detail 221, city_audit 813, building_landmarks 2419, sfx_audio 321, social_features 55;
+  - net_security 91, voice 87, remote_player 79, chat_ui 46, net_lobby_ui 84, week_flow 82, stair_walk 37;
+  - prefabs 903, city_fill 11; net_pair PASSED (68 host / 62 client).
+- **Perf** (RTX 3080, windowed): worst view 68 fps at 1,538 draw calls; every view 68–117 fps.
+  - The exe takes about 14 s to reach the title (city build) and uses about 1.9 GB RAM.
+- **Known gaps / next:**
+  - The central grid still has 350–500 m road sightlines; the target was none over 150 m.
+  - Lantern Row and Kingsway towers are still solid (0% enterable).
+  - About a quarter of the land is open rim.
+  - Startup time: consider building interiors lazily.
+  - `free_roam` with --fixed-fps 60 fails one wheelman check. That predates 0.8; normal mode passes.
+## 2026-09-30 afternoon — Claude Desktop (lead): 0.9 PLAYTEST POLISH — IN PROGRESS
+
+The user's brief for tonight's friends playtest:
+- street props off the road;
+- Halcyon Trust stairs;
+- phone voice calls (No Big Deal style);
+- crew HQ interiors;
+- the door issue;
+- menu cleanup;
+- a Claude Cloud handoff.
+
+Branches (worktrees in `outputs\wt\<name>`, each merged into `dev` by the lead):
+- [ ] `lead/street-props`: chicane islands leave the carriageway. Kiosks, boards and hedge-trees move to corner
+  pads and open gray lots (city_fill.gd).
+- [ ] `lead/stairs`: the Halcyon roof stair ends on an open-air terrace. BuildingKit flights get closed undersides,
+  open-side rails, and no capsule-trapping slots.
+- [ ] `lead/crew-hq`: four walk-in crew compounds (new `scripts/buildings/crew_hq.gd`), with the spawn inside and the
+  phone on a desk.
+- [ ] `lead/phone-voice`: voice calls through crew phones (P to dial, 1.2 m pickup, 3.5 m speaker, PHONE relay mode).
+  It also fixes the "door issue": host voice routing no longer scans all ~1,270 doors and ~700 interiors per frame.
+- [x] `dev`: title menu cleanup. CONTRACT is retired from the menu, the order is ONLINE, SOLO WEEK, FREE ROAM, and
+  the version label is live. Lobby labels are updated. Design §12 has the phone voice decision.
+- [ ] Merge, full suites, `tools\build_playtest.ps1` (installs into `play-fast-talkers`), then the cloud handoff
+  `docs/tasks/PLAYTEST_0_9_CLOUD.md`.

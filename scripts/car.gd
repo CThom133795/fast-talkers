@@ -20,11 +20,11 @@ signal wrecked
 ## A window broke (bullet or crash): `at` is where, in world space.
 signal glass_broken(index: int, at: Vector3)
 
-## Handling and layout per type. Sedan numbers are Codex's tuned originals.
+## Handling and layout per type. City playtest tuning: roughly 20% lower top speed, 20-25% less acceleration.
 ## Seat arcs: (centre, half-width) in radians, +yaw turns left. shoot: "driveby" (driver,
 ## one-handed, while aiming), "window", "open" (bed / pillion) or "none".
 const TYPES: Dictionary = {
-	"sedan": {"label": "SEDAN", "accel": 7.2, "brake": 19.0, "top": 31.5, "reverse": 8.0, "grip": 19.0, "handbrake": 3.8,
+	"sedan": {"label": "SEDAN", "accel": 5.6, "brake": 19.0, "top": 25.0, "reverse": 8.0, "grip": 19.0, "handbrake": 3.8,
 		"wheelbase": 2.7, "hull": Vector3(1.92, 1.5, 4.4), "belt": 1.0, "roof": 1.5, "cabin": Vector2(-1.1, 1.25), "mid": 0.21, "health": 800.0,
 		"wheel_r": 0.34, "axles": Vector2(-1.36, 1.34), "track": 0.89, "chase": 7.2, "engine_pitch": 1.0,
 		"seats": [
@@ -33,14 +33,14 @@ const TYPES: Dictionary = {
 			{"name": "REAR LEFT", "eye": Vector3(-0.56, 1.16, 0.72), "door": Vector3(-1.62, 0.12, 0.72), "arc": Vector2(1.66, 1.4), "shoot": "window", "pane": 2},
 			{"name": "REAR RIGHT", "eye": Vector3(0.56, 1.16, 0.72), "door": Vector3(1.62, 0.12, 0.72), "arc": Vector2(-1.66, 1.4), "shoot": "window", "pane": 3},
 		]},
-	"coupe": {"label": "COUPE", "accel": 9.0, "brake": 21.0, "top": 36.0, "reverse": 8.0, "grip": 21.0, "handbrake": 3.4,
+	"coupe": {"label": "COUPE", "accel": 7.0, "brake": 21.0, "top": 28.5, "reverse": 8.0, "grip": 21.0, "handbrake": 3.4,
 		"wheelbase": 2.55, "hull": Vector3(1.88, 1.3, 4.3), "belt": 0.9, "roof": 1.3, "cabin": Vector2(-0.55, 0.95), "health": 650.0,
 		"wheel_r": 0.33, "axles": Vector2(-1.4, 1.3), "track": 0.88, "chase": 6.8, "engine_pitch": 1.18,
 		"seats": [
 			{"name": "DRIVER", "eye": Vector3(-0.38, 1.02, 0.25), "door": Vector3(-1.6, 0.12, 0.2), "arc": Vector2(1.57, 1.3), "shoot": "driveby", "pane": 0},
 			{"name": "PASSENGER", "eye": Vector3(0.56, 1.02, 0.25), "door": Vector3(1.6, 0.12, 0.2), "arc": Vector2(-1.57, 1.4), "shoot": "window", "pane": 1},
 		]},
-	"suv": {"label": "SUV", "accel": 6.0, "brake": 17.0, "top": 28.0, "reverse": 7.5, "grip": 17.5, "handbrake": 4.6,
+	"suv": {"label": "SUV", "accel": 4.8, "brake": 17.0, "top": 22.5, "reverse": 7.5, "grip": 17.5, "handbrake": 4.6,
 		"wheelbase": 2.95, "hull": Vector3(2.06, 1.95, 4.8), "belt": 1.3, "roof": 1.92, "cabin": Vector2(-1.05, 2.05), "mid": 0.27, "health": 1250.0,
 		"wheel_r": 0.4, "axles": Vector2(-1.5, 1.45), "track": 0.94, "chase": 8.0, "engine_pitch": 0.85,
 		"seats": [
@@ -49,7 +49,7 @@ const TYPES: Dictionary = {
 			{"name": "REAR LEFT", "eye": Vector3(-0.6, 1.53, 0.85), "door": Vector3(-1.72, 0.12, 0.85), "arc": Vector2(1.66, 1.4), "shoot": "window", "pane": 2},
 			{"name": "REAR RIGHT", "eye": Vector3(0.6, 1.53, 0.85), "door": Vector3(1.72, 0.12, 0.85), "arc": Vector2(-1.66, 1.4), "shoot": "window", "pane": 3},
 		]},
-	"pickup": {"label": "PICKUP", "accel": 6.4, "brake": 17.5, "top": 29.0, "reverse": 7.5, "grip": 17.0, "handbrake": 4.2,
+	"pickup": {"label": "PICKUP", "accel": 5.0, "brake": 17.5, "top": 23.0, "reverse": 7.5, "grip": 17.0, "handbrake": 4.2,
 		"wheelbase": 3.2, "hull": Vector3(2.0, 1.85, 5.3), "belt": 1.05, "roof": 1.9, "cabin": Vector2(-1.25, 0.15), "health": 1050.0,
 		"wheel_r": 0.39, "axles": Vector2(-1.7, 1.55), "track": 0.92, "chase": 8.4, "engine_pitch": 0.8,
 		"seats": [
@@ -58,7 +58,7 @@ const TYPES: Dictionary = {
 			{"name": "BED LEFT", "eye": Vector3(-0.45, 2.2, 1.35), "door": Vector3(-1.65, 0.12, 2.1), "arc": Vector2(1.57, PI), "shoot": "open", "pane": -1},
 			{"name": "BED RIGHT", "eye": Vector3(0.45, 2.2, 1.35), "door": Vector3(1.65, 0.12, 2.1), "arc": Vector2(-1.57, PI), "shoot": "open", "pane": -1},
 		]},
-	"motorcycle": {"label": "MOTORCYCLE", "accel": 11.0, "brake": 22.0, "top": 38.0, "reverse": 3.0, "grip": 23.0, "handbrake": 2.8,
+	"motorcycle": {"label": "MOTORCYCLE", "accel": 8.2, "brake": 22.0, "top": 30.0, "reverse": 3.0, "grip": 23.0, "handbrake": 2.8,
 		"wheelbase": 1.45, "hull": Vector3(0.62, 1.0, 2.1), "belt": 0.0, "roof": 0.0, "cabin": Vector2.ZERO, "health": 380.0,
 		"wheel_r": 0.33, "axles": Vector2(-0.72, 0.72), "track": 0.0, "chase": 5.4, "engine_pitch": 1.55,
 		"seats": [
@@ -68,9 +68,9 @@ const TYPES: Dictionary = {
 }
 
 @export var vehicle_type: String = "sedan"
-@export var engine_acceleration: float = 7.2
+@export var engine_acceleration: float = 5.6
 @export var braking_deceleration: float = 19.0
-@export var maximum_forward_speed: float = 31.5
+@export var maximum_forward_speed: float = 25.0
 @export var maximum_reverse_speed: float = 8.0
 @export var lateral_grip: float = 17.5
 @export var handbrake_grip: float = 3.8
@@ -944,12 +944,16 @@ func _car_body(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: Stan
 	var body: Dictionary = _spec_body()
 	var width: float = body["width"]
 	var axles: Vector2 = spec["axles"]
-	_part(VehicleKit.profile(_lower_outline(body, vehicle_type == "pickup"), width * 0.5, 0.07, float(body["tuck"])), Vector3.ZERO, paint)
+	var glass: Array = body["glass"]
+	var cabin_open: Vector2 = Vector2((glass[0] as Vector2).x + 0.25, (glass[3] as Vector2).x - 0.05)
+	_part(VehicleKit.profile(_lower_outline(body, vehicle_type == "pickup"), width * 0.5, 0.07, float(body["tuck"]), cabin_open, float(body["belt_half"]) - 0.14, _wheel_x() - 0.18), Vector3.ZERO, paint)
 	# Dark wheel-well liners behind every arch.
 	var well: StandardMaterial3D = _mat(Color(0.035, 0.035, 0.04), 0.95)
+	# A thin plate just inboard of the tyre: it used to be a thick block through the tyre.
 	for axle: float in [axles.x, axles.y]:
 		var arch: float = body["arch"]
-		_soft(Vector3(width - 0.34, arch * 1.05, arch * 1.9), Vector3(0, float(spec["wheel_r"]) + arch * 0.35 - BODY_Y, axle), well, 0.05)
+		for side: float in [-1.0, 1.0]:
+			_block(Vector3(0.04, arch * 1.25, arch * 1.9), Vector3(side * (_wheel_x() - 0.16), float(spec["wheel_r"]) + arch * 0.4 - BODY_Y, axle), well, 0.015)
 	_glasshouse(body, paint, trim)
 	_cabin_interior(body, trim)
 
@@ -1022,22 +1026,71 @@ func _cabin_interior(body: Dictionary, trim: StandardMaterial3D) -> void:
 	var g: Array = body["glass"]
 	var belt: float = (g[0] as Vector2).y - BODY_Y
 	var cloth: StandardMaterial3D = _mat(Color(0.16, 0.14, 0.13), 0.95)
-	var dash_z: float = (g[0] as Vector2).x + 0.32
-	_soft(Vector3(float(body["belt_half"]) * 2.0 - 0.12, 0.24, 0.46), Vector3(0, belt - 0.1, dash_z), trim, 0.07)
+	var dash_z: float = (g[0] as Vector2).x + 0.10
+	_soft(Vector3(float(body["belt_half"]) * 2.0 - 0.12, 0.20, 0.30), Vector3(0, belt - 0.12, dash_z), trim, 0.05)
 	var driver_eye: Vector3 = (seats[0] as Dictionary)["eye"]
-	var wheel: MeshInstance3D = _part(MeshKit.torus(0.15, 0.18, 18, 6), Vector3(driver_eye.x, belt + 0.02, dash_z + 0.34), trim)
-	wheel.rotation = Vector3(PI * 0.5 - 0.5, 0, 0)
-	var floor_y: float = (body["nose"] as Array)[0].y - BODY_Y + 0.12
+	# The rim stays below the driver's straight-ahead sight line.
+	var wheel: MeshInstance3D = _part(MeshKit.torus(0.15, 0.18, 18, 6), Vector3(driver_eye.x, belt - 0.01, dash_z + 0.22), trim)
+	wheel.rotation = Vector3(PI * 0.5 - 0.45, 0, 0)
+	var floor_y: float = _cabin_floor_y(body)
+	var front: float = (g[0] as Vector2).x + 0.25
+	var rear: float = (g[3] as Vector2).x - 0.05
+	var inner: float = float(body["belt_half"]) - 0.14
+	_soft(Vector3(inner * 2 + 0.08, 0.05, rear - front), Vector3(0, floor_y - 0.025, (front + rear) * 0.5), cloth, 0.01)
+	# Footwell and toe board: closes the gap under the dash, so the road and the front
+	# wheels no longer show through the cabin.
+	var toe_top: float = belt - 0.2
+	_block(Vector3(inner * 2 + 0.08, 0.05, front - dash_z + 0.1), Vector3(0, floor_y - 0.025, (front + dash_z - 0.1) * 0.5), cloth, 0.01)
+	_block(Vector3(inner * 2 + 0.04, toe_top - floor_y + 0.04, 0.05), Vector3(0, (toe_top + floor_y) * 0.5, dash_z - 0.08), trim, 0.015)
+	for side: float in [-1.0, 1.0]:
+		_soft(Vector3(0.06, belt - floor_y, rear - front), Vector3(side * (inner + 0.03), (belt + floor_y) * 0.5, (front + rear) * 0.5), trim, 0.02)
+		_soft(Vector3(0.12, 0.08, 0.6), Vector3(side * (inner - 0.04), belt - 0.17, driver_eye.z), cloth, 0.02)
+		# Kick panels under the dash ends.
+		_block(Vector3(0.06, toe_top - floor_y, front - dash_z + 0.1), Vector3(side * (inner + 0.03), (toe_top + floor_y) * 0.5, (front + dash_z - 0.1) * 0.5), trim, 0.015)
+	# Restrained dashboard details, all using the existing trim/cloth materials.
+	_soft(Vector3(0.3, 0.09, 0.035), Vector3(driver_eye.x, belt - 0.05, dash_z + 0.155), cloth, 0.015)
+	_soft(Vector3(0.2, 0.16, 0.45), Vector3(0, floor_y + 0.09, driver_eye.z - 0.05), trim, 0.02)
+	# Steering column from the dash to the hub.
+	_strut_part(MeshKit.cylinder(0.03, 0.03, 1.0, 8), Vector3(driver_eye.x, belt - 0.12, dash_z + 0.05), Vector3(driver_eye.x, belt - 0.03, dash_z + 0.2), trim)
+	# Lived-in: a map folded on the passenger side of the dash top, a rear-view mirror on
+	# its stalk and two sun visors folded up against the roof lining.
+	_block(Vector3(0.2, 0.025, 0.14), Vector3(-driver_eye.x * 0.9, belt - 0.005, dash_z + 0.02), cloth, 0.008, Vector3(0, 0.25, 0))
+	var roof_front: Vector2 = g[1]
+	var screen: Vector2 = (g[1] as Vector2) - (g[0] as Vector2)
+	var mirror_y: float = roof_front.y - 0.14
+	var mirror_z: float = (g[0] as Vector2).x + screen.x * clampf((mirror_y - (g[0] as Vector2).y) / screen.y, 0.0, 1.0) + 0.1
+	_block(Vector3(0.22, 0.06, 0.03), Vector3(0, mirror_y - BODY_Y, mirror_z), trim, 0.015, Vector3(-0.15, 0, 0))
+	_block(Vector3(0.025, 0.1, 0.025), Vector3(0, mirror_y + 0.07 - BODY_Y, mirror_z - 0.02), trim, 0.008)
+	for seat_x: float in [driver_eye.x, -driver_eye.x]:
+		_block(Vector3(0.34, 0.02, 0.16), Vector3(seat_x * 0.95, roof_front.y - 0.075 - BODY_Y, roof_front.x + 0.16), cloth, 0.008)
 	for seat_spec: Dictionary in seats:
 		var eye: Vector3 = seat_spec["eye"]
 		if eye.y > float(spec["roof"]) or str(seat_spec["shoot"]) == "open":
 			continue
-		var seat_at: Vector3 = Vector3(eye.x * 0.8, 0.0, eye.z + 0.14)
-		# A seated eye is ~0.75 m over the cushion; the headrest stays under the roof lining.
-		var cushion_y: float = maxf(floor_y + 0.08, eye.y - BODY_Y - 0.75)
+		var seat_at: Vector3 = _seat_centre(eye)
+		var cushion_y: float = _cushion_y(body, eye)
 		_soft(Vector3(0.52, 0.14, 0.5), Vector3(seat_at.x, cushion_y, seat_at.z), cloth, 0.05)
 		_soft(Vector3(0.5, 0.56, 0.14), Vector3(seat_at.x, cushion_y + 0.33, seat_at.z + 0.3), cloth, 0.05, Vector3(-0.14, 0, 0))
 		_soft(Vector3(0.26, 0.18, 0.1), Vector3(seat_at.x, cushion_y + 0.68, seat_at.z + 0.34), cloth, 0.04, Vector3(-0.14, 0, 0))
+		# Seat base: tall-cab seats sat on air; a pedestal carries the cushion to the floor.
+		var base_top: float = cushion_y - 0.06
+		if base_top - floor_y > 0.02:
+			_block(Vector3(0.4, base_top - floor_y + 0.01, 0.38), Vector3(seat_at.x, (base_top + floor_y) * 0.5, seat_at.z), trim, 0.02)
+
+
+## Top of the cabin floor, body space.
+func _cabin_floor_y(body: Dictionary) -> float:
+	return (body["nose"] as Array)[0].y - BODY_Y + 0.12
+
+
+## Where a seat's cushion sits (car space x/z) for a seat eye point.
+func _seat_centre(eye: Vector3) -> Vector3:
+	return Vector3(eye.x * 0.8, 0.0, eye.z + 0.14)
+
+
+## Cushion centre height (body space): a seated eye is ~0.75 m over the cushion.
+func _cushion_y(body: Dictionary, eye: Vector3) -> float:
+	return maxf(_cabin_floor_y(body) + 0.08, eye.y - BODY_Y - 0.75)
 
 
 ## Clear-lens headlamps with an amber corner lamp, a grille, a wraparound tail-lamp bar,
@@ -1068,7 +1121,8 @@ func _car_details(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: S
 		"bar":
 			_soft(Vector3(tail_half * 2.0 - 0.1, 0.13, 0.05), Vector3(0, tail_height - BODY_Y, rear_z + 0.01), _tail_material, 0.03)
 			for side: float in [-1.0, 1.0]:
-				_soft(Vector3(0.18, 0.13, 0.055), Vector3(side * (tail_half - 0.2), tail_height - BODY_Y, rear_z + 0.012), amber, 0.03)
+				# Taller and proud of the red bar, so their faces are never coplanar (z-fighting).
+				_soft(Vector3(0.18, 0.15, 0.065), Vector3(side * (tail_half - 0.2), tail_height - BODY_Y, rear_z + 0.02), amber, 0.03)
 		"tall":
 			for side: float in [-1.0, 1.0]:
 				_soft(Vector3(0.16, 0.46, 0.06), Vector3(side * (tail_half - 0.06), tail_height - BODY_Y, rear_z + 0.01), _tail_material, 0.03)
@@ -1079,6 +1133,10 @@ func _car_details(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: S
 	var plate: StandardMaterial3D = _mat(Color(0.88, 0.86, 0.72), 0.5)
 	_soft(Vector3(0.46, 0.13, 0.02), Vector3(0, (nose[0] as Vector2).y + 0.1 - BODY_Y, front_z - 0.02), plate, 0.01)
 	_soft(Vector3(0.46, 0.13, 0.02), Vector3(0, tail_height - 0.2 - BODY_Y, rear_z + 0.03), plate, 0.01)
+	# Plate legend: embossed segment characters in the trim colour (same merged surface).
+	var legend: String = PLATES.get(vehicle_type, "PH 1999")
+	_plate_text(legend, Vector3(0, (nose[0] as Vector2).y + 0.1 - BODY_Y, front_z - 0.031), -1.0, trim)
+	_plate_text(legend, Vector3(0, tail_height - 0.2 - BODY_Y, rear_z + 0.041), 1.0, trim)
 	var pipe: MeshInstance3D = _part(MeshKit.cylinder(0.035, 0.035, 0.24, 8), Vector3(0.45, (nose[0] as Vector2).y + 0.02 - BODY_Y, rear_z - 0.06), chrome)
 	pipe.rotation.x = PI * 0.5
 	# Mirrors on stalks at the A-pillar foot, door handles and the door shut-lines.
@@ -1093,7 +1151,15 @@ func _car_details(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: S
 		cuts.append_array(body["posts"])
 		for index: int in range(cuts.size()):
 			var cut: float = float(cuts[index])
-			_soft(Vector3(0.012, belt - (nose[0] as Vector2).y - 0.12, 0.012), Vector3(skin, (belt + (nose[0] as Vector2).y) * 0.5 - BODY_Y, cut), seam, 0.004)
+			# A shut-line over a wheel arch stops at the arch, instead of hanging in front
+			# of the tyre.
+			var seam_low: float = (nose[0] as Vector2).y + 0.06
+			for axle: float in [float(spec["axles"].x), float(spec["axles"].y)]:
+				var reach: float = float(body["arch"]) + 0.03
+				if absf(cut - axle) < reach:
+					seam_low = maxf(seam_low, float(spec["wheel_r"]) + sqrt(reach * reach - (cut - axle) * (cut - axle)) + 0.02)
+			if belt - 0.06 - seam_low > 0.05:
+				_soft(Vector3(0.012, belt - 0.06 - seam_low, 0.012), Vector3(skin, (belt - 0.06 + seam_low) * 0.5 - BODY_Y, cut), seam, 0.004)
 			if index < (body["roll"] as Array).size() and bool(body["roll"][index]):
 				_soft(Vector3(0.03, 0.04, 0.16), Vector3(skin + side * 0.01, belt - 0.14 - BODY_Y, cut + 0.62 if index == 0 else cut + 0.25), chrome, 0.01)
 		# Rubbing strip along the doors.
@@ -1105,6 +1171,42 @@ func _car_details(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: S
 		for side: float in [-1.0, 1.0]:
 			_soft(Vector3(0.02, 0.08, length), Vector3(side * (_side_x(body, stripe_y) + 0.006), stripe_y - BODY_Y, (front_z + rear_z) * 0.5), stripe, 0.01)
 		_soft(Vector3(0.32, 0.02, absf((g[2] as Vector2).x - (g[1] as Vector2).x)), Vector3(0, maxf((g[1] as Vector2).y, (g[2] as Vector2).y) + 0.04 - BODY_Y, ((g[1] as Vector2).x + (g[2] as Vector2).x) * 0.5), stripe, 0.008)
+
+
+## Port Halcyon registrations (original, fixed per type so the world stays deterministic).
+const PLATES: Dictionary = {"sedan": "PH 4127", "coupe": "PH 9030", "suv": "PH 5518", "pickup": "PH 2264"}
+## Seven-segment masks (a b c d e f g) for the few glyphs plates use.
+const SEGMENTS: Dictionary = {"0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg", "5": "acdfg",
+	"6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg", "P": "abefg", "H": "bcefg"}
+
+
+## Seven-segment plate characters, centred on `at` (the plate's face), facing `facing` z.
+func _plate_text(text: String, at: Vector3, facing: float, material: StandardMaterial3D) -> void:
+	var pitch: float = 0.056
+	var w: float = 0.034
+	var h: float = 0.036
+	var t: float = 0.008
+	var start: float = -pitch * (text.length() - 1) * 0.5
+	for index: int in range(text.length()):
+		var mask: String = SEGMENTS.get(text[index], "")
+		# Read left to right from the viewer's side.
+		var cx: float = at.x + (start + index * pitch) * facing
+		var places: Dictionary = {"a": Vector3(0, h, 0), "g": Vector3(0, 0, 0), "d": Vector3(0, -h, 0),
+			"f": Vector3(-w * 0.5, h * 0.5, 1), "b": Vector3(w * 0.5, h * 0.5, 1), "e": Vector3(-w * 0.5, -h * 0.5, 1), "c": Vector3(w * 0.5, -h * 0.5, 1)}
+		for segment: String in mask:
+			var place: Vector3 = places[segment]
+			var vertical: bool = place.z > 0.5
+			var size: Vector3 = Vector3(t, h + t, 0.006) if vertical else Vector3(w + t, t, 0.006)
+			_part(_box(size), Vector3(cx + place.x * facing, at.y + place.y, at.z), material)
+
+
+func _box(size: Vector3) -> BoxMesh:
+	var key: String = "box" + str(size)
+	if not _materials.has(key):
+		var mesh: BoxMesh = BoxMesh.new()
+		mesh.size = size
+		_materials[key] = mesh
+	return _materials[key] as BoxMesh
 
 
 ## Where the nose (or tail) outline crosses a height above the road.
@@ -1171,7 +1273,8 @@ func _build_coupe(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: S
 	# side skirts, black grille slot and a lower air dam. Fast and fragile.
 	_car_body(paint, trim, chrome)
 	_car_details(paint, trim, trim, false, 0.58, 0.76, "twin")
-	_soft(Vector3(1.5, 0.08, 0.3), Vector3(0, 0.3 - BODY_Y, -2.12), trim, 0.03)
+	# Air dam hangs 1.5 cm below the floor pan instead of sharing its plane.
+	_soft(Vector3(1.5, 0.08, 0.3), Vector3(0, 0.285 - BODY_Y, -2.12), trim, 0.03)
 	_soft(Vector3(1.66, 0.04, 0.3), Vector3(0, 1.02 - BODY_Y, 1.96), paint, 0.02)
 	for side: float in [-0.62, 0.62]:
 		_soft(Vector3(0.05, 0.12, 0.12), Vector3(side, 0.93 - BODY_Y, 1.96), trim, 0.02)
@@ -1233,6 +1336,9 @@ func _build_pickup(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: 
 	_soft(Vector3(width - 0.3, 0.22, 0.12), Vector3(0, 0.52 - BODY_Y, 2.5), _mat(Color(0.1, 0.1, 0.11), 0.8), 0.03)
 	for side: float in [-1.0, 1.0]:
 		_soft(Vector3(0.22, 0.05, 1.3), Vector3(side * 1.02, 0.42 - BODY_Y, -0.5), _mat(Color(0.14, 0.14, 0.15), 0.8), 0.02)
+		# Work-truck mud flaps behind both wheels, hung from the body just above the road.
+		for axle: float in [axles.x, axles.y]:
+			_block(Vector3(0.24, 0.3, 0.015), Vector3(side * _wheel_x(), 0.31 - BODY_Y, axle + float(spec["wheel_r"]) + 0.08), trim, 0.01)
 
 
 func _build_bike(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: StandardMaterial3D) -> void:
@@ -1285,13 +1391,27 @@ func _build_bike(paint: StandardMaterial3D, trim: StandardMaterial3D, chrome: St
 	for side: float in [-1.0, 1.0]:
 		var clock: MeshInstance3D = _part(MeshKit.cylinder(0.05, 0.05, 0.05, 12), Vector3(side * 0.06, 1.14 - BODY_Y, -0.6), dark)
 		clock.rotation.x = -0.6
-	_soft(Vector3(0.14, 0.03, 0.52), Vector3(0, wheel + 0.36 - BODY_Y, axles.x - 0.04), paint, 0.015, Vector3(0.1, 0, 0))
-	_soft(Vector3(0.12, 0.03, 0.4), Vector3(0, wheel + 0.34 - BODY_Y, axles.y + 0.08), dark, 0.015, Vector3(-0.3, 0, 0))
+	# Fenders follow the tyres (they were flat planks floating over them).
+	_part(_fender(axles.x, wheel, 0.6, 2.5), Vector3.ZERO, paint)
+	_part(_fender(axles.y, wheel, 0.5, 2.0), Vector3.ZERO, dark)
 	for side: float in [-1.0, 1.0]:
 		_soft(Vector3(0.1, 0.03, 0.04), Vector3(side * 0.2, 0.42 - BODY_Y, 0.2), dark, 0.01)
 		_soft(Vector3(0.1, 0.03, 0.04), Vector3(side * 0.18, 0.55 - BODY_Y, 0.58), dark, 0.01)
 	if stripe_color.a > 0.0:
 		_soft(Vector3(0.36, 0.035, 0.36), Vector3(0, 1.1 - BODY_Y, -0.24), _paint(stripe_color), 0.015)
+
+
+## A motorcycle mudguard: a thin curved band hugging the tyre between two angles (radians,
+## 0 = rearward along +Z, PI/2 = straight up).
+func _fender(axle: float, wheel: float, from_angle: float, to_angle: float) -> ArrayMesh:
+	var band: PackedVector2Array = PackedVector2Array()
+	for step: int in range(9):
+		var angle: float = lerpf(from_angle, to_angle, step / 8.0)
+		band.append(Vector2(axle + (wheel + 0.05) * cos(angle), wheel + (wheel + 0.05) * sin(angle) - BODY_Y))
+	for step: int in range(8, -1, -1):
+		var angle: float = lerpf(from_angle, to_angle, step / 8.0)
+		band.append(Vector2(axle + (wheel + 0.025) * cos(angle), wheel + (wheel + 0.025) * sin(angle) - BODY_Y))
+	return VehicleKit.profile(band, 0.07, 0.012, 0.0)
 
 
 ## A part (built along +Y, one metre long) stretched between two body-space points.
@@ -1317,7 +1437,7 @@ func _build_wheels() -> void:
 	for axle_z: float in [axles.x, axles.y]:
 		for side: float in sides:
 			var wheel_pivot: Node3D = Node3D.new()
-			wheel_pivot.position = Vector3(side * float(spec["track"]), radius, axle_z)
+			wheel_pivot.position = Vector3(side * _wheel_x(), radius, axle_z)
 			add_child(wheel_pivot)
 			if axle_z < 0.0:
 				_front_wheels.append(wheel_pivot)
@@ -1359,6 +1479,17 @@ func _build_wheels() -> void:
 						bar.rotation.x = spoke * TAU / 3.0
 						bar.position = Vector3(0, cos(spoke * TAU / 3.0) * (radius - tube) * 0.48, sin(spoke * TAU / 3.0) * (radius - tube) * 0.48)
 			MeshMerge.merge_children(spinner)
+
+
+## Visual wheel offset: the spec track, pulled in so the hub face sits flush with the body
+## side (under the flares on the SUV) instead of standing proud of the arches.
+func _wheel_x() -> float:
+	if is_bike():
+		return 0.0
+	var body: Dictionary = _spec_body()
+	var allowance: float = 0.07 if vehicle_type == "suv" else 0.03
+	var hub_face: float = 0.13 if str(body.get("rim", "cap")) == "offroad" else 0.12
+	return minf(float(spec["track"]), _side_x(body, float(spec["wheel_r"])) + allowance - hub_face)
 
 
 func _paint(color: Color) -> StandardMaterial3D:
@@ -1407,6 +1538,13 @@ func _part(mesh: Mesh, pos: Vector3, material: StandardMaterial3D, parent: Node3
 	mesh_instance.material_override = material
 	mesh_instance.position = pos
 	(parent if parent != null else _body).add_child(mesh_instance)
+	return mesh_instance
+
+
+## A low-poly rounded box (one bevel segment) for small or tucked-away parts.
+func _block(size: Vector3, pos: Vector3, material: StandardMaterial3D, radius: float, angles: Vector3 = Vector3.ZERO) -> MeshInstance3D:
+	var mesh_instance: MeshInstance3D = _part(MeshKit.rounded_box(size, radius, 1), pos, material)
+	mesh_instance.rotation = angles
 	return mesh_instance
 
 

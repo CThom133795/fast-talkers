@@ -51,6 +51,8 @@ func _run() -> void:
 		quit(1)
 		return
 	game = scene.instantiate()
+	# User camera preferences must not change the first-person interaction assertion.
+	game.settings_path = "res://.godot/integration_settings.cfg"
 	root.add_child(game)
 	await _frames(3)
 	_check(game.phase == game.Phase.MENU, "Main scene starts at title menu")

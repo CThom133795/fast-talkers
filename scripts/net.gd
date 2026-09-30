@@ -9,11 +9,25 @@ extends Node
 ## Clients never call a `_host_*` handler directly: use the `send_*` wrappers, which call the handler
 ## locally with sender id 1 when we are the host.
 ##
-## Security notes: `allow_object_decoding` is forced off (no object or script injection over the wire),
-## every RPC has typed parameters, and every incoming value is sanitised (finite numbers, clamped ids,
-## printable clamped strings, known weapons and crews) before it reaches game code.
+## Security notes (docs/NETWORK_SECURITY_AND_STEAM.md): `allow_object_decoding` is forced off (no object or
+## script injection over the wire), server relay is OFF (clients only ever talk to the host; the host
+## validates and re-broadcasts snapshots, so a client cannot bypass host checks by sending straight to other
+## clients), every RPC has typed parameters, and every incoming value is sanitised (finite numbers, clamped
+## ids, printable clamped strings, known weapons and crews) before it reaches game code. Peers must pass a
+## version handshake within HELLO_TIMEOUT_MS or they are dropped; nothing but the hello is accepted before it.
+## Every client RPC also spends from a per-peer token bucket, and malformed / spoofed / impossible input
+## earns strikes; STRIKE_LIMIT strikes (decaying) means a kick.
+##
+## Transport: ENet by default. `host_steam()` / `join_steam()` use the optional GodotSteam layer
+## (scripts/steam_transport.gd) and hand its SteamMultiplayerPeer to the same `_attach_peer`, so every
+## check below applies unchanged. Without the extension those calls return ERR_UNAVAILABLE.
 
 const Factions = preload("res://scripts/factions.gd")
+const Sec = preload("res://scripts/net_security.gd")
+const VoiceRelayS = preload("res://scripts/voice_relay.gd")
+const VoiceCodecS = preload("res://scripts/voice_codec.gd")
+## Loaded on demand (never preloaded), so net.gd works even if this file or the extension is missing.
+const STEAM_TRANSPORT_PATH: String = "res://scripts/steam_transport.gd"
 
 const PORT: int = 24650
 const MAX_PLAYERS: int = 8
@@ -31,10 +45,26 @@ const MAX_HIT_DAMAGE: float = 250.0
 const LIMIT_STATE: int = 40
 const LIMIT_CAR: int = 40
 const LIMIT_CHAT: int = 3
+## Voice frames per second a peer may send (a talker sends 25/s of 40 ms frames); 5x this for two windows is a kick.
+const LIMIT_VOICE: int = 40
 const LIMIT_REQUEST: int = 10
 const LIMIT_HIT: int = 25
 const LIMIT_HELLO: int = 3
 const ITEM_ACTIONS: PackedStringArray = ["pickup", "drop", "bank"]
+## A connected peer must send a valid hello (name + build tag) within this time.
+const HELLO_TIMEOUT_MS: int = 10000
+## Global per-peer message budget (all client RPCs share it): burst and refill per second.
+const BUDGET_BURST: float = 240.0
+const BUDGET_RATE: float = 150.0
+## Strikes before a kick; one strike decays every STRIKE_DECAY_MS.
+const STRIKE_LIMIT: int = 10
+const STRIKE_DECAY_MS: int = 5000
+## Consecutive rejected (impossible) movement snapshots before the host resyncs to the new position.
+const TELEPORT_RESYNC: int = 10
+## After a phase change, death or match start, snapshots may jump (respawn at HQ) for this long.
+const TELEPORT_GRACE_MS: int = 4000
+## Shooter's claimed origin may be this far from their last snapshot (latency, cars, muzzle offset).
+const HIT_ORIGIN_SLACK: float = 30.0
 
 enum Mode { OFFLINE, HOST, CLIENT }
 
@@ -50,6 +80,8 @@ signal server_closed()
 signal match_started()
 signal match_ended()
 signal upnp_done(status: String)
+## A Steam invite / "Join Game" was accepted and a Steam join started (UI: show the lobby screen).
+signal steam_join_started()
 
 ## Game messages (all peers)
 signal remote_state(id: int, state: Dictionary)
@@ -64,6 +96,8 @@ signal item_update(item: int, data: Dictionary)
 signal round_state(data: Dictionary)
 signal grant(amount: int, reason: String)
 signal chat(from_id: int, channel: String, text: String)
+## A voice frame for the local player to play: from_id, mode (VoiceRelayS.Mode), ADPCM frame, metres from the talker.
+signal voice_frame(from_id: int, mode: int, frame: PackedByteArray, distance: float, muffled: bool)
 ## Shared world state changed by a player: kind "door" (value 1 open / 0 shut) or "lift"
 ## (value = target floor). Cosmetic-plus-cover state; every peer applies it.
 signal world_event(kind: String, index: int, value: int)
@@ -91,14 +125,43 @@ var accept_hits: bool = true
 ## Optional `seat_owner(car: int) -> int` (0 = nobody). Only the driver may send `_car_state`
 ## (the host may when there is no driver). Unset = allow anyone.
 var seat_owner: Callable = Callable()
+## Optional `los_check(from: Vector3, to: Vector3) -> bool` (host): a hit claim whose ray is blocked by
+## world geometry is dropped. Unset = no line-of-sight test (range, position and weapon checks still run).
+var los_check: Callable = Callable()
+## Optional `call_gate(sender: int) -> bool` (host): may this peer phone another crew ("call:<crew>")?
+## online.gd sets it so only whoever holds a crew phone can call (docs/LEAD_DESIGN_DECISIONS.md §2).
+var call_gate: Callable = Callable()
+## Host lobby setting: Days in a Week (5 = Monday..Friday, 3 = a quick Wednesday..Friday). online.gd reads it
+## when the match starts and sends it to everyone in the round state.
+var week_days: int = 5
 ## Last reason a peer was kicked for flooding (for tests / logs).
 var last_kick: String = ""
+## Handshake tag; peers with a different one are refused. Defaults to "<protocol>|<config/version>".
+## The lead can append a world hash / seed so builds that generate a different world cannot join.
+var build_tag: String = Sec.build_tag()
+## Playable half-extent (metres) for snapshot positions; the lead can narrow it to the real map.
+var map_half_extent: float = Sec.MAP_HALF_EXTENT
+## "enet" (default) or "steam": which transport the current session uses.
+var transport: String = "enet"
+## Why the last Steam call could not run ("" when fine). Readable by UI.
+var steam_status: String = ""
 
 var _mode: int = Mode.OFFLINE
 var _connected: bool = false
 var _port: int = PORT
 var _address: String = ""
 var _latest: Dictionary = {}
+## Test hook: when valid, the host calls it (target, sender, mode, distance, frame) instead of sending the relay RPC.
+var voice_tap: Callable = Callable()
+## Host-side world knowledge for proximity occlusion (set by main.gd): `voice_space(pos: Vector3) -> int`
+## (-1 outdoors, else an id of the walk-in building around that point) and `voice_doors() -> Array` of
+## the world positions of currently open doorways.
+var voice_space: Callable = Callable()
+var voice_doors: Callable = Callable()
+var voice_range: float = 35.0
+## Host: peer id -> tick (ms) until which that peer is "on the radio": their proximity frames are dropped.
+var _voice_radio_until: Dictionary = {}
+const VOICE_RADIO_HOLD_MS: int = 300
 var _dead_until: Dictionary = {}
 var _death_ms: Dictionary = {}
 var _claim_ok: Dictionary = {}
@@ -109,6 +172,18 @@ var _threads: Array[Thread] = []
 var _upnp_gen: int = 0
 var _upnp_obj: UPNP = null
 var _upnp_port: int = 0
+var _hello_deadline: Dictionary = {}
+var _hello_rejected: Dictionary = {}
+var _budget: Dictionary = {}
+var _strikes: Sec.Strikes = Sec.Strikes.new(STRIKE_LIMIT, STRIKE_DECAY_MS)
+var _state_ms: Dictionary = {}
+var _tp_rejects: Dictionary = {}
+var _teleport_until: Dictionary = {}
+var _teleport_all_until: int = 0
+var _last_phase: String = ""
+var _steam: Node = null
+## victim -> [shooter, ms] of the last validated hit (death attribution check).
+var _last_hitter: Dictionary = {}
 
 
 func _ready() -> void:
@@ -123,6 +198,8 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_reap_threads()
+	if _mode == Mode.HOST:
+		_check_hello_timeouts()
 
 
 func _exit_tree() -> void:
@@ -135,22 +212,29 @@ func _exit_tree() -> void:
 # ---------------------------------------------------------------- connection
 
 ## Start listening. Returns OK or the ENet error (for example ERR_CANT_CREATE when the port is taken).
-func host(port: int = PORT) -> Error:
+## Host a match. `bind_ip` "127.0.0.1" keeps it on this PC (the solo Week test: no firewall prompt, no UPnP).
+func host(port: int = PORT, bind_ip: String = "*") -> Error:
 	if not is_inside_tree():
 		return ERR_UNCONFIGURED
 	leave()
 	var peer := ENetMultiplayerPeer.new()
+	if bind_ip != "*":
+		peer.set_bind_ip(bind_ip)
 	var err: Error = peer.create_server(port, MAX_PLAYERS)
 	if err != OK:
 		return err
+	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	_attach_peer(peer)
+	transport = "enet"
 	_mode = Mode.HOST
 	_connected = true
 	_port = port
 	_address = ""
 	players = {1: _new_entry(clean_name(local_name))}
 	_hello_done[1] = true
-	_start_upnp(port)
+	if bind_ip == "*":
+		_start_upnp(port)
+	set_process(true)
 	lobby_changed.emit()
 	return OK
 
@@ -174,7 +258,9 @@ func join(address: String, port: int = PORT) -> Error:
 	var err: Error = peer.create_client(host_name, use_port)
 	if err != OK:
 		return err
+	peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	_attach_peer(peer)
+	transport = "enet"
 	_mode = Mode.CLIENT
 	_connected = false
 	_port = use_port
@@ -189,6 +275,9 @@ func leave() -> void:
 	_mode = Mode.OFFLINE
 	_connected = false
 	_release_upnp()
+	if _steam != null and transport == "steam":
+		_steam.call("close")
+	transport = "enet"
 	if is_inside_tree():
 		var peer: MultiplayerPeer = multiplayer.multiplayer_peer
 		if peer != null and not (peer is OfflineMultiplayerPeer):
@@ -197,6 +286,142 @@ func leave() -> void:
 	_reset_state()
 	if was_active:
 		lobby_changed.emit()
+
+
+# ---------------------------------------------------------------- Steam (optional, UNVALIDATED)
+
+## The Steam transport helper (created on first use; harmless without the extension).
+func steam() -> Node:
+	if _steam == null:
+		var script: GDScript = load(STEAM_TRANSPORT_PATH) as GDScript if ResourceLoader.exists(STEAM_TRANSPORT_PATH) else null
+		if script == null:
+			return null
+		_steam = script.new()
+		_steam.name = "Steam"
+		add_child(_steam)
+		_steam.connect("peer_ready", _on_steam_peer_ready)
+		_steam.connect("failed", _on_steam_failed)
+		_steam.connect("invite_accepted", _on_steam_invite)
+	_steam.set("build_tag", build_tag)
+	_steam.set("max_members", MAX_PLAYERS)
+	return _steam
+
+
+## "" when Steam play is possible, else one plain sentence fragment for the UI
+## ("Steam add-on not installed", "Steam not running", ...). Never touches Steam without the extension.
+func steam_unavailable_reason() -> String:
+	if not steam_extension_present():
+		return "Steam add-on not installed"
+	var helper: Node = steam()
+	if helper == null:
+		return "Steam support missing from this build"
+	return String(helper.call("unavailable_reason"))
+
+
+## GodotSteam singleton and its multiplayer peer class both registered.
+static func steam_extension_present() -> bool:
+	return Engine.has_singleton("Steam") and ClassDB.class_exists("SteamMultiplayerPeer")
+
+
+func steam_available() -> bool:
+	return steam_unavailable_reason().is_empty()
+
+
+## Start Steam early (title screen) so invites accepted in the Steam overlay reach us, and join the
+## lobby the game was launched with (+connect_lobby <id>). No-op without the extension.
+func steam_autostart() -> void:
+	if not is_inside_tree() or not steam_extension_present():
+		steam_status = "Steam add-on not installed"
+		return
+	steam_status = steam_unavailable_reason()
+	# One line in the player's log (user://logs/godot.log) so a friend's Steam trouble can be diagnosed.
+	print("[steam] %s" % ("ready (app %d)" % int(steam().get("app_id")) if steam_status.is_empty() else steam_status))
+	if not steam_status.is_empty():
+		return
+	var launch: int = int(steam().call("launch_lobby"))
+	if launch > 0 and _mode == Mode.OFFLINE:
+		join_steam(launch)
+
+
+## Host over Steam: friends-only lobby, then the Steam invite overlay opens. ERR_UNAVAILABLE without Steam.
+func host_steam(friends_only: bool = true) -> Error:
+	if not is_inside_tree():
+		return ERR_UNCONFIGURED
+	steam_status = steam_unavailable_reason()
+	if not steam_status.is_empty():
+		return ERR_UNAVAILABLE
+	leave()
+	transport = "steam"
+	var err: Error = steam().call("host_lobby", friends_only)
+	if err != OK:
+		transport = "enet"
+		return err
+	upnp_status = "Starting a Steam lobby..."
+	return OK
+
+
+## Join a friend's Steam lobby (normally from an invite, not typed). ERR_UNAVAILABLE without Steam.
+func join_steam(lobby_id: int) -> Error:
+	if not is_inside_tree():
+		return ERR_UNCONFIGURED
+	if lobby_id <= 0:
+		return ERR_INVALID_PARAMETER
+	steam_status = steam_unavailable_reason()
+	if not steam_status.is_empty():
+		return ERR_UNAVAILABLE
+	leave()
+	transport = "steam"
+	var err: Error = steam().call("join_lobby", lobby_id)
+	if err != OK:
+		transport = "enet"
+		return err
+	# Waiting for the lobby and then the host: shows as "connecting".
+	_mode = Mode.CLIENT
+	_connected = false
+	_address = "Steam lobby"
+	lobby_changed.emit()
+	return OK
+
+
+## Host: open the Steam overlay's invite dialog again.
+func invite_steam_friends() -> void:
+	if _steam != null and transport == "steam":
+		_steam.call("invite_friends")
+
+
+func _on_steam_peer_ready(peer: MultiplayerPeer, hosting: bool) -> void:
+	if transport != "steam":
+		peer.close()
+		return
+	_attach_peer(peer)
+	if hosting:
+		_mode = Mode.HOST
+		_connected = true
+		_address = ""
+		players = {1: _new_entry(clean_name(local_name))}
+		_hello_done[1] = true
+		upnp_status = "Hosting on Steam: no ports or addresses needed. Invite friends from the Steam overlay."
+		set_process(true)
+	else:
+		_mode = Mode.CLIENT
+		_connected = false
+		_address = "Steam lobby"
+	lobby_changed.emit()
+
+
+func _on_steam_failed(reason: String) -> void:
+	steam_status = reason
+	if transport != "steam":
+		return
+	leave()
+	connection_failed.emit(reason)
+
+
+func _on_steam_invite(lobby_id: int) -> void:
+	if in_match and _mode != Mode.OFFLINE:
+		return
+	if join_steam(lobby_id) == OK:
+		steam_join_started.emit()
 
 
 ## True when hosting, or when a client has finished connecting.
@@ -319,22 +544,9 @@ func seat_holder(car: int, seat: int) -> int:
 
 # ---------------------------------------------------------------- sanitising
 
-## Printable, bracket-free, length-clamped text.
+## Printable, bracket-free (no BBCode), length-clamped text (see NetSecurity.clean_text).
 static func clean_text(text: String, max_len: int) -> String:
-	var out: String = ""
-	for index: int in range(text.length()):
-		var code: int = text.unicode_at(index)
-		if code < 32 or code == 127 or (code >= 0x80 and code < 0xA0):
-			continue
-		if (code >= 0x200B and code <= 0x200F) or (code >= 0x202A and code <= 0x202E) or (code >= 0x2066 and code <= 0x2069) or code == 0xFEFF:
-			continue
-		if code == 91:
-			out += "("
-		elif code == 93:
-			out += ")"
-		else:
-			out += text[index]
-	return out.strip_edges().substr(0, max_len)
+	return Sec.clean_text(text, max_len)
 
 
 static func clean_name(text: String) -> String:
@@ -391,7 +603,7 @@ func _default_crew() -> String:
 
 
 func _clean_dict(data: Dictionary) -> Dictionary:
-	if data.size() > 64:
+	if not Sec.dict_ok(data, 64):
 		return {}
 	return data
 
@@ -431,6 +643,99 @@ func _kick(peer: int, reason: String) -> void:
 			mp.disconnect_peer(peer)
 
 
+## Host: note a malformed / spoofed / impossible message from `peer`; enough of them means a kick.
+func _strike(peer: int, reason: String, weight: int = 1) -> void:
+	if peer == 1 or _mode != Mode.HOST:
+		return
+	if _strikes.add(peer, Time.get_ticks_msec(), weight):
+		_strikes.clear(peer)
+		_kick(peer, "too many bad messages (last: %s)" % reason)
+
+
+## Host: every client RPC spends one token from the peer's shared budget first.
+func _spend(peer: int) -> bool:
+	if peer == 1 or _mode != Mode.HOST:
+		return true
+	var bucket: Sec.TokenBucket = _budget.get(peer)
+	if bucket == null:
+		bucket = Sec.TokenBucket.new(BUDGET_BURST, BUDGET_RATE)
+		_budget[peer] = bucket
+	if bucket.take(Time.get_ticks_msec()):
+		return true
+	_strike(peer, "message budget exceeded")
+	return false
+
+
+## Host: entry gate for every client RPC except the hello: a known peer that finished the handshake
+## and is inside its message budget.
+func _joined(sender: int) -> bool:
+	if sender == 1:
+		return true
+	if not players.has(sender) or not _hello_done.has(sender):
+		if sender > 1:
+			_strike(sender, "message before handshake")
+		return false
+	return _spend(sender)
+
+
+## Host: drop peers that never finished the handshake, and refused ones once their notice went out.
+func _check_hello_timeouts() -> void:
+	if _hello_deadline.is_empty():
+		return
+	var now: int = Time.get_ticks_msec()
+	for id: int in _hello_deadline.keys():
+		if now < int(_hello_deadline[id]):
+			continue
+		_hello_deadline.erase(id)
+		if _hello_done.has(id):
+			continue
+		last_kick = "peer %d: %s" % [id, String(_hello_rejected.get(id, "no handshake within %d s" % (HELLO_TIMEOUT_MS / 1000)))]
+		print("[net] dropping ", last_kick)
+		if is_inside_tree() and multiplayer.get_peers().has(id):
+			var mp: MultiplayerPeer = multiplayer.multiplayer_peer
+			if mp != null and not (mp is OfflineMultiplayerPeer):
+				mp.disconnect_peer(id)
+
+
+## Host: may this snapshot position follow the last one? Handles respawn grace, map bounds and resync.
+func _move_ok(sender: int, pos: Vector3) -> bool:
+	if sender == 1 or _mode != Mode.HOST:
+		return true
+	if not Sec.in_map(pos, map_half_extent):
+		_strike(sender, "position outside the map")
+		return false
+	var now: int = Time.get_ticks_msec()
+	var prev: Dictionary = _latest.get(sender, {})
+	var last_ms: int = int(_state_ms.get(sender, -1))
+	var grace: bool = now < _teleport_all_until or now < int(_teleport_until.get(sender, 0)) or (int(prev.get("flags", 0)) & 4) != 0
+	if prev.is_empty() or last_ms < 0 or grace:
+		_tp_rejects.erase(sender)
+		_state_ms[sender] = now
+		return true
+	if Sec.step_ok(prev.get("pos", pos), pos, float(now - last_ms) / 1000.0):
+		_tp_rejects.erase(sender)
+		_state_ms[sender] = now
+		return true
+	var rejects: int = int(_tp_rejects.get(sender, 0)) + 1
+	_tp_rejects[sender] = rejects
+	if rejects >= TELEPORT_RESYNC:
+		# Legit rare teleports (stuck-car recovery) end up here once; a speed hacker keeps striking.
+		_tp_rejects.erase(sender)
+		_state_ms[sender] = now
+		_strike(sender, "teleport")
+		return true
+	return false
+
+
+## Let `peer` (0 = everyone) jump once, e.g. after a respawn or round reset.
+func allow_teleport(peer: int = 0) -> void:
+	var until: int = Time.get_ticks_msec() + TELEPORT_GRACE_MS
+	if peer == 0:
+		_teleport_all_until = until
+	else:
+		_teleport_until[peer] = until
+
+
 # ---------------------------------------------------------------- peer plumbing
 
 func _attach_peer(peer: MultiplayerPeer) -> void:
@@ -439,7 +744,8 @@ func _attach_peer(peer: MultiplayerPeer) -> void:
 	if scene_mp != null:
 		# Never let remote peers send Objects or scripts: only plain Variants are decoded.
 		scene_mp.allow_object_decoding = false
-		scene_mp.server_relay = true
+		# Clients never reach each other directly: the host validates and re-broadcasts (see _relay_*).
+		scene_mp.server_relay = false
 
 
 func _reset_state() -> void:
@@ -452,6 +758,16 @@ func _reset_state() -> void:
 	_hello_done.clear()
 	_rl.clear()
 	_seats.clear()
+	_hello_deadline.clear()
+	_hello_rejected.clear()
+	_budget.clear()
+	_strikes.reset()
+	_state_ms.clear()
+	_tp_rejects.clear()
+	_teleport_until.clear()
+	_teleport_all_until = 0
+	_last_phase = ""
+	_last_hitter.clear()
 
 
 func _on_peer_connected(id: int) -> void:
@@ -461,6 +777,7 @@ func _on_peer_connected(id: int) -> void:
 		multiplayer.multiplayer_peer.disconnect_peer(id)
 		return
 	players[id] = _new_entry("Player %d" % id)
+	_hello_deadline[id] = Time.get_ticks_msec() + HELLO_TIMEOUT_MS
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -474,6 +791,15 @@ func _on_peer_disconnected(id: int) -> void:
 	_claim_ok.erase(id)
 	_hello_done.erase(id)
 	_rl.erase(id)
+	_voice_radio_until.erase(id)
+	_hello_deadline.erase(id)
+	_hello_rejected.erase(id)
+	_budget.erase(id)
+	_strikes.clear(id)
+	_state_ms.erase(id)
+	_tp_rejects.erase(id)
+	_teleport_until.erase(id)
+	_last_hitter.erase(id)
 	for key: Vector2i in _seats.keys():
 		if int(_seats[key]) == id:
 			host_seat_leave.emit(id, key.x, key.y)
@@ -489,7 +815,7 @@ func _on_connected_to_server() -> void:
 	if _mode != Mode.CLIENT:
 		return
 	_connected = true
-	_host_hello.rpc_id(1, clean_name(local_name))
+	_host_hello.rpc_id(1, clean_name(local_name), build_tag)
 	connected.emit()
 	lobby_changed.emit()
 
@@ -498,6 +824,8 @@ func _on_connection_failed() -> void:
 	if _mode != Mode.CLIENT:
 		return
 	var message: String = "Could not connect to %s:%d — is the host running and the port open?" % [_address, _port]
+	if transport == "steam":
+		message = "Could not reach the host over Steam. Ask them to invite you again."
 	leave()
 	connection_failed.emit(message)
 
@@ -512,7 +840,12 @@ func _on_server_disconnected() -> void:
 func _broadcast_lobby() -> void:
 	if _mode != Mode.HOST:
 		return
-	_sync_lobby.rpc(players, in_match)
+	# Peers still in (or refused at) the handshake are not announced to the others.
+	var public: Dictionary = {}
+	for id: int in players.keys():
+		if _hello_done.has(id):
+			public[id] = players[id]
+	_sync_lobby.rpc(public, in_match)
 	lobby_changed.emit()
 
 
@@ -523,23 +856,47 @@ func _can_send() -> bool:
 # ---------------------------------------------------------------- lobby RPCs
 
 @rpc("any_peer", "reliable", "call_remote", 0)
-func _host_hello(display_name: String) -> void:
+func _host_hello(display_name: String, version: String) -> void:
 	if _mode != Mode.HOST:
 		return
-	var sender: int = multiplayer.get_remote_sender_id()
-	if not players.has(sender) or _hello_done.has(sender):
-		return
-	if not _rate_ok(sender, "hello", LIMIT_HELLO):
-		return
+	_h_hello(multiplayer.get_remote_sender_id(), display_name, version)
+
+
+## Host handshake: name + build tag. Returns "" when accepted, else the refusal reason.
+func _h_hello(sender: int, display_name: String, version: String) -> String:
+	if not players.has(sender) or _hello_done.has(sender) or _hello_rejected.has(sender):
+		_strike(sender, "repeated hello")
+		return "repeated"
+	if not _rate_ok(sender, "hello", LIMIT_HELLO) or not _spend(sender):
+		return "flood"
+	var problem: String = Sec.check_version(version, build_tag)
+	if not problem.is_empty():
+		_hello_rejected[sender] = problem
+		# Tell them why, then drop them shortly after (the notice needs a moment to leave).
+		_hello_deadline[sender] = Time.get_ticks_msec() + 500
+		if sender != 1 and is_inside_tree() and multiplayer.get_peers().has(sender):
+			_hello_refused.rpc_id(sender, problem)
+		return problem
 	_hello_done[sender] = true
+	_hello_deadline.erase(sender)
 	(players[sender] as Dictionary)["name"] = clean_name(display_name)
 	_broadcast_lobby()
 	peer_joined.emit(sender)
+	return ""
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _hello_refused(reason: String) -> void:
+	if _mode != Mode.CLIENT:
+		return
+	var message: String = "The host refused the connection: %s. Both players need the same game build." % clean_text(reason, 96)
+	leave()
+	connection_failed.emit(message)
 
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_request_crew(crew: String) -> void:
-	if _mode != Mode.HOST:
+	if _mode != Mode.HOST or not _joined(multiplayer.get_remote_sender_id()):
 		return
 	_h_set_crew(multiplayer.get_remote_sender_id(), crew)
 
@@ -595,6 +952,7 @@ func _match_started() -> void:
 	if in_match or _mode == Mode.OFFLINE:
 		return
 	in_match = true
+	allow_teleport()
 	for entry: Dictionary in players.values():
 		entry["in_match"] = true
 	match_started.emit()
@@ -625,75 +983,153 @@ func _peer_gone(id: int) -> void:
 
 
 # ---------------------------------------------------------------- snapshots
+#
+# Clients send snapshots / fx / glass / world events to the host only (server relay is off). The host
+# validates, uses them, and re-broadcasts to the other clients through the authority-only `_relay_*`
+# RPCs, stamping the real sender id. Clients accept these messages from the host (peer 1) only.
+
+## Host: peers that should receive a relay of `sender`'s message.
+func _relay_targets(sender: int) -> Array[int]:
+	var out: Array[int] = []
+	if _mode != Mode.HOST or not is_inside_tree():
+		return out
+	var live: PackedInt32Array = multiplayer.get_peers()
+	for id: int in _hello_done.keys():
+		if id != 1 and id != sender and live.has(id):
+			out.append(id)
+	return out
+
+
+## Common gate for the any_peer broadcast RPCs: on a client only the host may send; on the host the
+## sender must have joined, be inside its budget and under the per-kind rate.
+func _gate(sender: int, key: String, limit: int) -> bool:
+	if _mode == Mode.CLIENT:
+		return sender == 1
+	if _mode != Mode.HOST or sender <= 1:
+		return false
+	return _joined(sender) and _rate_ok(sender, key, limit)
+
+
+func _check_state(sender: int, pos: Vector3, yaw: float, pitch: float, flags: int, weapon: String, car: int, seat: int, health: float) -> Dictionary:
+	if not finite_v(pos) or not finite_f(yaw) or not finite_f(pitch) or not finite_f(health):
+		_strike(sender, "non-finite snapshot")
+		return {}
+	if not Sec.string_ok(weapon, 32) or not weapon_ok(weapon) or car < -1 or car >= max_cars or seat < -1 or seat >= MAX_SEAT:
+		_strike(sender, "bad snapshot fields")
+		return {}
+	return {
+		"pos": pos, "yaw": wrapf(yaw, -TAU, TAU), "pitch": clampf(pitch, -PI, PI), "flags": clampi(flags, 0, 255), "weapon": weapon,
+		"car": car, "seat": seat, "health": clampf(health, 0.0, 1000.0),
+	}
+
 
 func send_state(pos: Vector3, yaw: float, pitch: float, flags: int, weapon: String, car: int, seat: int, health: float) -> void:
 	var me: int = my_id()
 	if me == 0:
 		return
 	_latest[me] = {"pos": pos, "yaw": yaw, "pitch": pitch, "flags": flags, "weapon": weapon, "car": car, "seat": seat, "health": health}
-	if _can_send():
+	if _mode == Mode.HOST:
 		_state.rpc(pos, yaw, pitch, flags, weapon, car, seat, health)
+	elif _can_send():
+		_state.rpc_id(1, pos, yaw, pitch, flags, weapon, car, seat, health)
 
 
 @rpc("any_peer", "unreliable_ordered", "call_remote", 1)
 func _state(pos: Vector3, yaw: float, pitch: float, flags: int, weapon: String, car: int, seat: int, health: float) -> void:
-	if _mode == Mode.OFFLINE:
-		return
 	var sender: int = multiplayer.get_remote_sender_id()
-	if sender <= 0 or sender == my_id():
+	if not _gate(sender, "state", LIMIT_STATE):
 		return
-	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "state", LIMIT_STATE)):
+	var state: Dictionary = _check_state(sender, pos, yaw, pitch, flags, weapon, car, seat, health)
+	if state.is_empty() or not _move_ok(sender, pos):
 		return
-	if not finite_v(pos) or not finite_f(yaw) or not finite_f(pitch) or not finite_f(health):
-		return
-	if not weapon_ok(weapon) or car < -1 or car >= max_cars or seat < -1 or seat >= MAX_SEAT:
-		return
-	var state: Dictionary = {
-		"pos": pos, "yaw": yaw, "pitch": pitch, "flags": clampi(flags, 0, 255), "weapon": weapon,
-		"car": car, "seat": seat, "health": clampf(health, 0.0, 1000.0),
-	}
 	_latest[sender] = state
 	remote_state.emit(sender, state)
+	for id: int in _relay_targets(sender):
+		_relay_state.rpc_id(id, sender, pos, float(state["yaw"]), float(state["pitch"]), int(state["flags"]), weapon, car, seat, float(state["health"]))
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 1)
+func _relay_state(id: int, pos: Vector3, yaw: float, pitch: float, flags: int, weapon: String, car: int, seat: int, health: float) -> void:
+	if _mode != Mode.CLIENT or id <= 1 or id == my_id():
+		return
+	var state: Dictionary = _check_state(id, pos, yaw, pitch, flags, weapon, car, seat, health)
+	if state.is_empty():
+		return
+	_latest[id] = state
+	remote_state.emit(id, state)
 
 
 func send_car_state(car: int, xform: Transform3D, vel: Vector3, steer: float, speed: float, flags: int) -> void:
-	if _can_send():
+	if _mode == Mode.HOST:
 		_car_state.rpc(car, xform, vel, steer, speed, flags)
+	elif _can_send():
+		_car_state.rpc_id(1, car, xform, vel, steer, speed, flags)
+
+
+func _car_fields_ok(sender: int, car: int, xform: Transform3D, vel: Vector3, steer: float, speed: float) -> bool:
+	if not _car_ok(car) or not finite_t(xform) or not finite_v(vel) or not finite_f(steer) or not finite_f(speed):
+		_strike(sender, "bad car state")
+		return false
+	if _mode == Mode.HOST and sender != 1 and not Sec.in_map(xform.origin, map_half_extent):
+		_strike(sender, "car outside the map")
+		return false
+	return true
 
 
 @rpc("any_peer", "unreliable_ordered", "call_remote", 1)
 func _car_state(car: int, xform: Transform3D, vel: Vector3, steer: float, speed: float, flags: int) -> void:
-	if _mode == Mode.OFFLINE:
-		return
 	var sender: int = multiplayer.get_remote_sender_id()
-	if sender <= 0 or sender == my_id() or not _car_ok(car) or not _driver_ok(sender, car):
+	if not _gate(sender, "car", LIMIT_CAR) or not _car_fields_ok(sender, car, xform, vel, steer, speed):
 		return
-	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "car", LIMIT_CAR)):
+	if not _driver_ok(sender, car):
+		# Somebody else's car: silently ignored (seat changes race snapshots), no strike.
 		return
-	if not finite_t(xform) or not finite_v(vel) or not finite_f(steer) or not finite_f(speed):
+	var clean_flags: int = clampi(flags, 0, 255)
+	remote_car.emit(car, {"from": sender, "xform": xform, "vel": vel, "steer": steer, "speed": speed, "flags": clean_flags})
+	for id: int in _relay_targets(sender):
+		_relay_car.rpc_id(id, sender, car, xform, vel, steer, speed, clean_flags)
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 1)
+func _relay_car(from_id: int, car: int, xform: Transform3D, vel: Vector3, steer: float, speed: float, flags: int) -> void:
+	if _mode != Mode.CLIENT or from_id <= 1 or from_id == my_id() or not _car_fields_ok(from_id, car, xform, vel, steer, speed):
 		return
-	remote_car.emit(car, {"from": sender, "xform": xform, "vel": vel, "steer": steer, "speed": speed, "flags": clampi(flags, 0, 255)})
+	if not _driver_ok(from_id, car):
+		return
+	remote_car.emit(car, {"from": from_id, "xform": xform, "vel": vel, "steer": steer, "speed": speed, "flags": clampi(flags, 0, 255)})
 
 
 # ---------------------------------------------------------------- shots and damage
 
 func send_shot_fx(origin: Vector3, end: Vector3, weapon: String, quiet: bool) -> void:
-	if _can_send():
+	if _mode == Mode.HOST:
 		_shot_fx.rpc(origin, end, weapon, quiet)
+	elif _can_send():
+		_shot_fx.rpc_id(1, origin, end, weapon, quiet)
+
+
+func _fx_ok(sender: int, origin: Vector3, end: Vector3, weapon: String) -> bool:
+	if not finite_v(origin) or not finite_v(end) or not Sec.string_ok(weapon, 32) or not weapon_ok(weapon):
+		_strike(sender, "bad shot fx")
+		return false
+	return origin.distance_to(end) <= MAX_HIT_RANGE * 2.0
 
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _shot_fx(origin: Vector3, end: Vector3, weapon: String, quiet: bool) -> void:
-	if _mode == Mode.OFFLINE:
-		return
 	var sender: int = multiplayer.get_remote_sender_id()
-	if sender <= 0 or sender == my_id():
-		return
-	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "fx", LIMIT_HIT)):
-		return
-	if not finite_v(origin) or not finite_v(end) or not weapon_ok(weapon):
+	if not _gate(sender, "fx", LIMIT_HIT) or not _fx_ok(sender, origin, end, weapon):
 		return
 	remote_shot.emit(sender, origin, end, weapon, quiet)
+	for id: int in _relay_targets(sender):
+		_relay_shot_fx.rpc_id(id, sender, origin, end, weapon, quiet)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _relay_shot_fx(from_id: int, origin: Vector3, end: Vector3, weapon: String, quiet: bool) -> void:
+	if _mode != Mode.CLIENT or from_id <= 1 or from_id == my_id() or not _fx_ok(from_id, origin, end, weapon):
+		return
+	remote_shot.emit(from_id, origin, end, weapon, quiet)
 
 
 func send_claim_hit(victim: int, amount: float, head: bool, origin: Vector3, point: Vector3, weapon: String) -> void:
@@ -705,7 +1141,7 @@ func send_claim_hit(victim: int, amount: float, head: bool, origin: Vector3, poi
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_claim_hit(victim: int, amount: float, head: bool, origin: Vector3, point: Vector3, weapon: String) -> void:
-	if _mode != Mode.HOST:
+	if _mode != Mode.HOST or not _joined(multiplayer.get_remote_sender_id()):
 		return
 	_h_claim_hit(multiplayer.get_remote_sender_id(), victim, amount, head, origin, point, weapon)
 
@@ -719,7 +1155,13 @@ func _h_claim_hit(sender: int, victim: int, amount: float, head: bool, origin: V
 		return false
 	if not _rate_ok(sender, "claim", LIMIT_HIT * 2):
 		return false
-	if not finite_f(amount) or amount <= 0.0 or not finite_v(origin) or not finite_v(point) or not weapon_ok(weapon):
+	if not finite_f(amount) or amount <= 0.0 or not finite_v(origin) or not finite_v(point) or not Sec.string_ok(weapon, 32) or not weapon_ok(weapon):
+		_strike(sender, "malformed hit claim")
+		return false
+	# The claimed weapon must be the one the shooter is holding (when their snapshot says so). The host
+	# is the referee in the listen-server model, so its own claims skip the client-only checks.
+	var held: String = String((_latest.get(sender, {}) as Dictionary).get("weapon", weapon))
+	if sender != 1 and not weapon.is_empty() and not held.is_empty() and held != weapon:
 		return false
 	# Accepted claims are capped at 25 per second per peer (one per 40 ms).
 	var now: int = Time.get_ticks_msec()
@@ -733,8 +1175,16 @@ func _h_claim_hit(sender: int, victim: int, amount: float, head: bool, origin: V
 		return false
 	if point.distance_to(latest_pos(victim)) > HIT_POINT_SLACK:
 		return false
+	# The shot must start near where the shooter actually is.
+	if sender != 1 and _latest.has(sender) and origin.distance_to(latest_pos(sender)) > HIT_ORIGIN_SLACK:
+		_strike(sender, "hit claim from far away")
+		return false
+	# Optional line-of-sight hook set by the lead: `los_check(from: Vector3, to: Vector3) -> bool`.
+	if los_check.is_valid() and not bool(los_check.call(origin, point)):
+		return false
 	_claim_ok[sender] = now
-	var dealt: float = minf(amount, MAX_HIT_DAMAGE)
+	_last_hitter[victim] = [sender, now]
+	var dealt: float = minf(amount, Sec.max_claim_damage(weapon, FastPlayer.WEAPONS, MAX_HIT_DAMAGE))
 	hit_validated.emit(sender, victim, dealt, head, weapon)
 	if victim == 1:
 		damage_received.emit(dealt, origin, sender)
@@ -759,7 +1209,7 @@ func send_report_death(killer: int, pos: Vector3) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_report_death(killer: int, pos: Vector3) -> void:
-	if _mode != Mode.HOST:
+	if _mode != Mode.HOST or not _joined(multiplayer.get_remote_sender_id()):
 		return
 	# The sender IS the victim: nobody can report another peer's death.
 	_h_report_death(multiplayer.get_remote_sender_id(), killer, pos)
@@ -776,6 +1226,12 @@ func _h_report_death(sender: int, killer: int, pos: Vector3) -> void:
 	_death_ms[sender] = now
 	if killer != 0 and not players.has(killer):
 		killer = 0
+	# A client can only blame the player whose hit the host validated on it in the last 15 s
+	# (otherwise it could fake kills between crews and wipe their clean-deal bonus).
+	if sender != 1 and killer != 0:
+		var last: Array = _last_hitter.get(sender, [0, -100000])
+		if int(last[0]) != killer or now - int(last[1]) > 15000:
+			killer = 0
 	_player_died.rpc(sender, killer, pos)
 
 
@@ -784,6 +1240,9 @@ func _player_died(id: int, killer: int, pos: Vector3) -> void:
 	if _mode == Mode.OFFLINE or not finite_v(pos):
 		return
 	_dead_until[id] = Time.get_ticks_msec() + 1000
+	if _mode == Mode.HOST:
+		# They respawn at HQ after the timer: allow that jump.
+		_teleport_until[id] = Time.get_ticks_msec() + 30000
 	player_died.emit(id, killer, pos)
 
 
@@ -798,7 +1257,7 @@ func send_request_seat(car: int, seat: int) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_request_seat(car: int, seat: int) -> void:
-	if _mode == Mode.HOST:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
 		_h_request_seat(multiplayer.get_remote_sender_id(), car, seat)
 
 
@@ -818,7 +1277,7 @@ func send_leave_seat(car: int, seat: int) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_leave_seat(car: int, seat: int) -> void:
-	if _mode == Mode.HOST:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
 		_h_leave_seat(multiplayer.get_remote_sender_id(), car, seat)
 
 
@@ -827,6 +1286,7 @@ func _h_leave_seat(sender: int, car: int, seat: int) -> void:
 		return
 	# Only the peer that holds the seat may free it.
 	if seat_holder(car, seat) != sender:
+		_strike(sender, "leaving a seat it does not hold")
 		return
 	if _rate_ok(sender, "req", LIMIT_REQUEST):
 		host_seat_leave.emit(sender, car, seat)
@@ -858,7 +1318,7 @@ func send_car_damage(car: int, amount: float) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_car_damage(car: int, amount: float) -> void:
-	if _mode == Mode.HOST:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
 		_h_car_damage(multiplayer.get_remote_sender_id(), car, amount)
 
 
@@ -883,18 +1343,28 @@ func _car_health(car: int, health: float, disabled: bool) -> void:
 
 
 func send_glass(car: int, index: int) -> void:
-	if _can_send():
+	if _mode == Mode.HOST:
 		_glass.rpc(car, index)
+	elif _can_send():
+		_glass.rpc_id(1, car, index)
 
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _glass(car: int, index: int) -> void:
-	if _mode == Mode.OFFLINE:
-		return
 	var sender: int = multiplayer.get_remote_sender_id()
-	if sender <= 0 or sender == my_id() or not _car_ok(car) or index < 0 or index > 255:
+	if not _gate(sender, "car", LIMIT_CAR):
 		return
-	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "car", LIMIT_CAR)):
+	if not _car_ok(car) or index < 0 or index > 255:
+		_strike(sender, "bad glass index")
+		return
+	remote_glass.emit(car, index)
+	for id: int in _relay_targets(sender):
+		_relay_glass.rpc_id(id, sender, car, index)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _relay_glass(from_id: int, car: int, index: int) -> void:
+	if _mode != Mode.CLIENT or from_id <= 1 or from_id == my_id() or not _car_ok(car) or index < 0 or index > 255:
 		return
 	remote_glass.emit(car, index)
 
@@ -910,12 +1380,13 @@ func send_item_request(action: String, item: int, pos: Vector3) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_item_request(action: String, item: int, pos: Vector3) -> void:
-	if _mode == Mode.HOST:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
 		_h_item_request(multiplayer.get_remote_sender_id(), action, item, pos)
 
 
 func _h_item_request(sender: int, action: String, item: int, pos: Vector3) -> void:
 	if not players.has(sender) or not ITEM_ACTIONS.has(action) or item < 0 or item >= max_items or not finite_v(pos):
+		_strike(sender, "bad item request")
 		return
 	if _rate_ok(sender, "req", LIMIT_REQUEST):
 		host_item_request.emit(sender, action, item, pos)
@@ -944,6 +1415,11 @@ func broadcast_round(data: Dictionary) -> void:
 func _round_state(data: Dictionary) -> void:
 	if _mode == Mode.OFFLINE:
 		return
+	var phase: String = str(data.get("phase", "")) if data.size() <= 64 else ""
+	if phase != _last_phase:
+		# A new phase resets everyone to their HQ: let those jumps through.
+		_last_phase = phase
+		allow_teleport()
 	round_state.emit(_clean_dict(data))
 
 
@@ -974,18 +1450,37 @@ const WORLD_KINDS: PackedStringArray = ["door", "lift"]
 
 
 func send_world_event(kind: String, index: int, value: int) -> void:
-	if _can_send():
+	if _mode == Mode.HOST:
 		_world_event.rpc(kind, index, value)
+	elif _can_send():
+		_world_event.rpc_id(1, kind, index, value)
+
+
+## Highest door or lift index a world event may name. Map 0.8 has about 1,270 doors; tests/net_security.gd checks
+## the real world stays under this.
+const MAX_WORLD_INDEX: int = 8191
+
+
+static func world_event_ok(kind: String, index: int, value: int) -> bool:
+	return kind.length() <= 8 and WORLD_KINDS.has(kind) and index >= 0 and index <= MAX_WORLD_INDEX and value >= -1 and value <= 255
 
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _world_event(kind: String, index: int, value: int) -> void:
-	if _mode == Mode.OFFLINE:
-		return
 	var sender: int = multiplayer.get_remote_sender_id()
-	if sender <= 0 or sender == my_id() or not WORLD_KINDS.has(kind) or index < 0 or index > 1023 or value < -1 or value > 255:
+	if not _gate(sender, "req", LIMIT_REQUEST):
 		return
-	if _mode == Mode.HOST and (not players.has(sender) or not _rate_ok(sender, "req", LIMIT_REQUEST)):
+	if not world_event_ok(kind, index, value):
+		_strike(sender, "bad world event")
+		return
+	world_event.emit(kind, index, value)
+	for id: int in _relay_targets(sender):
+		_relay_world_event.rpc_id(id, sender, kind, index, value)
+
+
+@rpc("authority", "reliable", "call_remote", 0)
+func _relay_world_event(from_id: int, kind: String, index: int, value: int) -> void:
+	if _mode != Mode.CLIENT or from_id <= 1 or from_id == my_id() or not world_event_ok(kind, index, value):
 		return
 	world_event.emit(kind, index, value)
 
@@ -1002,15 +1497,17 @@ func send_chat(channel: String, text: String) -> void:
 
 @rpc("any_peer", "reliable", "call_remote", 0)
 func _host_chat(channel: String, text: String) -> void:
-	if _mode == Mode.HOST:
+	if _mode == Mode.HOST and _joined(multiplayer.get_remote_sender_id()):
 		_h_chat(multiplayer.get_remote_sender_id(), channel, text)
 
 
 func _h_chat(sender: int, channel: String, text: String) -> void:
-	if not players.has(sender) or not channel_ok(channel):
+	if not players.has(sender) or not Sec.string_ok(channel, 32) or not channel_ok(channel):
 		return
 	var clean: String = clean_text(text, CHAT_MAX)
 	if clean.is_empty() or not _rate_ok(sender, "chat", LIMIT_CHAT):
+		return
+	if channel.begins_with("call:") and call_gate.is_valid() and not bool(call_gate.call(sender)):
 		return
 	var sender_crew: String = crew_of(sender)
 	for id: int in players.keys():
@@ -1035,6 +1532,80 @@ func _chat(from_id: int, channel: String, text: String) -> void:
 	var clean: String = clean_text(text, CHAT_MAX)
 	if not clean.is_empty():
 		chat.emit(from_id, channel, clean)
+
+
+# ---------------------------------------------------------------- voice
+#
+# Clients send ADPCM frames (scripts/voice_codec.gd) to the host on transfer channel 2, unreliable.
+# The host validates sender / mode / size / rate, decides who may hear it (scripts/voice_relay.gd:
+# proximity = within voice_range metres by the HOST'S view of positions, crew = the talker's crew only)
+# and relays with the real sender id stamped in. Clients accept voice from the host only.
+
+func send_voice(mode: int, frame: PackedByteArray) -> void:
+	if _mode == Mode.HOST:
+		_h_voice(1, mode, frame)
+	elif _can_send():
+		_host_voice.rpc_id(1, mode, frame)
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote", 2)
+func _host_voice(mode: int, frame: PackedByteArray) -> void:
+	var sender: int = multiplayer.get_remote_sender_id()
+	if _gate(sender, "voice", LIMIT_VOICE):
+		_h_voice(sender, mode, frame)
+
+
+## Host: validate and route one frame. Returns how many listeners it went to (0 when dropped).
+func _h_voice(sender: int, mode: int, frame: PackedByteArray) -> int:
+	if not players.has(sender) or not VoiceRelayS.valid_mode(mode):
+		_strike(sender, "bad voice mode")
+		return 0
+	if frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
+		_strike(sender, "bad voice frame size")
+		return 0
+	var now: int = Time.get_ticks_msec()
+	if mode == VoiceRelayS.Mode.CREW:
+		_voice_radio_until[sender] = now + VOICE_RADIO_HOLD_MS
+	elif now < int(_voice_radio_until.get(sender, 0)):
+		# Holding the squad key mutes you in proximity: the same mic can't go out both ways.
+		return 0
+	var peers: Dictionary = {}
+	for id: int in players.keys():
+		var pos: Vector3 = Vector3.INF
+		var state: Dictionary = _latest.get(id, {})
+		if state.has("pos"):
+			pos = state["pos"]
+		var space: int = -1
+		if voice_space.is_valid() and pos.is_finite():
+			space = int(voice_space.call(pos))
+		peers[id] = {"crew": crew_of(id), "pos": pos, "dead": is_dead(id), "space": space}
+	var doors: Array = []
+	if voice_doors.is_valid():
+		doors = voice_doors.call()
+	var sent: int = 0
+	for entry: Array in VoiceRelayS.targets(sender, mode, peers, voice_range, doors):
+		var id: int = int(entry[0])
+		var dist: float = float(entry[1])
+		var muffled: bool = bool(entry[2])
+		if voice_tap.is_valid():
+			voice_tap.call(id, sender, mode, dist, frame, muffled)
+			sent += 1
+		elif id == 1:
+			voice_frame.emit(sender, mode, frame, dist, muffled)
+			sent += 1
+		elif is_inside_tree() and multiplayer.get_peers().has(id) and _hello_done.has(id):
+			_relay_voice.rpc_id(id, sender, mode, dist, frame, muffled)
+			sent += 1
+	return sent
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 2)
+func _relay_voice(from_id: int, mode: int, dist: float, frame: PackedByteArray, muffled: bool) -> void:
+	if _mode != Mode.CLIENT or multiplayer.get_remote_sender_id() != 1 or from_id <= 1 or from_id == my_id():
+		return
+	if not VoiceRelayS.valid_mode(mode) or not is_finite(dist) or frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
+		return
+	voice_frame.emit(from_id, mode, frame, clampf(dist, 0.0, 9999.0), muffled)
 
 
 # ---------------------------------------------------------------- UPnP (worker threads)

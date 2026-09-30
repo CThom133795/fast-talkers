@@ -21,6 +21,8 @@ const RetroTextures = preload("res://scripts/retro_textures.gd")
 const Factions = preload("res://scripts/factions.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
 const Interiors = preload("res://scripts/interiors.gd")
+const CityDetail = preload("res://scripts/city_detail.gd")
+const CityFill = preload("res://scripts/city_fill.gd")
 ## Kept for the city-limit tests: the Harbor mole's north quay is at z = -HALF on Halcyon
 ## Avenue, and Union Street ends at the West Slip quay at x = -HALF.
 const HALF: float = 200.0
@@ -32,16 +34,25 @@ const COPING_HEIGHT: float = 0.34
 const RAIL_HEIGHT: float = 1.12
 ## Visual layer for interior meshes: interior lamps only light this layer.
 const INTERIOR_LAYER: int = 2
+## Small static clutter renders on its own layer that the neon street lights skip: a merged
+## 60 m clutter cell would otherwise take an extra lighting pass per surface for every nearby sign.
+const CLUTTER_LAYER: int = 3
 ## Neighbourhood kits: authored around `from` (0.4 coordinates), placed at `to` turned by
 ## `yaw` (radians about +Y). Their outer frame is `from` ± `half`.
 const KITS: Dictionary = {
-	"lantern": {"from": Vector2(-147, -147), "to": Vector2(-178, -53), "yaw": PI * 0.5 + 0.1, "half": Vector2(53, 53)},
-	"solana": {"from": Vector2(147, -147), "to": Vector2(158, -153), "yaw": -PI * 0.5 - 0.16, "half": Vector2(53, 53)},
-	"kingsway": {"from": Vector2(147, 147), "to": Vector2(166, 40), "yaw": PI * 0.5 + 0.08, "half": Vector2(53, 53)},
-	"morris": {"from": Vector2(-147, 147), "to": Vector2(-70, 148), "yaw": -PI * 0.5 - 0.12, "half": Vector2(53, 53)},
-	"strip": {"from": Vector2(147, 0), "to": Vector2(95, 162), "yaw": -PI * 0.5, "half": Vector2(53, 82)},
-	"station": {"from": Vector2(0, 152), "to": Vector2(-190, 140), "yaw": -PI * 0.5 + 0.06, "half": Vector2(82, 58)},
+	"lantern": {"from": Vector2(-147, -147), "to": Vector2(-300, -70), "yaw": PI * 0.5 + 0.1, "half": Vector2(53, 53)},
+	"solana": {"from": Vector2(147, -147), "to": Vector2(309, -174), "yaw": -PI * 0.5 - 0.16, "half": Vector2(53, 53)},
+	"kingsway": {"from": Vector2(147, 147), "to": Vector2(240, 190), "yaw": PI * 0.5 + 0.08, "half": Vector2(53, 53)},
+	"morris": {"from": Vector2(-147, 147), "to": Vector2(-90, 253), "yaw": -PI * 0.5 - 0.12, "half": Vector2(53, 53)},
+	"strip": {"from": Vector2(147, 0), "to": Vector2(115, 338), "yaw": -PI * 0.5, "half": Vector2(53, 82)},
+	"station": {"from": Vector2(0, 152), "to": Vector2(-255, 230), "yaw": -PI * 0.5 + 0.06, "half": Vector2(82, 58)},
 }
+## Where the 0.5 sites that hang off a kit went (0.6 moved every kit outward). The strip's
+## beach, pier and quay gap, Morris Marina and Kingsway Docks are authored in 0.5 world
+## coordinates and simply shift by the same amount as their kit.
+const STRIP_SHIFT: Vector2 = Vector2(20, 176)
+const MORRIS_SHIFT: Vector2 = Vector2(-20, 132)
+const DOCKS_SHIFT: Vector2 = Vector2(160, 111)
 const RAILS: Array[float] = [168.0, 178.0]
 
 var _materials: Dictionary = {}
@@ -55,6 +66,30 @@ var _lights: Array[OmniLight3D] = []
 ## compatibility) and the exact outlines in `footprint_polys` (same order).
 var footprints: Array[Rect2] = []
 var footprint_polys: Array[PackedVector2Array] = []
+## Every building on the map (0.8), one record each, for the enterable-ratio audit and the map:
+## {name, kind ("solid", "shop", "plot" or a prefab kind), enterable, footprints (indices into
+## footprint_polys)}. A record covers all the outlines its builder registered while it was open.
+var buildings: Array[Dictionary] = []
+var _building_open: Dictionary = {}
+## World x/z bounds of everything solid or tall the builders placed (props, walls, yards), so the
+## 0.8 fill pass (city_fill.gd) never drops a building on top of hand-authored dressing.
+var _blockers: Array[Rect2] = []
+## The 0.8 fill pass (scripts/city_fill.gd): its `placed` lots and `alleys` are for the tests.
+var city_fill: RefCounted
+var _blockers_off: bool = false
+var _road_boxes: Array[Rect2] = []
+var _solid_grid: Dictionary = {}
+## The part of `_blockers` that stops a car-height (1.3 m) line of sight: used by the fill pass to plan chicanes.
+var eye_blockers: Array[Rect2] = []
+## Buildings the fill passes made, for the far-distance stand-ins (city_fill.gd builds one merged, vertex-coloured
+## massing mesh per 96 m cell from these): {center (x/z), size (frontage, height, depth), yaw, color}.
+var lod_lots: Array[Dictionary] = []
+## Corner polygons of the traffic-calming kerb islands the fill pass put in the streets (see city_fill.gd).
+var calming_islands: Array[PackedVector2Array] = []
+## Per island: {center, u (along the street), n (across), width, side (which kerb), axis (the street's centre line at the island)}.
+var calming_info: Array[Dictionary] = []
+## Beyond this distance a fill building is drawn as its massing box only.
+const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
 var districts: Array[Dictionary] = []
 ## Named places for the map and mission sites: {name, at, neutral}.
@@ -65,6 +100,22 @@ var landmarks: Array[Dictionary] = []
 var crew_spawns: Dictionary = {}
 ## Open paved squares and parks (x/z polygons) for the map.
 var plazas: Array[PackedVector2Array] = []
+## Authored public spaces and their solid furniture; used by collision/playtest checks.
+var public_spaces: Array[Dictionary] = []
+var city_furniture: Array[Dictionary] = []
+## Park/plaza perimeter rail runs (CityDetail): {site, from, to, y, inward}. Solid to vehicles.
+var park_rails: Array[Dictionary] = []
+## Static lived-in clutter (alley bins, bags, boxes, rooftop plant, oil stains): kind, at (x/z), radius, roof.
+var city_clutter: Array[Dictionary] = []
+## Flat tower roofs for rooftop plant: world centre, size, yaw, roof height, world front, business sign.
+var _roofs: Array[Dictionary] = []
+## Top faces of raised slabs (world polygon, height) so late dressing can sit on the real surface.
+var _slab_tops: Array[Dictionary] = []
+## Generic shop-sign uses per text, so no sign is stamped across the city more than twice.
+var _sign_uses: Dictionary = {}
+## Distance-culled detail meshes (public-space props, clutter): potato mode shortens their range.
+var _detail_ranges: Array[GeometryInstance3D] = []
+var potato_mode: bool = false
 ## Walk-in doors: {index, label, kind, position, inside, outside, open, district}.
 ## Doors start open; `set_door_open(index, open)` swings one (main.gd can bind E to it).
 var interactable_doors: Array[Dictionary] = []
@@ -123,7 +174,7 @@ func _ready() -> void:
 	_build_midtown_life()
 	_finish(midtown)
 	_define_districts()
-	for builder: Callable in [_build_lantern_row, _build_solana_heights, _build_morris_park, _build_kingsway, _build_harbor, _build_station, _build_canal_market, _build_strip, _build_waterfronts, _build_plazas]:
+	for builder: Callable in [_build_lantern_row, _build_solana_heights, _build_morris_park, _build_kingsway, _build_harbor, _build_station, _build_canal_market, _build_strip, _build_waterfronts, _build_plazas, _build_uptown, _build_motor_mile, _build_nightlife, _build_west_end, _build_old_town, _build_slip_side, _build_old_wharf, _build_south_docks, _build_east_shore]:
 		var before: int = get_child_count()
 		_pending_blocks.clear()
 		builder.call()
@@ -135,9 +186,14 @@ func _ready() -> void:
 			var node: Node = get_child(index)
 			if node is Node3D and not node is Light3D:
 				_finish(node as Node3D)
+	_build_plots()
 	# Walk-in businesses last: each interior is its own node so its lamp only lights it.
 	for shop: Dictionary in Interiors.SHOPS:
 		Interiors.new(self, shop).build_interior()
+	# Map 0.8: street-frontage infill (prefab buildings, aprons, alleys) before the clutter pass.
+	city_fill = CityFill.new(self)
+	city_fill.build()
+	CityDetail.new(self).build()
 	_xf = Transform3D.IDENTITY
 	_xf_yaw = 0.0
 	set_dusk(dusk)
@@ -150,6 +206,166 @@ func _ready() -> void:
 		for step: int in range(16):
 			var at: Vector2 = from.lerp(to, step / 16.0)
 			road_loop.append(Vector3(at.x, 0, at.y))
+
+# --- Plots for the trademark buildings, lifts and mode dressing (0.6) -----------------------
+
+## Reserved footprints for the trademark buildings. `center` is the plot's centre on the ground
+## (world x/z), `size` is (width along the facade, depth), `yaw` turns the plot's local frame
+## (+Z out of the front door, +X along the facade; the frame Interiors and BuildingKit use) and
+## `front` is the world direction the facade faces. Each has a builder in scripts/buildings/<key>.gd
+## (`static func build(world, plot)`), called once, in PLOT_ORDER, after the districts.
+const PLOTS: Dictionary = {
+	"highrise": {"center": Vector2(125, -176), "size": Vector2(30, 30), "yaw": 0.0, "front": Vector3.BACK, "district": "UPTOWN"},
+	"hotel": {"center": Vector2(175, -176), "size": Vector2(30, 28), "yaw": 0.0, "front": Vector3.BACK, "district": "UPTOWN"},
+	"garage": {"center": Vector2(202, 10), "size": Vector2(30, 28), "yaw": 0.0, "front": Vector3.BACK, "district": "MOTOR MILE"},
+	"motel": {"center": Vector2(170, 10), "size": Vector2(32, 28), "yaw": 0.0, "front": Vector3.BACK, "district": "MOTOR MILE"},
+	"burger": {"center": Vector2(120, 62), "size": Vector2(30, 26), "yaw": PI, "front": Vector3.FORWARD, "district": "MOTOR MILE"},
+	"nightclub": {"center": Vector2(98, 244), "size": Vector2(32, 36), "yaw": PI, "front": Vector3.FORWARD, "district": "NIGHTLIFE"},
+	"stripclub": {"center": Vector2(150, 244), "size": Vector2(30, 32), "yaw": PI, "front": Vector3.FORWARD, "district": "NIGHTLIFE"},
+	"gunstore": {"center": Vector2(269, -66), "size": Vector2(26, 46), "yaw": -PI * 0.5, "front": Vector3.LEFT, "district": "EAST SHORE"},
+}
+const PLOT_ORDER: Array[String] = ["highrise", "hotel", "garage", "motel", "nightclub", "stripclub", "burger", "gunstore"]
+const PLOT_BUILDERS: Dictionary = {
+	"highrise": preload("res://scripts/buildings/highrise.gd"),
+	"hotel": preload("res://scripts/buildings/hotel.gd"),
+	"garage": preload("res://scripts/buildings/garage.gd"),
+	"motel": preload("res://scripts/buildings/motel.gd"),
+	"nightclub": preload("res://scripts/buildings/nightclub.gd"),
+	"stripclub": preload("res://scripts/buildings/stripclub.gd"),
+	"burger": preload("res://scripts/buildings/burger.gd"),
+	"gunstore": preload("res://scripts/buildings/gunstore.gd"),
+}
+
+## Plot key -> the Node3D its builder made, and the footprint_polys indices it registered.
+var plot_nodes: Dictionary = {}
+var plot_footprints: Dictionary = {}
+## "free_roam", "contract" or "online" (see set_mode).
+var mode: String = "free_roam"
+## interactable_doors indices of the gun store's range door, yard door and yard gate.
+var gun_doors: Array[int] = []
+## Lifts: {index, label, car, floors (landing heights), floor (destination), from_floor, t (0..1),
+## doors (per landing: leaf nodes), open (per landing 0..1), buttons, panel}.
+var lifts: Array[Dictionary] = []
+
+func _build_plots() -> void:
+	for key: String in PLOT_ORDER:
+		var before_nodes: int = get_child_count()
+		var before_footprints: int = footprint_polys.size()
+		_begin_building("plot", true, key)
+		PLOT_BUILDERS[key].build(self, PLOTS[key])
+		_end_building()
+		var indices: Array[int] = []
+		for index: int in range(before_footprints, footprint_polys.size()):
+			indices.append(index)
+		plot_footprints[key] = indices
+		for index: int in range(before_nodes, get_child_count()):
+			var node: Node = get_child(index)
+			if node is Node3D and not node is Light3D:
+				if not plot_nodes.has(key):
+					plot_nodes[key] = node
+				_finish(node as Node3D)
+	_xf = Transform3D.IDENTITY
+	_xf_yaw = 0.0
+	set_physics_process(not lifts.is_empty())
+
+## Switches the city between game modes. The gun store is a real business in every mode; in
+## contract and online rounds its range doors and yard gate are locked shut (so it reads as a
+## closed range), and in free roam they are open. The range dressing (targets, rack, painted
+## lines, labels) belongs to the Armory node: main.gd calls armory.set_mode(mode) too.
+func set_mode(new_mode: String) -> void:
+	mode = new_mode
+	var closed: bool = new_mode != "free_roam"
+	for index: int in gun_doors:
+		var entry: Dictionary = interactable_doors[index]
+		entry["locked"] = closed
+		set_door_open(index, not closed, true)
+
+## Locked doors ignore E and network events (set_mode locks the gun store's range in matches).
+func is_door_locked(index: int) -> bool:
+	return index >= 0 and index < interactable_doors.size() and bool(interactable_doors[index].get("locked", false))
+
+# --- Lifts ---------------------------------------------------------------------------------
+
+## Sends lift `index` to landing `floor` (ignored while it is travelling or if the floor does not exist).
+func call_lift(index: int, floor: int) -> void:
+	if index < 0 or index >= lifts.size():
+		return
+	var lift: Dictionary = lifts[index]
+	if floor < 0 or floor >= (lift["floors"] as Array).size():
+		return
+	if float(lift["t"]) < 1.0:
+		lift["queued"] = floor
+		return
+	if floor == int(lift["floor"]):
+		return
+	lift["from_floor"] = lift["floor"]
+	lift["floor"] = floor
+	lift["t"] = 0.0
+	lift["queued"] = -1
+
+## Plain-data state for the network: {floor (destination), from (departure landing), t (0..1 trip
+## progress, 1 = arrived), y (car height), moving}.
+func lift_state(index: int) -> Dictionary:
+	var lift: Dictionary = lifts[index]
+	return {"floor": int(lift["floor"]), "from": int(lift["from_floor"]), "t": float(lift["t"]), "y": (lift["car"] as Node3D).position.y, "moving": float(lift["t"]) < 1.0}
+
+## Puts lift `index` at `t` of the way from landing `from_floor` (default: where it is coming from)
+## to landing `floor`.
+func set_lift_state(index: int, floor: int, t: float, from_floor: int = -1) -> void:
+	if index < 0 or index >= lifts.size():
+		return
+	var lift: Dictionary = lifts[index]
+	var count: int = (lift["floors"] as Array).size()
+	lift["floor"] = clampi(floor, 0, count - 1)
+	if from_floor >= 0:
+		lift["from_floor"] = clampi(from_floor, 0, count - 1)
+	lift["t"] = clampf(t, 0.0, 1.0)
+	_place_lift(lift, 0.0)
+
+## Metres per second of the lifts' car, and how long the doors take to slide.
+const LIFT_SPEED: float = 2.6
+const LIFT_DOOR_SPEED: float = 1.6
+
+func _physics_process(delta: float) -> void:
+	for lift: Dictionary in lifts:
+		_place_lift(lift, delta)
+
+func _place_lift(lift: Dictionary, delta: float) -> void:
+	var floors: Array = lift["floors"]
+	var from_y: float = float(floors[int(lift["from_floor"])])
+	var to_y: float = float(floors[int(lift["floor"])])
+	if float(lift["t"]) < 1.0 and delta > 0.0:
+		var duration: float = maxf(2.2, absf(to_y - from_y) / LIFT_SPEED)
+		# The doors must be shut before the car leaves.
+		var shut: bool = true
+		for amount: float in lift["open"]:
+			shut = shut and amount < 0.02
+		if shut:
+			lift["t"] = minf(1.0, float(lift["t"]) + delta / duration)
+			if float(lift["t"]) >= 1.0 and int(lift.get("queued", -1)) >= 0:
+				var queued: int = int(lift["queued"])
+				lift["queued"] = -1
+				call_lift(int(lift["index"]), queued)
+	var t: float = float(lift["t"])
+	var eased: float = t * t * (3.0 - 2.0 * t)
+	var car: AnimatableBody3D = lift["car"]
+	car.position.y = lerpf(from_y, to_y, eased)
+	# Landing doors slide open on the floor the car is at, once it has stopped.
+	var open: Array = lift["open"]
+	var doors: Array = lift["doors"]
+	for landing: int in range(open.size()):
+		var target: float = 1.0 if (t >= 1.0 and landing == int(lift["floor"])) else 0.0
+		if delta <= 0.0:
+			open[landing] = target
+		else:
+			open[landing] = move_toward(float(open[landing]), target, delta * LIFT_DOOR_SPEED)
+		for leaf: Node3D in doors[landing]:
+			leaf.position.x = float(leaf.get_meta("closed_x")) + float(leaf.get_meta("slide")) * float(open[landing])
+	# The car's own panel button rides with the car.
+	var panel: int = int(lift.get("panel", -1))
+	if panel >= 0:
+		var local: Vector3 = lift["panel_local"]
+		interactable_doors[panel]["position"] = (car.get_parent() as Node3D).to_global(Vector3(local.x, car.position.y, local.z))
 
 func map_bounds() -> Rect2:
 	var bounds: Rect2 = Rect2(Vector2(-HALF, -HALF), Vector2(HALF * 2.0, HALF * 2.0))
@@ -186,19 +402,49 @@ func draw_map(canvas: Control, to_screen: Callable, scale: float) -> void:
 	for bridge: Dictionary in bridges:
 		var rect: Rect2 = bridge["rect"]
 		canvas.draw_rect(Rect2(to_screen.call(Vector3(rect.position.x, 0, rect.position.y)), rect.size * scale), Color(0.52, 0.36, 0.26))
-	for road: Dictionary in roads:
+	if _road_boxes.size() != roads.size():
+		_road_boxes.clear()
+		for road: Dictionary in roads:
+			var points: PackedVector2Array = road["points"]
+			var box: Rect2 = Rect2(points[0], Vector2.ZERO)
+			for point: Vector2 in points:
+				box = box.expand(point)
+			_road_boxes.append(box.grow(float(road["width"])))
+	var canvas_rect: Rect2 = Rect2(Vector2.ZERO, canvas.size)
+	for index: int in range(roads.size()):
+		var road: Dictionary = roads[index]
+		var box: Rect2 = _road_boxes[index]
+		var corner_a: Vector2 = to_screen.call(Vector3(box.position.x, 0, box.position.y))
+		var corner_b: Vector2 = to_screen.call(Vector3(box.end.x, 0, box.end.y))
+		if not canvas_rect.intersects(Rect2(corner_a, Vector2.ZERO).expand(corner_b)):
+			continue
 		var line: PackedVector2Array = _screen_poly(road["points"], to_screen)
 		canvas.draw_polyline(line, road_color, maxf(float(road["width"]) * scale, 1.5))
-	for outline: PackedVector2Array in footprint_polys:
-		canvas.draw_colored_polygon(_screen_poly(outline, to_screen), Color(0.27, 0.29, 0.31))
+	# Only the buildings that can show on this canvas are drawn: the radar is redrawn every frame and the
+	# city has hundreds of footprints, each of them a canvas draw call.
+	var view: Rect2 = Rect2(Vector2.ZERO, canvas.size)
+	for index: int in range(footprint_polys.size()):
+		var bounds: Rect2 = footprints[index]
+		var at: Vector2 = to_screen.call(Vector3(bounds.get_center().x, 0, bounds.get_center().y))
+		var reach: float = bounds.size.length() * scale
+		if not view.grow(reach).has_point(at):
+			continue
+		canvas.draw_colored_polygon(_screen_poly(footprint_polys[index], to_screen), Color(0.27, 0.29, 0.31))
 	if scale > 0.9:
 		for door: Dictionary in interactable_doors:
-			canvas.draw_circle(to_screen.call(door["position"]), maxf(scale * 1.2, 2.0), Color(0.45, 0.95, 0.6, 0.9))
+			var dot: Vector2 = to_screen.call(door["position"])
+			if view.grow(4.0).has_point(dot):
+				canvas.draw_circle(dot, maxf(scale * 1.2, 2.0), Color(0.45, 0.95, 0.6, 0.9))
 
 ## Swings a walk-in door open or shut (the garage's shutter rolls). Doors are physical: a
 ## shut door blocks bodies and bullets, an open one leaves the doorway clear.
-func set_door_open(index: int, open: bool) -> void:
+func set_door_open(index: int, open: bool, force: bool = false) -> void:
 	if index < 0 or index >= interactable_doors.size():
+		return
+	# Lift landings are worked by call_lift; locked doors (the gun store's range in matches) stay shut.
+	if str(interactable_doors[index]["kind"]) == "lift":
+		return
+	if not force and bool(interactable_doors[index].get("locked", false)):
 		return
 	interactable_doors[index]["open"] = open
 	for leaf: Node3D in _door_nodes[index]:
@@ -210,19 +456,32 @@ func set_door_open(index: int, open: bool) -> void:
 			tween.tween_property(leaf, "rotation:y", closed + (float(leaf.get_meta("swing")) if open else 0.0), 0.35).set_trans(Tween.TRANS_SINE)
 
 func toggle_door(index: int) -> void:
-	if index >= 0 and index < interactable_doors.size():
-		set_door_open(index, not bool(interactable_doors[index]["open"]))
+	if index < 0 or index >= interactable_doors.size():
+		return
+	var entry: Dictionary = interactable_doors[index]
+	if str(entry["kind"]) == "lift":
+		# A landing button calls the car to its floor; the car's own panel sends it to the next floor.
+		var lift: Dictionary = lifts[int(entry["lift"])]
+		if int(entry["floor"]) >= 0:
+			call_lift(int(entry["lift"]), int(entry["floor"]))
+		else:
+			call_lift(int(entry["lift"]), (int(lift["floor"]) + 1) % (lift["floors"] as Array).size())
+		return
+	set_door_open(index, not bool(entry["open"]))
 
 ## Puts every shot-out shop window back (e.g. between rounds).
 func reset_glass() -> void:
 	for glass: Dictionary in glass_panes:
 		(glass["body"] as Node).call("restore")
 
-## The nearest walk-in door within `radius` metres of `at` (-1 if none).
+## The nearest walk-in door within `radius` metres of `at` (-1 if none). Doors on other floors of a
+## building (their position.y is the floor's height) are out of reach.
 func door_near(at: Vector3, radius: float = 2.2) -> int:
 	var best: int = -1
 	var best_distance: float = radius
 	for door: Dictionary in interactable_doors:
+		if absf(at.y - float(door["position"].y)) > 3.2:
+			continue
 		var distance: float = Vector2(at.x - door["position"].x, at.z - door["position"].z).length()
 		if distance < best_distance:
 			best_distance = distance
@@ -233,6 +492,9 @@ func door_near(at: Vector3, radius: float = 2.2) -> int:
 ## point on the road nearest `from` to the point on the road nearest `to` (y = 0).
 ## Empty if unreachable.
 func route(from: Vector3, to: Vector3) -> PackedVector3Array:
+	return _weave_islands(_route_raw(from, to))
+
+func _route_raw(from: Vector3, to: Vector3) -> PackedVector3Array:
 	if _graph_points.is_empty():
 		_build_road_graph()
 	var path: PackedVector3Array = PackedVector3Array()
@@ -297,10 +559,54 @@ func wheelman_path(from: Vector3) -> PackedVector3Array:
 	path.append_array(road_loop)
 	return path
 
+## Adds waypoints in the open lane wherever the route runs into a traffic-calming kerb island, so the GPS line
+## and the practice wheelman thread each chicane instead of running down the centre line into it (`route()`
+## returns the woven path; the extra distance is a few metres per chicane).
+func _weave_islands(path: PackedVector3Array) -> PackedVector3Array:
+	if calming_info.is_empty():
+		return path
+	var woven: PackedVector3Array = PackedVector3Array()
+	for index: int in range(path.size()):
+		woven.append(path[index])
+		if index + 1 >= path.size():
+			break
+		var a: Vector2 = Vector2(path[index].x, path[index].z)
+		var b: Vector2 = Vector2(path[index + 1].x, path[index + 1].z)
+		var length: float = a.distance_to(b)
+		if length < 0.5:
+			continue
+		var hits: Array = []
+		for info: Dictionary in calming_info:
+			var centre: Vector2 = info["center"]
+			if centre.distance_to((a + b) * 0.5) > length * 0.5 + 8.0:
+				continue
+			var half_reach: float = float(info["width"]) * 0.5 + 1.6
+			var t: float = (centre - a).dot((b - a) / length)
+			if t < 0.0 or t > length:
+				continue
+			var closest: Vector2 = a + (b - a) / length * t
+			var offset: Vector2 = closest - centre
+			if absf(offset.dot(info["n"])) < half_reach and absf(offset.dot(info["u"])) < 4.0:
+				hits.append([t, info])
+		hits.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) < float(q[0]))
+		for hit: Array in hits:
+			var info: Dictionary = hit[1]
+			var free: Vector2 = (info["axis"] as Vector2) - (info["n"] as Vector2) * float(info["side"]) * float(info["width"]) * 0.5
+			# Approach and exit points 9 m either side of the island, in the open lane (the pure-pursuit bot
+			# switches waypoint 7 m early, so it clears the island's edge before it turns for the next one).
+			var heading: Vector2 = (b - a) / length
+			var approach: Vector2 = free - heading * 9.0
+			var leave: Vector2 = free + heading * 9.0
+			woven.append(Vector3(approach.x, 0.0, approach.y))
+			woven.append(Vector3(free.x, 0.0, free.y))
+			woven.append(Vector3(leave.x, 0.0, leave.y))
+	return woven
+
 ## Length in metres of `route(from, to)` plus the walk from each point to its road (INF if
 ## there is no way through).
 func route_length(from: Vector3, to: Vector3) -> float:
-	var path: PackedVector3Array = route(from, to)
+	# The street-graph distance (the crews' fairness metric); `route()` adds a few metres of chicane weave.
+	var path: PackedVector3Array = _route_raw(from, to)
 	if path.is_empty():
 		return INF
 	var total: float = Vector2(from.x - path[0].x, from.z - path[0].z).length() + Vector2(to.x - path[path.size() - 1].x, to.z - path[path.size() - 1].z).length()
@@ -315,6 +621,23 @@ func _screen_poly(poly: PackedVector2Array, to_screen: Callable) -> PackedVector
 	return screen
 
 # --- Lighting ------------------------------------------------------------------
+
+## Potato mode, for bare-minimum PCs (the settings toggle lives in main.gd). Hides the
+## collision-free dressing in the "potato_optional" group (posters, bags, cardboard, leaves,
+## bunting, rooftop plant, oil stains...) and draws the remaining small detail to 60 % of its
+## range. Nothing with collision is hidden or removed, so cover, routes and gameplay are the same
+## in both modes (multiplayer fairness); colliders never depend on visibility anyway.
+func set_potato_mode(enabled: bool) -> void:
+	potato_mode = enabled
+	for node: Node in get_tree().get_nodes_in_group("potato_optional"):
+		if node is Node3D and is_ancestor_of(node):
+			(node as Node3D).visible = not enabled
+	for geometry: GeometryInstance3D in _detail_ranges:
+		if not is_instance_valid(geometry):
+			continue
+		if not geometry.has_meta("full_range"):
+			geometry.set_meta("full_range", geometry.visibility_range_end)
+		geometry.visibility_range_end = float(geometry.get_meta("full_range")) * (0.6 if enabled else 1.0)
 
 func set_dusk(value: bool) -> void:
 	dusk = value
@@ -437,6 +760,18 @@ func _footprint(rect: Rect2) -> void:
 	for point: Vector2 in outline:
 		bounds = bounds.expand(point)
 	footprints.append(bounds)
+	if _building_open.is_empty():
+		buildings.append({"name": "", "kind": "solid", "enterable": false, "footprints": [footprint_polys.size() - 1]})
+	else:
+		(_building_open["footprints"] as Array).append(footprint_polys.size() - 1)
+
+## Opens a building record: every outline registered until `_end_building()` belongs to it.
+func _begin_building(kind: String, enterable: bool, title: String = "") -> void:
+	_building_open = {"name": title, "kind": kind, "enterable": enterable, "footprints": []}
+	buildings.append(_building_open)
+
+func _end_building() -> void:
+	_building_open = {}
 
 func _on_land(at: Vector2) -> bool:
 	for poly: PackedVector2Array in land:
@@ -445,9 +780,14 @@ func _on_land(at: Vector2) -> bool:
 	return false
 
 func _finish(node: Node3D) -> void:
+	if node.has_meta("finished"):
+		return
+	node.set_meta("finished", true)
 	_batch_static_meshes(node)
 	# Remaining one-off boxes (walls, signs, kerbs) merge into one mesh per material.
 	MeshMerge.merge_children(node)
+	# The sun's shadow splits then draw the node's static casters in one call each.
+	MeshMerge.shadow_proxy(node)
 
 ## A named district for the map and the radar. `polys` overrides the rectangle's shape.
 func _district(title: String, rect: Rect2, color: Color, crew: String, polys: Array = []) -> void:
@@ -537,9 +877,61 @@ func _box_with(at: Vector3, size: Vector3, material: Material, solid: bool = fal
 	instance.position = at
 	instance.rotation.y = angle
 	_target.add_child(instance)
+	_note_blocker(at, size, angle)
 	if solid:
 		_collider(at, size, angle)
 	return instance
+
+## Records a box's world x/z bounds for the fill pass (small flat decals are ignored).
+func _note_blocker(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
+	var area: float = size.x * size.z
+	if _blockers_off or (size.y < 0.5 and area < 25.0) or area > 40000.0:
+		return
+	var world_at: Vector3 = _xf * at
+	var yaw: float = angle + _xf_yaw
+	var eye: bool = world_at.y - size.y * 0.5 <= 1.3 and world_at.y + size.y * 0.5 >= 1.3
+	# A long turned box (a diagonal quay face, a fence) is recorded in short pieces, so its bounds
+	# do not swallow the ground beside it.
+	var length: float = maxf(size.x, size.z)
+	if length > 8.0 and minf(size.x, size.z) < 4.0 and absf(sin(2.0 * yaw)) > 0.05:
+		var along: Vector2 = Vector2(cos(yaw), -sin(yaw)) if size.x >= size.z else Vector2(sin(yaw), cos(yaw))
+		var pieces: int = ceili(length / 5.0)
+		for piece: int in range(pieces):
+			var offset: float = (float(piece) + 0.5) / pieces * length - length * 0.5
+			var chunk: Vector2 = Vector2(world_at.x, world_at.z) + along * offset
+			var half_length: float = length / pieces * 0.5
+			var half_thick: float = minf(size.x, size.z) * 0.5
+			var reach_x: float = absf(along.x) * half_length + absf(along.y) * half_thick
+			var reach_z: float = absf(along.y) * half_length + absf(along.x) * half_thick
+			_add_blocker(Rect2(chunk.x - reach_x, chunk.y - reach_z, reach_x * 2.0, reach_z * 2.0), size.y, area, eye)
+		return
+	var ex: float = absf(cos(yaw)) * size.x * 0.5 + absf(sin(yaw)) * size.z * 0.5
+	var ez: float = absf(sin(yaw)) * size.x * 0.5 + absf(cos(yaw)) * size.z * 0.5
+	_add_blocker(Rect2(world_at.x - ex, world_at.z - ez, ex * 2.0, ez * 2.0), size.y, area, eye)
+
+func _add_blocker(rect: Rect2, height: float, area: float, eye: bool = false) -> void:
+	_blockers.append(rect)
+	if eye:
+		eye_blockers.append(rect)
+	if height >= 0.5 and area < 400.0:
+		var low: Vector2i = Vector2i(floori(rect.position.x / 16.0), floori(rect.position.y / 16.0))
+		var high: Vector2i = Vector2i(floori(rect.end.x / 16.0), floori(rect.end.y / 16.0))
+		for cx: int in range(low.x, high.x + 1):
+			for cy: int in range(low.y, high.y + 1):
+				var key: Vector2i = Vector2i(cx, cy)
+				if not _solid_grid.has(key):
+					_solid_grid[key] = []
+				(_solid_grid[key] as Array).append(rect)
+
+## True if a tall solid the builders placed (prop, wall, container stack) lies within `radius` of `at`.
+func solid_near(at: Vector2, radius: float) -> bool:
+	var key: Vector2i = Vector2i(floori(at.x / 16.0), floori(at.y / 16.0))
+	if not _solid_grid.has(key):
+		return false
+	for rect: Rect2 in _solid_grid[key]:
+		if rect.grow(radius).has_point(at):
+			return true
+	return false
 
 ## Invisible collision only (sea wall height, canal railings, fences).
 func _collider(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
@@ -552,6 +944,7 @@ func _collider(at: Vector3, size: Vector3, angle: float = 0.0) -> void:
 	body.rotation.y = angle
 	body.add_child(collision)
 	_target.add_child(body)
+	_note_blocker(at, size, angle)
 
 func _cylinder(at: Vector3, radius: float, height: float, color: Color, segments: int = 8, material: Material = null) -> MeshInstance3D:
 	var mesh: CylinderMesh = CylinderMesh.new()
@@ -564,6 +957,8 @@ func _cylinder(at: Vector3, radius: float, height: float, color: Color, segments
 	instance.material_override = material if material != null else _material(color)
 	instance.position = at
 	_target.add_child(instance)
+	if height >= 0.5:
+		_note_blocker(at, Vector3(radius * 2.0, height, radius * 2.0))
 	return instance
 
 func _label(words: String, at: Vector3, font_size: int, color: Color, angle: float = 0.0, pixel: float = 0.017) -> Label3D:
@@ -606,6 +1001,7 @@ func _neon(words: String, at: Vector3, angle: float, color: Color, font_size: in
 		lamp.light_energy = 1.6
 		lamp.omni_range = 11.0
 		lamp.shadow_enabled = false
+		lamp.light_cull_mask = 0xFFFFF & ~(1 << (CLUTTER_LAYER - 1))
 		lamp.position = at + back * 1.6
 		_target.add_child(lamp)
 		_lights.append(lamp)
@@ -621,8 +1017,37 @@ func _slab(rect: Rect2, color: Color, tex: String = "tiles", height: float = 0.1
 		Vector3(hx - bevel, height, hz - bevel), Vector3(-hx + bevel, height, hz - bevel)
 	])
 	_hull(Vector3(rect.get_center().x, 0, rect.get_center().y), corners, _material(color, 0.9, tex))
+	var top: PackedVector2Array = PackedVector2Array()
+	for corner: Vector2 in [Vector2(-hx + bevel, -hz + bevel), Vector2(hx - bevel, -hz + bevel), Vector2(hx - bevel, hz - bevel), Vector2(-hx + bevel, hz - bevel)]:
+		top.append(_w2(rect.get_center() + corner))
+	_slab_tops.append({"poly": top, "height": height})
 
-func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void:
+## Walking-surface height at a world x/z from the recorded slabs (0 on open ground or road).
+func surface_height(at: Vector2) -> float:
+	var best: float = 0.0
+	for slab: Dictionary in _slab_tops:
+		if float(slab["height"]) > best and Geometry2D.is_point_in_polygon(at, slab["poly"]):
+			best = float(slab["height"])
+	return best
+
+## A raised slab turned by `yaw` (the fill pass's lot aprons): same bevelled hull as `_slab`.
+func _slab_rot(center: Vector2, size: Vector2, yaw: float, color: Color, tex: String = "tiles", height: float = 0.16, bevel: float = 0.45) -> void:
+	var hx: float = size.x * 0.5
+	var hz: float = size.y * 0.5
+	var corners: PackedVector3Array = PackedVector3Array([
+		Vector3(-hx, 0.0, -hz), Vector3(hx, 0.0, -hz), Vector3(hx, 0.0, hz), Vector3(-hx, 0.0, hz),
+		Vector3(-hx + bevel, height, -hz + bevel), Vector3(hx - bevel, height, -hz + bevel),
+		Vector3(hx - bevel, height, hz - bevel), Vector3(-hx + bevel, height, hz - bevel)
+	])
+	_hull(Vector3(center.x, 0, center.y), corners, _material(color, 0.9, tex), yaw)
+	var top: PackedVector2Array = PackedVector2Array()
+	var basis: Basis = Basis(Vector3.UP, yaw)
+	for corner: Vector2 in [Vector2(-hx + bevel, -hz + bevel), Vector2(hx - bevel, -hz + bevel), Vector2(hx - bevel, hz - bevel), Vector2(-hx + bevel, hz - bevel)]:
+		var turned: Vector3 = basis * Vector3(corner.x, 0, corner.y)
+		top.append(_w2(center + Vector2(turned.x, turned.z)))
+	_slab_tops.append({"poly": top, "height": height})
+
+func _hull(at: Vector3, corners: PackedVector3Array, material: Material, yaw: float = 0.0) -> void:
 	var surface: SurfaceTool = SurfaceTool.new()
 	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var faces: Array[PackedInt32Array] = [
@@ -640,6 +1065,7 @@ func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void
 	instance.mesh = surface.commit()
 	instance.material_override = material
 	instance.position = at
+	instance.rotation.y = yaw
 	_target.add_child(instance)
 	var shape: ConvexPolygonShape3D = ConvexPolygonShape3D.new()
 	shape.points = corners
@@ -647,6 +1073,7 @@ func _hull(at: Vector3, corners: PackedVector3Array, material: Material) -> void
 	collision.shape = shape
 	var body: StaticBody3D = StaticBody3D.new()
 	body.position = at
+	body.rotation.y = yaw
 	body.add_child(collision)
 	_target.add_child(body)
 
@@ -655,12 +1082,16 @@ func _walkway(at: Vector3, length: float, color: Color) -> void:
 
 ## Generic city building with windows on every face (some lit), a roof cap and an optional
 ## street sign. `front` is the outward normal of the entrance facade.
-func _tower(center: Vector2, size: Vector3, color: Color, tex: String, front: Vector3 = Vector3.BACK, sign_text: String = "", sign_color: Color = Color(0.94, 0.86, 0.64), roof: Color = Color(0.29, 0.31, 0.30), lit: float = 0.35) -> void:
+func _tower(center: Vector2, size: Vector3, color: Color, tex: String, front: Vector3 = Vector3.BACK, sign_text: String = "", sign_color: Color = Color(0.94, 0.86, 0.64), roof: Color = Color(0.29, 0.31, 0.30), lit: float = 0.35, enter: String = "") -> void:
+	# A prefab kind in `enter` makes this hand-placed business an enterable building (Map 0.8).
+	if enter != "" and _tower_prefab(enter, center, size, color, front, sign_text):
+		return
 	var at: Vector3 = Vector3(center.x, 0, center.y)
 	_footprint(Rect2(center.x - size.x * 0.5, center.y - size.z * 0.5, size.x, size.z))
 	_box(at + Vector3(0, size.y * 0.5, 0), size, color, true, tex)
 	_box(at + Vector3(0, 0.55, 0), Vector3(size.x + 0.14, 1.1, size.z + 0.14), color.darkened(0.3), false, tex)
 	_box(at + Vector3(0, size.y + 0.16, 0), Vector3(size.x + 0.45, 0.32, size.z + 0.45), roof, false, "roof")
+	_roofs.append({"center": _w2(center), "size": size, "yaw": _xf_yaw, "top": size.y + 0.32, "front": _xf.basis * front, "business": not sign_text.is_empty()})
 	var glass: StandardMaterial3D = _material(Color(0.16, 0.24, 0.29), 0.3)
 	var warm: StandardMaterial3D = _glow(Color(1.0, 0.78, 0.46), 1.3)
 	var floors: int = int((size.y - 1.2) / 3.1)
@@ -692,6 +1123,14 @@ func _lamp(at: Vector3, toward: Vector3) -> void:
 	_box(at + toward * 0.7 + Vector3(0, 6.94, 0), Vector3(1.5 if absf(toward.x) > 0.5 else 0.12, 0.12, 0.12 if absf(toward.x) > 0.5 else 1.5), steel)
 	_box_with(at + toward * 1.4 + Vector3(0, 6.86, 0), Vector3(0.6, 0.14, 0.34) if absf(toward.x) > 0.5 else Vector3(0.34, 0.14, 0.6), _glow(Color(1.0, 0.66, 0.28), 2.4))
 
+## True if a registered door lies within `radius` (x/z) of a world point.
+func door_within(at: Vector2, radius: float) -> bool:
+	for door: Dictionary in interactable_doors:
+		var spot: Vector3 = door["position"]
+		if Vector2(spot.x, spot.z).distance_to(at) < radius:
+			return true
+	return false
+
 ## Lamps along the edges of a block, one every `spacing` metres, facing the road.
 func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 	for side: int in range(4):
@@ -715,7 +1154,7 @@ func _block_lamps(rect: Rect2, spacing: float = 26.0) -> void:
 				_:
 					at = Vector3(rect.end.x - 1.1, 0.16, rect.position.y + rect.size.y * t)
 					toward = Vector3.RIGHT
-			if _on_land(_w2(Vector2(at.x, at.z))):
+			if _on_land(_w2(Vector2(at.x, at.z))) and not door_within(_w2(Vector2(at.x, at.z)), 2.6):
 				_lamp(at, toward)
 
 ## A city block: raised paved plinth with lamps. Returns the buildable interior.
@@ -748,6 +1187,9 @@ func _tree(at: Vector3, style: String = "plane") -> void:
 
 func _container(at: Vector3, color: Color, rotated: bool = false) -> void:
 	var size: Vector3 = Vector3(2.6, 2.7, 6.1) if rotated else Vector3(6.1, 2.7, 2.6)
+	# Yard stacks (levels of 2.7 m from the ground) stand on the paved plinth, not sunk into it.
+	if absf(at.y - roundf(at.y / 2.7) * 2.7) < 0.01:
+		at.y += surface_height(_w2(Vector2(at.x, at.z)))
 	_box(at + Vector3(0, 1.35, 0), size, color, true, "metal")
 
 ## Chain-link on steel posts. You can see and shoot through the mesh; what stops bodies is
@@ -812,6 +1254,11 @@ func _free_spot(at: Vector2, clearance: float) -> bool:
 	for used: Vector2 in _occupied:
 		if used.distance_to(at) < 2.4:
 			return false
+	# Nothing stands in a doorway (prefab doors are registered as their block is built).
+	for door: Dictionary in interactable_doors:
+		var spot: Vector3 = door["position"]
+		if Vector2(spot.x, spot.z).distance_to(at) < 3.0:
+			return false
 	return true
 
 ## Scatters crew-palette street furniture along a block's sidewalk edge.
@@ -835,7 +1282,7 @@ func _street_life(rect: Rect2) -> void:
 			at = Vector2(rect.end.x - 1.5, rect.position.y + t - rect.size.x * 2.0 - rect.size.y)
 			facing = PI * 0.5
 		var world_at2: Vector2 = _w2(at)
-		if not _on_land(world_at2) or not _free_spot(world_at2, 0.7):
+		if not _on_land(world_at2) or not _free_spot(world_at2, 0.7) or CityDetail.is_path_entrance(world_at2):
 			continue
 		_occupied.append(world_at2)
 		var world_at: Vector3 = Vector3(at.x, 0.16, at.y)
@@ -921,7 +1368,7 @@ func _build_puddles_and_vents() -> void:
 		var puddle: MeshInstance3D = _mesh_at(MeshKit.cylinder(1.0, 1.0, 0.004, 14), Vector3(spot.x, 0.06, spot.y), water, _rng.randf() * TAU)
 		puddle.scale = Vector3(_rng.randf_range(0.7, 1.8), 1.0, _rng.randf_range(0.5, 1.2))
 		puddle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	for at: Vector3 in [Vector3(-3.5, 0.05, -20), Vector3(3.2, 0.05, 44), Vector3(-179, 0.05, -80), Vector3(171, 0.05, 60), Vector3(-88, 0.05, 60), Vector3(62, 0.05, -150), Vector3(-125, 0.05, 100), Vector3(110, 0.05, 190)]:
+	for at: Vector3 in [Vector3(-3.5, 0.05, -20), Vector3(3.2, 0.05, 44), Vector3(-235, 0.05, -80), Vector3(171, 0.05, 41), Vector3(-88, 0.05, 60), Vector3(62, 0.05, -144), Vector3(-100, 0.05, 120), Vector3(124, 0.05, 190)]:
 		_mesh_at(MeshKit.cylinder(0.45, 0.45, 0.03, 16), at, _material(Color(0.12, 0.12, 0.13), 0.5, "metal"))
 		steam_vents.append(at + Vector3(0, 0.1, 0))
 
@@ -946,36 +1393,44 @@ func _build_midtown_life() -> void:
 func _define_land() -> void:
 	land.append(MAINLAND)
 	# Halcyon Pier off the beach, Morris Marina's jetty and Kingsway Docks.
-	land.append(PackedVector2Array([Vector2(91, 250), Vector2(99, 250), Vector2(99, 298), Vector2(91, 298)]))
-	land.append(PackedVector2Array([Vector2(-64, 214), Vector2(-56, 214), Vector2(-56, 248), Vector2(-64, 248)]))
-	land.append(PackedVector2Array([Vector2(236, 55), Vector2(270, 55), Vector2(270, 65), Vector2(236, 65)]))
+	land.append(_moved([Vector2(91, 250), Vector2(99, 250), Vector2(99, 298), Vector2(91, 298)], STRIP_SHIFT))
+	land.append(PackedVector2Array([Vector2(-84, 366), Vector2(-76, 366), Vector2(-76, 400), Vector2(-84, 400)]))
+	land.append(_moved([Vector2(236, 55), Vector2(270, 55), Vector2(270, 65), Vector2(236, 65)], DOCKS_SHIFT))
 	# Where piers meet a quay, the quay edge opens.
-	for gap: Rect2 in [Rect2(88, 246, 14, 14), Rect2(-66, 208, 12, 16), Rect2(232, 53, 10, 14)]:
+	for gap: Rect2 in [Rect2(108, 422, 14, 14), Rect2(-88, 364, 16, 16), Rect2(402, 163, 12, 16)]:
 		quay_gaps.append(gap)
 
+func _moved(points: Array, by: Vector2) -> PackedVector2Array:
+	var moved: PackedVector2Array = PackedVector2Array()
+	for point: Variant in points:
+		moved.append((point as Vector2) + by)
+	return moved
+
 const MAINLAND: PackedVector2Array = [
-	# North shore, west to east: Canal Market (with its inlet and basin), the Harbor's basins
-	# either side of the mole, then the Solana bluff and its cape.
-	Vector2(-243, -196), Vector2(-230, -218), Vector2(-206, -228), Vector2(-175, -229),
+	# North shore, west to east: the north-west headland (the wharf), Canal Market (with its
+	# inlet and basin), the Harbor's basins either side of the mole, Uptown's shore and the
+	# north-east cape under Solana Heights.
+	Vector2(-404, -140), Vector2(-402, -200), Vector2(-396, -240), Vector2(-370, -262), Vector2(-322, -268), Vector2(-280, -266), Vector2(-252, -246), Vector2(-243, -224),
+	Vector2(-230, -218), Vector2(-206, -228), Vector2(-175, -229),
 	Vector2(-175, -176), Vector2(-183, -176), Vector2(-183, -160), Vector2(-153, -160), Vector2(-153, -176), Vector2(-161, -176),
 	Vector2(-161, -229), Vector2(-122, -231), Vector2(-96, -227), Vector2(-86, -214), Vector2(-82, -200),
 	Vector2(-70, -200), Vector2(-70, -172), Vector2(-26, -172), Vector2(-26, -200), Vector2(26, -200), Vector2(26, -172),
-	Vector2(70, -172), Vector2(70, -200), Vector2(82, -200), Vector2(90, -216), Vector2(122, -222), Vector2(166, -224),
-	Vector2(204, -222), Vector2(226, -234), Vector2(244, -224), Vector2(248, -200), Vector2(238, -182),
-	# East shore: Eastside Park, Kingsway's waterfront and Kingsway Docks.
-	Vector2(244, -160), Vector2(242, -128), Vector2(238, -104), Vector2(246, -86), Vector2(250, -64), Vector2(244, -44),
-	Vector2(241, -24), Vector2(248, -4), Vector2(252, 18), Vector2(246, 40), Vector2(241, 52), Vector2(241, 68), Vector2(246, 84),
-	Vector2(244, 102), Vector2(234, 114), Vector2(214, 118), Vector2(198, 114), Vector2(193, 130), Vector2(196, 196), Vector2(190, 214),
-	# Halcyon Beach bulges south of the Strip, then Morris Park's shore and Union Station.
-	Vector2(174, 231), Vector2(145, 246), Vector2(110, 256), Vector2(75, 258), Vector2(43, 250), Vector2(17, 234),
-	Vector2(4, 224), Vector2(-20, 222), Vector2(-60, 216), Vector2(-100, 218), Vector2(-128, 222), Vector2(-146, 234),
-	Vector2(-200, 238), Vector2(-250, 234), Vector2(-262, 222),
+	Vector2(70, -172), Vector2(70, -200), Vector2(82, -200), Vector2(90, -216), Vector2(122, -222), Vector2(166, -224), Vector2(204, -222),
+	Vector2(224, -250), Vector2(254, -282), Vector2(298, -292), Vector2(342, -280), Vector2(380, -258), Vector2(404, -222),
+	# East shore: Solana's bluff, the East Shore park and the gun club, Kingsway's docks.
+	Vector2(410, -170), Vector2(404, -120), Vector2(410, -70), Vector2(402, -20), Vector2(409, 30), Vector2(404, 80),
+	Vector2(411, 130), Vector2(406, 180), Vector2(410, 230),
+	# South-east: the south docks, then Halcyon Beach bulges south of the Strip.
+	Vector2(400, 275), Vector2(378, 320), Vector2(342, 356), Vector2(292, 384), Vector2(242, 398),
+	Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410), Vector2(24, 400),
+	# South shore: Halcyon Avenue's end, Morris Marina and the Station's quay.
+	Vector2(8, 394), Vector2(-14, 384), Vector2(-34, 376), Vector2(-60, 372), Vector2(-100, 374), Vector2(-150, 376),
+	Vector2(-190, 380), Vector2(-240, 382), Vector2(-292, 372), Vector2(-338, 350), Vector2(-374, 324), Vector2(-396, 282),
 	# West shore: the rail yard, the West Slip (Union Street ends at its head, x = -HALF),
-	# Lantern Point's headland, and back up to Canal Market.
-	Vector2(-270, 196), Vector2(-266, 170), Vector2(-274, 140), Vector2(-270, 112), Vector2(-264, 80), Vector2(-262, 52),
-	Vector2(-200, 52), Vector2(-200, 18), Vector2(-241, 18), Vector2(-246, 4), Vector2(-243, -14),
-	Vector2(-252, -34), Vector2(-262, -50), Vector2(-260, -72), Vector2(-248, -84), Vector2(-244, -100), Vector2(-250, -118),
-	Vector2(-246, -136), Vector2(-241, -150), Vector2(-248, -170), Vector2(-246, -186),
+	# Lantern Point's headland, and back up to the wharf.
+	Vector2(-402, 230), Vector2(-397, 180), Vector2(-401, 130), Vector2(-396, 80), Vector2(-398, 52),
+	Vector2(-200, 52), Vector2(-200, 18), Vector2(-398, 18),
+	Vector2(-408, -30), Vector2(-404, -80),
 ]
 
 ## Midtown towers replaced by Eastbank Square and Corner Park.
@@ -984,24 +1439,25 @@ const SQUARE_SITES: Array[Vector2] = [Vector2(61, -66), Vector2(-61, 60)]
 ## Fountain Square's centre, a neutral roundabout between Solana Heights and Kingsway.
 const FOUNTAIN: Vector2 = Vector2(150, -56)
 
+## Cross streets of each kit in its authored space: "x" lines run along local z, "z" lines along local x.
+const KIT_STREETS: Dictionary = {
+	"lantern": {"x": [-150.0], "z": [-150.0]},
+	"solana": {"x": [150.0], "z": [-150.0]},
+	"kingsway": {"x": [150.0], "z": [150.0]},
+	"morris": {"x": [-150.0], "z": [150.0]},
+	"strip": {"x": [150.0], "z": [-50.0, -15.0, 35.0]},
+	"station": {"x": [0.0], "z": [150.0]},
+}
+
 ## The street network as centre-line polylines. Each neighbourhood keeps its own street
-## grid at its own angle (its cross streets come from its kit transform); long bent
-## arterials, waterfront drives and a roundabout square tie them together. Every crew
-## district has three or more road entries.
+## grid at its own angle (its cross streets and its perimeter ring come from its kit
+## transform); long arterials, diagonal boulevards, waterfront drives and a roundabout tie
+## them together, and the new 0.6 districts (Uptown, Motor Mile, Nightlife, West End, Old
+## Town, the wharf and the docks) hang their own grids on the same network. Every crew
+## district has three or more road entries and there is an outer ring road round Midtown.
 func _define_roads() -> void:
-	# Kit cross streets, extended 6 m past each kit's frame to meet the perimeter roads.
-	var lantern_ew: Array = [_kp("lantern", Vector2(-150, -206)), _kp("lantern", Vector2(-150, -88))]
-	var lantern_ns: Array = [_kp("lantern", Vector2(-88, -150)), _kp("lantern", Vector2(-206, -150))]
-	var solana_ew: Array = [_kp("solana", Vector2(150, -88)), _kp("solana", Vector2(150, -206))]
-	var solana_ns: Array = [_kp("solana", Vector2(88, -150)), _kp("solana", Vector2(206, -150))]
-	var kings_ew: Array = [_kp("kingsway", Vector2(150, 88)), _kp("kingsway", Vector2(150, 206))]
-	var kings_ns: Array = [_kp("kingsway", Vector2(206, 150)), _kp("kingsway", Vector2(88, 150))]
-	var morris_ew: Array = [_kp("morris", Vector2(-150, 206)), _kp("morris", Vector2(-150, 88))]
-	var morris_ns: Array = [_kp("morris", Vector2(-206, 150)), _kp("morris", Vector2(-88, 150))]
-	var station_ew: Array = [_kp("station", Vector2(0, 216)), _kp("station", Vector2(0, 88))]
-	var station_ns: Array = [_kp("station", Vector2(-88, 150)), _kp("station", Vector2(88, 150))]
-	# Downtown grid (Codex's Midtown) and its through-routes.
-	_road("HALCYON AVENUE", [Vector2(0, -200), Vector2(0, 216)], 14.0)
+	# --- Midtown's grid (unchanged) and its through-routes --------------------------------
+	_road("HALCYON AVENUE", [Vector2(0, -200), Vector2(0, 382)], 14.0)
 	_road("RING WEST", [Vector2(-88, -94), Vector2(-88, 94)])
 	_road("RING EAST", [Vector2(88, -94), Vector2(88, 94)])
 	_road("RING NORTH", [Vector2(-94, -88), Vector2(94, -88)])
@@ -1009,49 +1465,110 @@ func _define_roads() -> void:
 	# Two diagonals cut Midtown's corners through Eastbank Square and Corner Park.
 	_road("BROADWAY", [Vector2(88, -88), Vector2(46, -50)])
 	_road("PARK ROW", [Vector2(-88, 88), Vector2(-50, 35)])
-	# Meridian runs out west as Lantern Row's main street and bends into Fountain Square.
-	_road("MERIDIAN STREET", [lantern_ew[0], lantern_ew[1], Vector2(-100, -50), Vector2(88, -50), Vector2(112, -52), Vector2(134, -56)])
-	# West of Halcyon Avenue, Canal Street is the pedestrian Canal Walk (see _build_squares).
+	# --- The six neighbourhood kits: cross streets and a perimeter ring each ---------------
+	for kit: String in KITS:
+		_kit_streets(kit)
+		_kit_ring(kit)
+	# --- West: Meridian runs out to Lantern Row, the wharf road to the north-west ----------
+	_road("MERIDIAN STREET", [_ring_snap("lantern", Vector2(-250, -50)), Vector2(-235, -50), Vector2(-100, -50), Vector2(88, -50), Vector2(112, -52), Vector2(134, -56)])
+	_road("WHARF ROAD", [_ring_snap("lantern", Vector2(-300, -150)), Vector2(-280, -148), Vector2(-235, -150)])
+	# West of Halcyon Avenue, Canal Street is the pedestrian Canal Walk (see _build_squares);
+	# the east half is a street.
 	_road("CANAL STREET", [Vector2(0, -15), Vector2(88, -15), Vector2(104, -19), Vector2(118, -22), Vector2(170, -24), Vector2(227, -21)])
-	# Union Street is Kingsway's main street at the east end, and meets the West Slip at x = -HALF.
-	_road("UNION STREET", [Vector2(-HALF, 35), Vector2(96, 35), kings_ew[0], kings_ew[1], Vector2(227, 35)])
-	# North: the harbour front and its quays, the Canal Market shore and the Solana bluff.
-	_road("HARBOR ROAD", [Vector2(-235, -150), Vector2(88, -150), solana_ew[0], solana_ew[1]])
+	# Union Street: the West Slip's head at x = -HALF to Motor Mile and the east coast road.
+	_road("UNION STREET", [Vector2(-HALF, 35), Vector2(96, 35), Vector2(227, 35), Vector2(340, 35)])
+	# --- North: the harbour front and its quays, the Canal Market shore, Uptown's streets ---
+	_road("HARBOR ROAD", [Vector2(-235, -150), Vector2(88, -150), Vector2(227, -150)])
 	_road("WEST QUAY ROAD", [Vector2(-88, -94), Vector2(-88, -196)])
 	_road("EAST QUAY ROAD", [Vector2(88, -94), Vector2(88, -150)])
 	_road("NORTH SHORE ROAD", _curve([Vector2(-235, -196), Vector2(-222, -212), Vector2(-196, -217), Vector2(-150, -217), Vector2(-112, -214), Vector2(-88, -196)], 4))
-	_road("SOLANA BLUFF DRIVE", _curve([solana_ew[1], Vector2(226, -170), Vector2(229, -198), Vector2(212, -214), Vector2(182, -216), solana_ns[0]], 4))
-	_road("SOLANA HILL", [solana_ns[0], solana_ns[1], Vector2(152, -84), Vector2(150, -72)])
-	# East: Fountain Square (a roundabout round the fountain) and the east shore.
+	_road("WEST BANK ROAD", [Vector2(-235, -196), Vector2(-235, -156), Vector2(-212, -104), Vector2(-212, 9), Vector2(-112, 9), Vector2(-100, 4), Vector2(-88, 2)])
+	# Uptown: a small grid of tower blocks north-east of Midtown (see _build_uptown).
+	_road("UPTOWN WEST", [Vector2(100, -206), Vector2(100, -98)])
+	_road("UPTOWN MIDDLE", [Vector2(150, -206), Vector2(150, -72)])
+	_road("UPTOWN EAST", [Vector2(200, -206), Vector2(200, -98)])
+	_road("UPTOWN NORTH", [Vector2(100, -206), Vector2(200, -206), Vector2(226, -222), _ring_snap("solana", Vector2(255, -232))])
+	# --- East: Fountain Square (a roundabout), Solana Boulevard and the east shore drive ---
 	var ring: Array = []
 	for step: int in range(25):
 		var angle: float = step * TAU / 24.0
 		ring.append(FOUNTAIN + Vector2(cos(angle), sin(angle)) * 16.0)
 	_road("FOUNTAIN SQUARE", ring, 10.0)
-	_road("EAST SHORE DRIVE", _curve([solana_ew[1], Vector2(226, -128), Vector2(228, -100), Vector2(227, -60), Vector2(227, 100)], 4))
+	_road("UPTOWN SOUTH", [Vector2(100, -98), Vector2(227, -98)])
+	_road("SOLANA BOULEVARD", [FOUNTAIN + Vector2(cos(-0.7), sin(-0.7)) * 16.0, Vector2(227, -98), Vector2(262, -108), _ring_snap("solana", Vector2(285, -120))])
+	_road("EAST SHORE DRIVE", [Vector2(227, -150), Vector2(227, 102)], 14.0)
 	_road("PARK ROAD", [Vector2(166, -56), Vector2(227, -58)])
-	_road("KINGSWAY ROAD", [Vector2(150, -40), Vector2(160, -32), kings_ns[0], kings_ns[1]])
 	_road("BAYSIDE AVENUE", [Vector2(88, 88), Vector2(100, 99), Vector2(118, 102), Vector2(227, 102)])
-	# West: the shore road past Lantern Point, West Bank Road above the slip, Lantern Row.
-	_road("WEST BANK ROAD", [Vector2(-235, -196), Vector2(-235, 0), Vector2(-229, 8), Vector2(-213, 9), Vector2(-112, 9), Vector2(-100, 4), Vector2(-88, 2)])
-	_road("LANTERN ROW", [Vector2(-178, -150), lantern_ns[0], lantern_ns[1]])
-	# South-west: Union Station (its own grid) and Station Road.
-	_road("STATION ROAD", [Vector2(-125, 35), Vector2(-125, 212)])
-	_road("PLATFORM ROAD", [station_ns[0], station_ns[1]])
-	_road("TERMINAL WAY", [station_ew[0], station_ew[1], Vector2(-125, 142)])
-	# South: Morris Park, Marina Drive and the Strip's avenues down to Ocean Drive.
-	_road("MORRIS AVENUE", [morris_ns[0], morris_ns[1], Vector2(-70, 206)])
-	_road("MULBERRY STREET", [Vector2(-125, 142), morris_ew[0], morris_ew[1], Vector2(0, 146)])
-	_road("MARINA DRIVE", _curve([Vector2(-125, 206), Vector2(-70, 206), Vector2(-30, 207), Vector2(0, 214)], 3))
-	_road("BEACH AVENUE", [Vector2(60, 88), Vector2(60, 236)])
-	_road("CASINO AVENUE", [Vector2(110, 102), Vector2(110, 237)])
-	_road("PALM AVENUE", [Vector2(145, 102), Vector2(145, 228)])
-	_road("STRIP AVENUE", [Vector2(0, 165), Vector2(183, 165)])
-	_road("SEAVIEW ROAD", [Vector2(183, 102), Vector2(183, 206)])
-	_road("OCEAN DRIVE", _curve([Vector2(183, 206), Vector2(165, 219), Vector2(145, 228), Vector2(110, 237), Vector2(75, 240), Vector2(45, 233), Vector2(20, 222), Vector2(0, 214)], 4))
+	# Kingsway Boulevard: the diagonal from Midtown's east ring at Canal Street through Motor Mile.
+	_road("KINGSWAY BOULEVARD", [Vector2(88, -15), Vector2(141, 35), _ring_snap("kingsway", Vector2(240, 130))])
+	# Coast Road swings east round the Halcyon Arms range yard (world x 292-378, z -97..-29) instead of
+	# running through it and past the long-range plates, then rejoins the old line at x 340.
+	_road("COAST ROAD", [_ring_snap("solana", Vector2(335, -105)), Vector2(386, -105), Vector2(388, -22), Vector2(340, -22), Vector2(340, 35), Vector2(340, 110), _ring_snap("kingsway", Vector2(315, 135))])
+	_road("SOLANA BLUFF DRIVE", [Vector2(227, -150), Vector2(240, -170), Vector2(238, -200), _ring_snap("solana", Vector2(255, -190))])
+	# --- South: Halcyon Avenue to the beach, the outer ring, Old Town and the Strip ---------
+	_road("MORRIS LINK", [Vector2(0, 250), _ring_snap("morris", Vector2(-20, 250))])
+	_road("MORRIS NORTH LINK", [Vector2(0, 212), _ring_snap("morris", Vector2(-25, 200))])
+	_road("STRIP LINK", [Vector2(0, 310), _ring_snap("strip", Vector2(30, 310))])
+	_road("STATION LINK", [_ring_snap("station", Vector2(-180, 230)), _ring_snap("morris", Vector2(-160, 230))])
+	_road("SLIP HEAD ROAD", [Vector2(-212, 9), Vector2(-190, 10), Vector2(-190, 212)])
+	_road("SOUTH RING ROAD", [Vector2(0, 212), Vector2(176, 212)])
+	_road("STATION NORTH LINK", [Vector2(-190, 212), _ring_snap("station", Vector2(-180, 200))])
+	_road("SOUTH DOCKS ROAD", [_ring_snap("kingsway", Vector2(240, 262)), Vector2(215, 268), _ring_snap("strip", Vector2(200, 270))])
+	# Old Town (the old Morris site): three streets north of Morris Park.
+	for x: float in [-150.0, -100.0, -50.0]:
+		_road("OLD TOWN %d" % int(-x), [Vector2(x, 88), Vector2(x, 190)])
+	_road("OLD TOWN NORTH", [Vector2(-150, 88), Vector2(-94, 88)])
+	_road("OLD TOWN MIDDLE", [Vector2(-150, 150), Vector2(-20, 150)])
+	# Nightlife (the old Strip site): avenues down to the Strip's north ring.
+	for x: float in [20.0, 72.0, 124.0, 176.0]:
+		_road("NIGHTLIFE %d" % int(x), [Vector2(x, 98), Vector2(x, 276)])
+	_road("NIGHTLIFE NORTH", [Vector2(20, 98), Vector2(176, 98)])
+	_road("NIGHTLIFE MIDDLE", [Vector2(20, 154), Vector2(176, 154)])
+	# West End (the old Lantern site), the slip-side quay, the wharf, the docks.
+	_road("WEST END 150", [Vector2(-150, -100), Vector2(-150, 9)])
+	_road("WEST END NORTH", [Vector2(-212, -100), Vector2(-88, -100)])
+	_road("SLIP SIDE ROAD", [Vector2(-392, 62), Vector2(-190, 62)])
+	_road("SLIP SIDE LINK", [Vector2(-330, 62), Vector2(-330, 112), _ring_snap("station", Vector2(-322, 135))])
+	_road("WHARF NORTH", [Vector2(-380, -195), Vector2(-320, -195), Vector2(-235, -196)])
+	_road("WHARF SPINE", [Vector2(-320, -238), Vector2(-320, -195), _ring_snap("lantern", Vector2(-320, -140))])
+	_road("DOCK ROAD", [Vector2(215, 268), Vector2(215, 300), Vector2(330, 300), Vector2(385, 300)])
+	_road("DOCK SPUR", [Vector2(300, 300), Vector2(300, 372)])
 	# The canal's only road crossing, and a footbridge over the inlet nearer the sea.
 	_bridge(Rect2(-178, -224, 20, 14), true)
 	_bridge(Rect2(-178, -194, 20, 4), true, true)
+
+## A kit's own cross streets, in its authored space (ends 5.5 m past the frame so they reach
+## the perimeter ring).
+func _kit_streets(kit: String) -> void:
+	var spec: Dictionary = KITS[kit]
+	var from: Vector2 = spec["from"]
+	var half: Vector2 = (spec["half"] as Vector2) + Vector2(5.5, 5.5)
+	var lines: Dictionary = KIT_STREETS[kit]
+	for x: float in lines["x"]:
+		_road("%s AVENUE %d" % [kit.to_upper(), int(absf(x))], [_kp(kit, Vector2(x, from.y - half.y)), _kp(kit, Vector2(x, from.y + half.y))])
+	for z: float in lines["z"]:
+		_road("%s CROSS %d" % [kit.to_upper(), int(absf(z))], [_kp(kit, Vector2(from.x - half.x, z)), _kp(kit, Vector2(from.x + half.x, z))])
+
+## The kit's perimeter ring, 9 m outside its frame.
+func _kit_ring(kit: String) -> void:
+	var poly: PackedVector2Array = _kit_poly(kit, 9.0)
+	var points: Array = []
+	for point: Vector2 in poly:
+		points.append(point)
+	points.append(poly[0])
+	_road("%s RING" % kit.to_upper(), points)
+
+## The point on a kit's ring nearest to a world x/z (where an arterial joins it).
+func _ring_snap(kit: String, near: Vector2) -> Vector2:
+	var poly: PackedVector2Array = _kit_poly(kit, 9.0)
+	var best: Vector2 = poly[0]
+	var best_distance: float = INF
+	for index: int in range(poly.size()):
+		var point: Vector2 = Geometry2D.get_closest_point_to_segment(near, poly[index], poly[(index + 1) % poly.size()])
+		if point.distance_to(near) < best_distance:
+			best_distance = point.distance_to(near)
+			best = point
+	return best
 
 func _road(title: String, points: Array, width: float = 12.0) -> void:
 	var line: PackedVector2Array = PackedVector2Array()
@@ -1158,7 +1675,7 @@ func _signed_area(poly: PackedVector2Array) -> float:
 		area += a.x * b.y - b.x * a.y
 	return area * 0.5
 
-const BEACH: PackedVector2Array = [Vector2(4, 224), Vector2(13, 215), Vector2(177, 215), Vector2(190, 214), Vector2(174, 231), Vector2(145, 246), Vector2(110, 256), Vector2(75, 258), Vector2(43, 250), Vector2(17, 234)]
+const BEACH: PackedVector2Array = [Vector2(24, 400), Vector2(33, 391), Vector2(197, 391), Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410)]
 
 ## Quay edges round a land mass: a stone face down to the water, a coping kerb and a rail on
 ## posts. Collision is exactly what you see: the coping is solid, the top rail is a thin bar,
@@ -1179,7 +1696,7 @@ func _coast(poly: PackedVector2Array) -> void:
 			continue
 		var direction: Vector2 = edge.normalized()
 		var outward: Vector2 = Vector2(-direction.y, direction.x) if clockwise else Vector2(direction.y, -direction.x)
-		var beach: bool = a.y >= 214.0 and b.y >= 214.0 and a.x >= 3.0 and b.x >= 3.0 and a.x <= 191.0 and b.x <= 191.0
+		var beach: bool = _on_beach(a) and _on_beach(b)
 		for span: Vector2 in _open_spans(a, b):
 			var from: Vector2 = a + edge * span.x
 			var to: Vector2 = a + edge * span.y
@@ -1204,6 +1721,10 @@ func _coast(poly: PackedVector2Array) -> void:
 			_box_with(Vector3(rail_at.x, RAIL_HEIGHT, rail_at.y), Vector3(0.07, 0.07, length), rail, true, angle)
 
 ## The parts of edge a→b (as 0..1 parameter spans) not covered by a bridge or pier gap.
+## Coast vertices that belong to Halcyon Beach (the sand bulge south of the Strip).
+func _on_beach(at: Vector2) -> bool:
+	return at.y >= 389.0 and at.x >= 22.0 and at.x <= 220.0
+
 func _open_spans(a: Vector2, b: Vector2) -> Array[Vector2]:
 	var covered: Array[Vector2] = []
 	for gap: Rect2 in quay_gaps:
@@ -1242,14 +1763,16 @@ func _clip_segment(a: Vector2, b: Vector2, rect: Rect2) -> Vector2:
 	return Vector2(t0, t1)
 
 ## Asphalt ribbons with mitred joints, centre lines, and zebra crossings at bridge ends.
-func _build_roads() -> void:
+func _build_roads(from_index: int = 0) -> void:
 	var asphalt: StandardMaterial3D = _material(Color(0.18, 0.20, 0.21), 0.9, "asphalt")
 	var paint: StandardMaterial3D = _material(Color(0.83, 0.76, 0.48))
-	for road_index: int in range(roads.size()):
+	for road_index: int in range(from_index, roads.size()):
 		var road: Dictionary = roads[road_index]
 		var points: PackedVector2Array = road["points"]
 		var width: float = road["width"]
-		var y: float = 0.02 + road_index * 0.0015
+		# Millimetre-scale sorting offsets: overlapping ribbons must not rise into
+		# a visible staircase merely because their road records were built later.
+		var y: float = 0.02 + road_index * 0.00004
 		var surface: SurfaceTool = SurfaceTool.new()
 		surface.begin(Mesh.PRIMITIVE_TRIANGLES)
 		var lefts: PackedVector2Array = PackedVector2Array()
@@ -1301,9 +1824,10 @@ func _build_roads() -> void:
 				if not _near_other_road(at, road_index, 2.5):
 					for offset: float in [-0.15, 0.15]:
 						var mark: Vector2 = at + side * offset
-						_box_with(Vector3(mark.x, y + 0.03, mark.y), Vector3(0.1, 0.012, 3.2), paint, false, angle)
+						_box_with(Vector3(mark.x, y + 0.008, mark.y), Vector3(0.1, 0.012, 3.2), paint, false, angle)
 				dash += 7.0
-	for bridge: Dictionary in bridges:
+	# Streets added later (the fill pass's cul-de-sacs) have no bridges to stripe.
+	for bridge: Dictionary in (bridges if from_index == 0 else ([] as Array[Dictionary])):
 		var rect: Rect2 = bridge["rect"]
 		var along_x: bool = bridge["along_x"]
 		if bridge.get("foot", false):
@@ -1487,7 +2011,9 @@ func _build_district() -> void:
 	# door, breakable shop windows. Their rooms are furnished after Midtown merges.
 	var shop_sites: Array[Vector2] = []
 	for shop: Dictionary in Interiors.SHOPS:
+		_begin_building("shop", true, str(shop["sign"]))
 		Interiors.new(self, shop).build_shell()
+		_end_building()
 		shop_sites.append(shop["at"])
 	_building(Vector3(39, 0, -35), Vector3(14, 8, 18), Color(0.65, 0.54, 0.37), 2, "CARGO  04")
 	for side: float in [-1.0, 1.0]:
@@ -1495,11 +2021,13 @@ func _build_district() -> void:
 			var height: float = _rng.randf_range(13.0, 27.0)
 			if not shop_sites.has(Vector2(side * 61.0, z)) and not SQUARE_SITES.has(Vector2(side * 61.0, z)):
 				_building(Vector3(side * 61.0, 0, z), Vector3(22, height, 21), Color(0.42, 0.46, 0.45), int(height / 3.2))
-	# A low loading yard leaves sight lines and the range lane open.
-	_box(Vector3(20, 0.02, -34), Vector3(21, 0.035, 22), Color(0.42, 0.42, 0.38), false, "tiles")
+	# Midtown Parking: the old armory lot is a pay-and-display car park (the range moved to Halcyon Arms).
+	_box(Vector3(20, 0.02, -34), Vector3(21, 0.035, 22), Color(0.2, 0.22, 0.23), false, "asphalt")
 	_box(Vector3(21, 0.10, -43), Vector3(18, 0.20, 1.2), Color(0.70, 0.63, 0.45), true)
 	_box(Vector3(22, 1.6, -45), Vector3(20, 3.2, 0.5), Color(0.46, 0.43, 0.35), true, "panel")
-	_label("PRIVATE YARD / AUTHORIZED TRADES", Vector3(22, 2.0, -44.70), 34, Color(0.94, 0.79, 0.48))
+	_label("MIDTOWN PARKING  /  PAY AT THE MACHINE", Vector3(22, 2.0, -44.70), 34, Color(0.94, 0.79, 0.48))
+	for at: Array in [[Vector3(15.9, 0.03, -34.4), 0.0, Color(0.55, 0.14, 0.14), "sedan"], [Vector3(24.1, 0.03, -34.4), 0.0, Color(0.2, 0.28, 0.4), "coupe"]]:
+		_car_prop(at[0], float(at[1]), at[2], str(at[3]), "MIDTOWN LOT")
 	for x: float in [13.0, 30.0]:
 		_box(Vector3(x, 0.65, -41), Vector3(0.3, 1.3, 0.3), Color(0.93, 0.63, 0.21), true)
 	# Street-facing loading doors and awnings.
@@ -1516,7 +2044,7 @@ func _build_district() -> void:
 	_box(Vector3(0, 7.9, -38.0), Vector3(18.2, 0.4, 0.4), Color(0.2, 0.22, 0.24))
 	_neon("UNION EXCHANGE", Vector3(0, 6.9, -37.85), 0.0, Color(0.98, 0.7, 0.34), 70, true)
 	_landmark("UNION EXCHANGE", Vector3(0, 0, -42))
-	_landmark("ARMORY", Vector3(13, 0, -40))
+	_landmark("MIDTOWN PARKING", Vector3(13, 0, -40))
 
 func _crate(at: Vector3, size: float = 1.2) -> void:
 	var wood: Color = Color(0.56, 0.43, 0.28)
@@ -1527,7 +2055,7 @@ func _crate(at: Vector3, size: float = 1.2) -> void:
 	_box(at + Vector3(0, size + 0.02, 0), Vector3(size, 0.04, 0.12), wood.darkened(0.22))
 
 func _build_props() -> void:
-	# Yard crates sit in the street-side (map south-east) corner, clear of the armory firing lanes.
+	# Yard crates sit in the street-side (map south-east) corner of the lot.
 	for at: Vector3 in [Vector3(-10.8, 0.16, -39), Vector3(-10.8, 0.16, -36.8), Vector3(28.6, 0, -24.4), Vector3(27.2, 0, -24.4), Vector3(28.6, 1.2, -24.4), Vector3(14, 0.16, 0)]:
 		_crate(at)
 	var steel: Color = Color(0.23, 0.28, 0.29)
@@ -1548,12 +2076,12 @@ func _build_props() -> void:
 	# Freight container in the back lot, recognizable corrugations included.
 	_box(Vector3(25, 1.35, -58), Vector3(6.1, 2.7, 2.6), Color(0.35, 0.48, 0.49), true, "metal")
 	_label("M / 028", Vector3(25, 1.5, -56.60), 38, Color(0.82, 0.83, 0.71))
-	for at: Vector3 in [Vector3(-10.1, 0, 7), Vector3(10.5, 0, -37), Vector3(10.5, 0, 58)]:
+	for at: Vector3 in [Vector3(-10.1, 0.16, 7), Vector3(10.5, 0.16, -37), Vector3(10.5, 0.16, 58)]:
 		_tree(at)
-	# Familiar painted parking bays frame the training yard.
+	# Painted parking bays.
 	for x: float in [14.0, 18.0, 22.0, 26.0, 30.0]:
 		_box(Vector3(x, 0.05, -28.4), Vector3(0.09, 0.015, 5), Color(0.74, 0.70, 0.53))
-	_label("RANGE", Vector3(31.65, 4.4, -28), 46, Color(0.95, 0.79, 0.43), -PI * 0.5)
+	_label("PARKING", Vector3(31.65, 4.4, -28), 46, Color(0.95, 0.79, 0.43), -PI * 0.5)
 
 ## Two small squares where the diagonal avenues cut Midtown's north-east and south-west
 ## corners: somewhere to stand, sit, hide behind a planter or a clock tower. (No painted
@@ -1691,8 +2219,8 @@ func _build_solana_heights() -> void:
 	_crew_spawn("solnegro", Vector3(178, 0.5, -147.4), -PI * 0.5, Vector3(178, 0.2, -161))
 	# Cantina and auto shop.
 	_block(Rect2(94, -200, 50, 44), Color(0.7, 0.6, 0.48), "tiles")
-	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7)
-	_tower(Vector2(131, -170), Vector3(22, 6.5, 16), Color(0.66, 0.64, 0.6), "stucco", Vector3.BACK, "TALLER  MECANICO", Color(0.95, 0.55, 0.25), Color(0.4, 0.4, 0.42), 0.3)
+	_tower(Vector2(106, -168), Vector3(18, 5.2, 16), pastels[0], "stucco", Vector3.BACK, "CANTINA DEL SOL", Color(1.0, 0.75, 0.3), terracotta, 0.7, "bar")
+	_tower(Vector2(131, -170), Vector3(22, 6.5, 16), Color(0.66, 0.64, 0.6), "stucco", Vector3.BACK, "TALLER  MECANICO", Color(0.95, 0.55, 0.25), Color(0.4, 0.4, 0.42), 0.3, "auto_shop")
 	_box(Vector3(131, 2.2, -161.9), Vector3(9, 4.4, 0.2), Color(0.2, 0.2, 0.22), false, "metal")
 	_car_prop(Vector3(122, 0.16, -186), 0.3, Color(0.55, 0.2, 0.15))
 	_car_prop(Vector3(138, 0.16, -188), -0.2, Color(0.8, 0.78, 0.7))
@@ -1809,8 +2337,8 @@ func _build_kingsway() -> void:
 	_tower(Vector2(188, 128), Vector3(16, 19, 22), concrete, "panel", Vector3.LEFT, "", Color.WHITE, Color(0.3, 0.3, 0.3), 0.35)
 	# Corner store, laundromat, mural wall.
 	_block(Rect2(94, 94, 50, 50), Color(0.5, 0.5, 0.49), "tiles")
-	_tower(Vector2(106, 106), Vector3(16, 5, 14), Color(0.8, 0.78, 0.72), "panel", Vector3.LEFT, "KWIK STOP  24/7", Color(0.35, 1.0, 0.6), Color(0.3, 0.3, 0.3), 0.8)
-	_tower(Vector2(106, 125), Vector3(16, 5, 14), Color(0.76, 0.76, 0.8), "panel", Vector3.LEFT, "SPIN CITY", Color(0.4, 0.8, 1.0), Color(0.3, 0.3, 0.3), 0.8)
+	_tower(Vector2(106, 106), Vector3(16, 5, 14), Color(0.8, 0.78, 0.72), "panel", Vector3.LEFT, "KWIK STOP  24/7", Color(0.35, 1.0, 0.6), Color(0.3, 0.3, 0.3), 0.8, "corner_store")
+	_tower(Vector2(106, 125), Vector3(16, 5, 14), Color(0.76, 0.76, 0.8), "panel", Vector3.LEFT, "SPIN CITY", Color(0.4, 0.8, 1.0), Color(0.3, 0.3, 0.3), 0.8, "row_shop")
 	_box(Vector3(135, 2, 118), Vector3(0.6, 4, 36), Color(0.6, 0.6, 0.58), true, "panel")
 	for index: int in range(8):
 		_box(Vector3(134.66, 1.2 + (index % 3) * 0.9, 102 + index * 4.2), Vector3(0.06, 1.6, 3.4), tags[index % 4])
@@ -1881,7 +2409,7 @@ func _build_harbor() -> void:
 		_box(Vector3(-60 + index * 10, 0.6, -109.8), Vector3(6, 1.2, 2), Color(0.5, 0.5, 0.48), true, "panel")
 	_landmark("COLD STORAGE 7", Vector3(-44, 0, -106))
 	# Harbor office, trailers and light towers.
-	_tower(Vector2(64, -130), Vector3(18, 7, 12), Color(0.8, 0.76, 0.66), "panel", Vector3.LEFT, "HARBOR OFFICE", Color(0.95, 0.85, 0.5), Color(0.3, 0.3, 0.3), 0.6)
+	_tower(Vector2(64, -130), Vector3(18, 7, 12), Color(0.8, 0.76, 0.66), "panel", Vector3.LEFT, "HARBOR OFFICE", Color(0.95, 0.85, 0.5), Color(0.3, 0.3, 0.3), 0.6, "row_shop")
 	for index: int in range(3):
 		_container(Vector3(20 + index * 3.2, 0, -122), colors[index + 2], true)
 		_container(Vector3(20 + index * 3.2, 0, -110), colors[index], true)
@@ -1950,15 +2478,17 @@ func _build_canal_market() -> void:
 	_street_palette = [Color(0.85, 0.3, 0.2), Color(0.25, 0.55, 0.8), Color(0.95, 0.8, 0.25), Color(0.3, 0.65, 0.4)]
 	var canopies: Array[Color] = [Color(0.85, 0.25, 0.2), Color(0.2, 0.55, 0.8), Color(0.95, 0.75, 0.2), Color(0.3, 0.65, 0.35)]
 	# West bank: the fish hall faces the inlet across its quay.
-	_block(Rect2(-229, -211, 42, 55), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-210, -186), Vector3(17, 7, 36), Color(0.6, 0.64, 0.66), "metal", Vector3.RIGHT, "FISH HALL", Color(0.5, 0.9, 1.0), Color(0.3, 0.33, 0.35), 0.2)
+	# Both bank blocks stop short of North Shore Road's curve (their corners used to put a
+	# kerbed plinth on the carriageway at x -228 and x -100, z -206).
+	_block(Rect2(-229, -205, 42, 49), Color(0.5, 0.48, 0.44), "cobble")
+	_tower(Vector2(-210, -186), Vector3(17, 7, 36), Color(0.6, 0.64, 0.66), "metal", Vector3.RIGHT, "FISH HALL", Color(0.5, 0.9, 1.0), Color(0.3, 0.33, 0.35), 0.2, "warehouse")
 	for index: int in range(3):
 		_box(Vector3(-199.5, 2.2, -198 + index * 12), Vector3(0.2, 4.4, 6), Color(0.3, 0.33, 0.35), false, "metal")
-		_box(Vector3(-198.4, 0.6, -198 + index * 12), Vector3(2, 1.2, 6), Color(0.5, 0.5, 0.48), true, "panel")
+		_box(Vector3(-198.4, 0.76, -198 + index * 12), Vector3(2, 1.2, 6), Color(0.5, 0.5, 0.48), true, "panel")
 	_landmark("FISH HALL", Vector3(-196, 0, -186))
 	# East bank: warehouse lofts over the basin, with kiosks on the quay.
-	_block(Rect2(-149, -211, 55, 55), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-122, -190), Vector3(40, 13, 18), Color(0.6, 0.42, 0.3), "brick", Vector3.BACK, "CANAL LOFTS", Color(1.0, 0.8, 0.5), Color(0.28, 0.25, 0.24), 0.45)
+	_block(Rect2(-149, -201, 55, 45), Color(0.5, 0.48, 0.44), "cobble")
+	_tower(Vector2(-122, -190), Vector3(40, 13, 18), Color(0.6, 0.42, 0.3), "brick", Vector3.BACK, "CANAL LOFTS", Color(1.0, 0.8, 0.5), Color(0.28, 0.25, 0.24), 0.45, "walkup")
 	for at: Vector3 in [Vector3(-142, 0.16, -170), Vector3(-130, 0.16, -166), Vector3(-196, 0.16, -150 + -14)]:
 		_box(at + Vector3(0, 1.4, 0), Vector3(4, 2.8, 3), Color(0.25, 0.42, 0.36), true, "planks")
 		_box(at + Vector3(0, 3.0, 0), Vector3(4.8, 0.3, 3.8), Color(0.72, 0.36, 0.22), false, "roof")
@@ -1971,8 +2501,6 @@ func _build_canal_market() -> void:
 	_landmark("CANAL BASIN", Vector3(-168, 0, -156))
 	_landmark("CANAL BRIDGE", Vector3(-168, 0, -217))
 	# South of Harbor Road: a warehouse and the open-air market square.
-	_block(Rect2(-229, -144, 44, 38), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-212, -125), Vector3(30, 12, 22), Color(0.55, 0.36, 0.28), "brick", Vector3.RIGHT, "", Color.WHITE, Color(0.28, 0.25, 0.24), 0.4)
 	_block(Rect2(-173, -144, 50, 38), Color(0.52, 0.5, 0.45), "cobble")
 	plazas.append(PackedVector2Array([Vector2(-173, -144), Vector2(-123, -144), Vector2(-123, -106), Vector2(-173, -106)]))
 	for row: int in range(3):
@@ -1987,7 +2515,7 @@ func _build_canal_market() -> void:
 	_landmark("CANAL MARKET", Vector3(-148, 0, -126))
 	# East of the square, a covered produce hall.
 	_block(Rect2(-117, -144, 23, 38), Color(0.5, 0.48, 0.44), "cobble")
-	_tower(Vector2(-105.5, -125), Vector3(16, 6, 30), Color(0.74, 0.7, 0.6), "stucco", Vector3.LEFT, "PRODUCE", Color(0.5, 1.0, 0.5), Color(0.72, 0.36, 0.22), 0.5)
+	_tower(Vector2(-105.5, -125), Vector3(16, 6, 30), Color(0.74, 0.7, 0.6), "stucco", Vector3.LEFT, "PRODUCE", Color(0.5, 1.0, 0.5), Color(0.72, 0.36, 0.22), 0.5, "warehouse")
 
 ## Waterfront landmarks that went with the crew turf: Lantern Point's pagoda on its
 ## headland, the Solana lookout on the north-east cape, Morris Marina's jetty and the
@@ -1997,50 +2525,51 @@ func _build_waterfronts() -> void:
 	_street_palette = [Color(0.6, 0.6, 0.6), Color(0.3, 0.5, 0.7), Color(0.8, 0.7, 0.4), Color(0.4, 0.6, 0.4)]
 	var slate: Color = Color(0.16, 0.16, 0.2)
 	var violet: Color = Factions.color("kojimoto")
-	var base: Vector3 = Vector3(-251, 0, -58)
+	var base: Vector3 = Vector3(-391, 0, -58)
 	for tier: int in range(5):
 		var width: float = 7.0 - tier * 1.1
 		_box(base + Vector3(0, 1.0 + tier * 2.6, 0), Vector3(width, 2.0, width), Color(0.55, 0.12, 0.12), tier == 0, "planks")
 		_box(base + Vector3(0, 2.2 + tier * 2.6, 0), Vector3(width + 2.2, 0.35, width + 2.2), slate, false, "roof")
 	_cylinder(base + Vector3(0, 15.5, 0), 0.12, 3.0, Color(0.8, 0.7, 0.3), 6)
 	_box_with(base + Vector3(3.6, 1.3, 0), Vector3(0.1, 1.6, 1.2), _glow(violet, 1.8))
-	for at: Vector3 in [Vector3(-246, 0, -42), Vector3(-255, 0, -70), Vector3(-247, 0, -78)]:
+	for at: Vector3 in [Vector3(-387, 0, -42), Vector3(-395, 0, -74), Vector3(-388, 0, -80)]:
 		_tree(at, "blossom")
 	_landmark("LANTERN POINT", base + Vector3(6, 0, 0), false)
-	# Solana Lookout: a whitewashed gazebo and palms on the bluff.
-	var solana: Vector3 = Vector3(234, 0, -214)
+	# Solana Lookout: a whitewashed gazebo and palms on the north-east cape.
+	var solana: Vector3 = Vector3(330, 0, -265)
 	for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
 		_box(solana + Vector3(corner.x * 3.0, 1.6, corner.y * 3.0), Vector3(0.4, 3.2, 0.4), Color(0.95, 0.93, 0.88), true, "stucco")
 	_box(solana + Vector3(0, 3.4, 0), Vector3(7.4, 0.4, 7.4), Color(0.72, 0.36, 0.22), false, "roof")
 	_cylinder(solana + Vector3(0, 0.3, 0), 3.4, 0.6, Color(0.9, 0.86, 0.76), 12)
-	for at: Vector3 in [Vector3(240, 0, -202), Vector3(226, 0, -226), Vector3(242, 0, -190)]:
+	for at: Vector3 in [Vector3(346, 0, -262), Vector3(314, 0, -262), Vector3(360, 0, -268)]:
 		_tree(at, "palm")
 	_landmark("SOLANA LOOKOUT", solana, false)
 	# Morris Marina: cabin cruisers along the jetty.
 	for index: int in range(4):
-		var z: float = 224.0 + index * 7.0
+		var z: float = 372.0 + index * 7.0
 		var side: float = -1.0 if index % 2 == 0 else 1.0
-		var boat: Vector3 = Vector3(-60 + side * 5.2, 0, z)
+		var boat: Vector3 = Vector3(-80 + side * 5.2, 0, z)
 		_box(boat + Vector3(0, -0.6, 0), Vector3(3.0, 1.4, 6.5), Color(0.95, 0.95, 0.94), true, "panel")
 		_box(boat + Vector3(0, 0.6, 0.6), Vector3(2.2, 1.0, 3.0), Color(0.2, 0.3, 0.4), false, "panel")
 		_box(boat + Vector3(0, -0.2, 0), Vector3(3.05, 0.2, 6.55), Factions.color("morris"))
-	_box(Vector3(-60, 0.06, 232), Vector3(8, 0.12, 32), Color(0.55, 0.4, 0.26), false, "planks")
-	_neon("MORRIS MARINA", Vector3(-60, 3.8, 213.6), PI, Color(1.0, 0.8, 0.5), 56)
-	_box(Vector3(-60, 1.9, 213.8), Vector3(0.3, 3.8, 0.3), Color(0.3, 0.3, 0.3))
-	_landmark("MORRIS MARINA", Vector3(-60, 0, 228), false)
+	_box(Vector3(-80, 0.06, 384), Vector3(8, 0.12, 32), Color(0.55, 0.4, 0.26), false, "planks")
+	_neon("MORRIS MARINA", Vector3(-80, 3.8, 363.6), PI, Color(1.0, 0.8, 0.5), 56)
+	_box(Vector3(-80, 1.9, 363.8), Vector3(0.3, 3.8, 0.3), Color(0.3, 0.3, 0.3))
+	_landmark("MORRIS MARINA", Vector3(-80, 0, 384), false)
 	# Kingsway Docks: a working pier with a crane, crates and an old trawler.
-	_box(Vector3(253, 0.06, 60), Vector3(34, 0.12, 10), Color(0.5, 0.48, 0.44), false, "panel")
-	_box(Vector3(260, 0.2, 70.5), Vector3(14, 2.4, 5), Color(0.2, 0.45, 0.42), true, "metal")
-	_box(Vector3(256, 2.6, 70.5), Vector3(4, 2.4, 3.6), Color(0.9, 0.88, 0.82), false, "panel")
-	_box(Vector3(246, 5, 57), Vector3(0.6, 10, 0.6), Factions.color("kingsway"), true)
-	_box(Vector3(250, 9.8, 57), Vector3(9, 0.5, 0.5), Factions.color("kingsway"))
+	var dock: Vector3 = Vector3(DOCKS_SHIFT.x, 0, DOCKS_SHIFT.y)
+	_box(dock + Vector3(253, 0.06, 60), Vector3(34, 0.12, 10), Color(0.5, 0.48, 0.44), false, "panel")
+	_box(dock + Vector3(260, 0.2, 70.5), Vector3(14, 2.4, 5), Color(0.2, 0.45, 0.42), true, "metal")
+	_box(dock + Vector3(256, 2.6, 70.5), Vector3(4, 2.4, 3.6), Color(0.9, 0.88, 0.82), false, "panel")
+	_box(dock + Vector3(246, 5, 57), Vector3(0.6, 10, 0.6), Factions.color("kingsway"), true)
+	_box(dock + Vector3(250, 9.8, 57), Vector3(9, 0.5, 0.5), Factions.color("kingsway"))
 	for at: Vector3 in [Vector3(240, 0.1, 58), Vector3(241.4, 0.1, 58), Vector3(240.6, 1.3, 58), Vector3(264, 0.1, 58)]:
-		_crate(at)
-	_landmark("KINGSWAY DOCKS", Vector3(252, 0, 60), false)
+		_crate(dock + at)
+	_landmark("KINGSWAY DOCKS", dock + Vector3(252, 0, 60), false)
 	# Lamps along the waterfront drives.
 	for road: Dictionary in roads:
 		var title: String = str(road["name"])
-		if title in ["SOLANA BLUFF DRIVE", "NORTH SHORE ROAD", "EAST SHORE DRIVE", "MARINA DRIVE"]:
+		if title in ["SOLANA BLUFF DRIVE", "NORTH SHORE ROAD", "EAST SHORE DRIVE", "COAST ROAD"]:
 			var points: PackedVector2Array = road["points"]
 			for index: int in range(1, points.size() - 1, 3):
 				var direction: Vector2 = (points[index + 1] - points[index - 1]).normalized()
@@ -2060,23 +2589,23 @@ func _build_plazas() -> void:
 	_street_palette = [Color(0.8, 0.2, 0.18), Color(0.2, 0.45, 0.75), Color(0.95, 0.75, 0.2), Color(0.25, 0.6, 0.35)]
 	var stone: Color = Color(0.78, 0.74, 0.66)
 	# West Bank Plaza: between Lantern Row and Union Street, a statue on a plinth.
-	var west: Rect2 = Rect2(-229, 15, 106, 14)
+	var west: Rect2 = Rect2(-182, 15, 59, 14)
 	_slab(west, Color(0.56, 0.53, 0.48), "tiles")
 	plazas.append(_rect_poly(west))
-	_box(Vector3(-176, 0.8, 20.5), Vector3(3.2, 1.6, 3.2), stone, true, "stucco")
-	_box(Vector3(-176, 2.9, 20.5), Vector3(0.9, 2.6, 0.7), Color(0.3, 0.42, 0.36), true, "metal")
-	_box(Vector3(-176, 4.5, 20.5), Vector3(0.5, 0.6, 0.5), Color(0.3, 0.42, 0.36), false, "metal")
-	for x: float in [-218.0, -200.0, -154.0, -136.0]:
+	_box(Vector3(-152, 0.96, 20.5), Vector3(3.2, 1.6, 3.2), stone, true, "stucco")
+	_box(Vector3(-152, 3.06, 20.5), Vector3(0.9, 2.6, 0.7), Color(0.3, 0.42, 0.36), true, "metal")
+	_box(Vector3(-152, 4.66, 20.5), Vector3(0.5, 0.6, 0.5), Color(0.3, 0.42, 0.36), false, "metal")
+	for x: float in [-174.0, -164.0, -138.0, -128.0]:
 		_tree(Vector3(x, 0.16, 20.5))
-	for x: float in [-209.0, -191.0, -161.0, -145.0]:
+	for x: float in [-171.0, -161.0, -143.0, -133.0]:
 		_bench(Vector3(x, 0.16, 16.0), PI)
 		_planter(Vector3(x, 0.16, 25.0))
-	_landmark("WEST BANK PLAZA", Vector3(-176, 0, 24))
+	_landmark("WEST BANK PLAZA", Vector3(-152, 0, 24))
 	# Slip Park: lawns and a promenade between Union Street and the station.
-	var slip: Rect2 = Rect2(-200, 41, 69, 11)
+	var slip: Rect2 = Rect2(-182, 41, 51, 11)
 	_slab(slip, Color(0.52, 0.5, 0.45), "tiles")
 	plazas.append(_rect_poly(slip))
-	for x: float in [-192.0, -176.0, -160.0, -144.0]:
+	for x: float in [-172.0, -158.0, -144.0]:
 		_tree(Vector3(x, 0.16, 46.5))
 	_landmark("WEST SLIP", Vector3(-214, 0, 35))
 	# Fountain Square: a roundabout island with a three-tier fountain, in Eastside Park.
@@ -2106,14 +2635,421 @@ func _build_plazas() -> void:
 		_bench(at, 0.0)
 	_landmark("EASTSIDE PARK", Vector3(190, 0, -58))
 	# Eastgate: a hotel and a bank tower face the park from the north-east.
-	_tower(Vector2(201, -80), Vector3(20, 24, 26), Color(0.7, 0.62, 0.5), "stucco", Vector3.LEFT, "HOTEL EASTGATE", Color(1.0, 0.85, 0.55), Color(0.3, 0.28, 0.26), 0.5)
+	for at: Vector2 in [Vector2(196, -80), Vector2(206, -70), Vector2(214, -84)]:
+		_tree(Vector3(at.x, 0.0, at.y))
 	_tower(Vector2(204, -38), Vector3(16, 30, 18), Color(0.46, 0.5, 0.52), "panel", Vector3.LEFT, "HALCYON SAVINGS", Color(0.6, 0.9, 1.0), Color(0.28, 0.3, 0.3), 0.35)
-	# Kingsway Green: a planted verge between downtown and the projects.
-	var green: Rect2 = Rect2(97, -9, 15, 94)
-	_box(Vector3(green.get_center().x, 0.02, green.get_center().y), Vector3(green.size.x, 0.03, green.size.y), Color(0.3, 0.42, 0.27), false, "grass")
-	for z: float in [0.0, 18.0, 56.0, 74.0]:
-		_tree(Vector3(104.5, 0.0, z))
-	_bench(Vector3(104.5, 0.0, 9.0), PI * 0.5)
+
+# --- 0.6 districts: the new ring of land -------------------------------------------------------
+
+## Block-filling styles: heights, colours, textures and shop signs for the generic buildings of
+## the new districts. (The hand-authored kits and Midtown keep their own art.)
+const FILL_STYLES: Dictionary = {
+	"highrise": {"height": Vector2(30.0, 62.0), "colors": [Color(0.42, 0.46, 0.5), Color(0.5, 0.55, 0.58), Color(0.36, 0.4, 0.46), Color(0.55, 0.52, 0.47)], "tex": "panel", "lit": 0.45, "width": Vector2(20.0, 30.0), "signs": ["HALCYON BANK", "MERIDIAN TRUST", "PORT LIFE", "CARLYLE & CO", "NORTHLINE", "UNION MUTUAL"], "sign_color": Color(0.7, 0.9, 1.0)},
+	"midrise": {"height": Vector2(14.0, 26.0), "colors": [Color(0.6, 0.55, 0.47), Color(0.5, 0.52, 0.5), Color(0.66, 0.6, 0.5), Color(0.44, 0.46, 0.5)], "tex": "stucco", "lit": 0.4, "width": Vector2(16.0, 24.0), "signs": ["LAW OFFICES", "MERCURY CLINIC", "ATLAS INSURANCE", "PARK VIEW APTS"], "sign_color": Color(0.95, 0.85, 0.6)},
+	"brick": {"height": Vector2(9.0, 17.0), "colors": [Color(0.56, 0.3, 0.24), Color(0.62, 0.38, 0.28), Color(0.5, 0.27, 0.25), Color(0.66, 0.46, 0.34)], "tex": "brick", "lit": 0.4, "width": Vector2(11.0, 17.0), "signs": ["DELI", "HARDWARE", "TAILOR", "CORNER PUB", "PHARMACY", "BARBER"], "sign_color": Color(1.0, 0.85, 0.55)},
+	"warehouse": {"height": Vector2(7.0, 11.0), "colors": [Color(0.5, 0.52, 0.5), Color(0.42, 0.46, 0.5), Color(0.55, 0.5, 0.42), Color(0.36, 0.42, 0.4)], "tex": "metal", "lit": 0.08, "width": Vector2(20.0, 32.0), "signs": ["CARGO WORKS", "COLD STORE", "SHIPPING CO", "TIMBER YARD", "NET LOFT", "CANNERY"], "sign_color": Color(0.9, 0.8, 0.45)},
+	"neon": {"height": Vector2(7.0, 13.0), "colors": [Color(0.16, 0.14, 0.2), Color(0.2, 0.16, 0.24), Color(0.12, 0.14, 0.2), Color(0.24, 0.16, 0.2)], "tex": "panel", "lit": 0.6, "width": Vector2(14.0, 22.0), "signs": ["LUCKY DRAGON", "SILVER SLIPPER", "CASINO ORIOLE", "THE 400 CLUB", "SPIN PALACE", "DICE & DIAMONDS", "AMBER STAR CLUB", "CLUB ORBIT"], "sign_color": Color(1.0, 0.45, 0.85)},
+	"flats": {"height": Vector2(10.0, 20.0), "colors": [Color(0.64, 0.6, 0.52), Color(0.58, 0.62, 0.6), Color(0.68, 0.56, 0.48), Color(0.52, 0.54, 0.6)], "tex": "stucco", "lit": 0.4, "width": Vector2(14.0, 22.0), "signs": [], "sign_color": Color(1.0, 0.9, 0.7)},
+}
+
+## An enterable prefab standing where a hand-placed `_tower` would have been (kit or world frame): the
+## footprint is the tower's, the front faces the same way. False if the library or the kind is missing or the
+## lot is smaller than the prefab's minimum.
+func _tower_prefab(kind: String, center: Vector2, size: Vector3, color: Color, front: Vector3, title: String) -> bool:
+	var lib: Variant = _prefab_library()
+	if lib == null or not lib.kinds().has(kind):
+		return false
+	var world_front: Vector3 = (_xf.basis * front).normalized()
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = size.x if across else size.z
+	var depth: float = size.z if across else size.x
+	var least: Vector2 = lib.min_size(kind)
+	if frontage < least.x or depth < least.y:
+		return false
+	var at: Vector2 = _w2(center)
+	var floors: int = clampi(int(size.y / 3.4), 1, int(lib.max_floors(kind)))
+	var seed: int = absi(int(at.x * 131.0) * 7919 + int(at.y * 977.0)) + 31
+	var palette: Array[Color] = [color, color.lightened(0.35), color.darkened(0.35)]
+	var saved_xf: Transform3D = _xf
+	var saved_yaw: float = _xf_yaw
+	var saved_target: Node3D = _target
+	_begin_building(kind, true, title)
+	var record: Dictionary = _building_open
+	var node: Variant = lib.build(self, kind, at, Vector2(frontage, depth), lib.front_yaw(world_front), floors, seed, {"palette": palette, "sign": title, "lit": 0.4, "district": "hand"})
+	_end_building()
+	_xf = saved_xf
+	_xf_yaw = saved_yaw
+	_target = saved_target
+	if node == null:
+		buildings.erase(record)
+		return false
+	if (record["footprints"] as Array).is_empty():
+		_footprint(Rect2(center.x - size.x * 0.5, center.y - size.z * 0.5, size.x, size.z))
+		(record["footprints"] as Array).append(footprint_polys.size() - 1)
+		buildings.pop_back()
+	_finish(node as Node3D)
+	limit_range(node as Node3D, NEAR_RANGE)
+	lod_lots.append({"center": at, "size": Vector3(size.x, floors * 3.4 + 1.2, size.z), "yaw": _xf_yaw, "color": color})
+	return true
+
+## Which prefab kinds fill each generic style (best fit first); the high-rises stay solid towers.
+const FILL_PREFABS: Dictionary = {
+	"brick": ["walkup", "row_shop", "corner_store"],
+	"flats": ["walkup", "row_shop"],
+	"midrise": ["office", "walkup"],
+	"neon": ["bar", "row_shop"],
+	"warehouse": ["warehouse", "auto_shop"],
+}
+
+## Fills a block's buildable rectangle with one or two rows of generic buildings. Lots whose
+## rectangle meets `keep_clear` (a reserved plot) are left out. Front faces the nearer street.
+func _fill_block(area: Rect2, style: String, keep_clear: Rect2 = Rect2()) -> void:
+	var spec: Dictionary = FILL_STYLES[style]
+	var along_x: bool = area.size.x >= area.size.y
+	var length: float = area.size.x if along_x else area.size.y
+	var depth: float = area.size.y if along_x else area.size.x
+	var rows: int = 2 if depth >= 32.0 else 1
+	# Two rows back to back leave a 5 m alley between them (rear doors, dumpsters, a way through).
+	var row_gap: float = 5.0 if rows == 2 else 0.0
+	var row_depth: float = (depth - row_gap) / rows
+	var widths: Vector2 = spec["width"]
+	for row: int in range(rows):
+		var cursor: float = 0.0
+		var side: float = -1.0 if row == 0 else 1.0
+		while length - cursor > 9.0:
+			var span: float = minf(_rng.randf_range(widths.x, widths.y), length - cursor)
+			if length - cursor - span < 9.0:
+				span = length - cursor
+			var lot_center: float = cursor + span * 0.5
+			var offset: float = (row_depth * 0.5 + row_gap * 0.5) * side if rows == 2 else 0.0
+			var center: Vector2 = Vector2(area.position.x + lot_center, area.get_center().y + offset) if along_x else Vector2(area.get_center().x + offset, area.position.y + lot_center)
+			var lot_size: Vector2 = Vector2(span, row_depth) if along_x else Vector2(row_depth, span)
+			cursor += span + (3.4 if style == "warehouse" else 0.8)
+			var lot: Rect2 = Rect2(center - lot_size * 0.5, lot_size)
+			if keep_clear.size != Vector2.ZERO and lot.intersects(keep_clear.grow(1.0)):
+				continue
+			var height: float = _rng.randf_range(float(spec["height"].x), float(spec["height"].y))
+			var colors: Array = spec["colors"]
+			var color: Color = colors[_rng.randi() % colors.size()]
+			var front: Vector3
+			if along_x:
+				front = Vector3.FORWARD if side < 0.0 else Vector3.BACK
+				if rows == 1:
+					front = Vector3.BACK if _rng.randf() < 0.5 else Vector3.FORWARD
+			else:
+				front = Vector3.LEFT if side < 0.0 else Vector3.RIGHT
+				if rows == 1:
+					front = Vector3.RIGHT if _rng.randf() < 0.5 else Vector3.LEFT
+			var signs: Array = spec["signs"]
+			var title: String = ""
+			if not signs.is_empty() and _rng.randf() < 0.65:
+				title = str(signs[_rng.randi() % signs.size()])
+				# Same random draw as before; a third copy of a generic sign becomes the least-used one.
+				if int(_sign_uses.get(title, 0)) >= 2:
+					for option: Variant in signs:
+						if int(_sign_uses.get(str(option), 0)) < int(_sign_uses.get(title, 0)):
+							title = str(option)
+				_sign_uses[title] = int(_sign_uses.get(title, 0)) + 1
+			var sign_color: Color = spec["sign_color"]
+			if style == "neon":
+				sign_color = [Color(1.0, 0.45, 0.85), Color(0.3, 0.9, 1.0), Color(1.0, 0.85, 0.3), Color(0.5, 1.0, 0.45)][_rng.randi() % 4]
+			var roof: Color = Color(0.29, 0.31, 0.3)
+			if _fill_prefab(style, center, lot_size, front, height, color, title):
+				continue
+			_tower(center, Vector3(lot_size.x, height, lot_size.y), color, str(spec["tex"]), front, title, sign_color, roof, float(spec["lit"]))
+			_rooftop(center, lot_size, height)
+	# Dumpsters and bags along the alley between the rows.
+	if rows == 2:
+		var stops: int = maxi(1, int(length / 26.0))
+		for stop: int in range(stops):
+			var along: float = (stop + 0.5) * length / stops
+			var wall_side: float = -1.0 if stop % 2 == 0 else 1.0
+			var spot: Vector2 = Vector2(area.position.x + along, area.get_center().y + wall_side * 1.4) if along_x else Vector2(area.get_center().x + wall_side * 1.4, area.position.y + along)
+			if _free_spot(_w2(spot), 0.7):
+				_occupied.append(_w2(spot))
+				_dumpster(Vector3(spot.x, 0.16, spot.y), 0.0 if along_x else PI * 0.5, Color(0.2, 0.33, 0.26))
+
+## The prefab library (scripts/buildings/prefabs.gd), or null while it is not in the project.
+var _prefab_lib: Variant = null
+var _prefab_checked: bool = false
+
+func _prefab_library() -> Variant:
+	if not _prefab_checked:
+		_prefab_checked = true
+		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd"):
+			_prefab_lib = load("res://scripts/buildings/prefabs.gd")
+	return _prefab_lib
+
+## Fills a block lot with an enterable prefab instead of a solid tower: the kinds a style may use, best
+## fit first. Returns false when the library is missing, the style keeps its solid towers (the high-rises)
+## or no kind fits the lot. Axis-aligned lots in world space (district nodes have no transform).
+func _fill_prefab(style: String, center: Vector2, lot: Vector2, front: Vector3, height: float, color: Color, title: String) -> bool:
+	var lib: Variant = _prefab_library()
+	if lib == null or not FILL_PREFABS.has(style):
+		return false
+	var across: bool = absf(front.z) > 0.5
+	var frontage: float = lot.x if across else lot.y
+	var depth: float = lot.y if across else lot.x
+	for kind: String in FILL_PREFABS[style]:
+		if not lib.kinds().has(kind):
+			continue
+		var least: Vector2 = lib.min_size(kind)
+		if frontage < least.x or depth < least.y:
+			continue
+		var floors: int = clampi(int(height / 3.4), 1, int(lib.max_floors(kind)))
+		var palette: Array[Color] = [color, color.lightened(0.35), color.darkened(0.35)]
+		var seed: int = absi(int(center.x * 131.0) * 7919 + int(center.y * 977.0)) + 17
+		_begin_building(kind, true, title)
+		var record: Dictionary = _building_open
+		var node: Variant = lib.build(self, kind, center, Vector2(frontage, depth), lib.front_yaw(front), floors, seed, {"palette": palette, "sign": title, "lit": 0.3, "district": style})
+		_end_building()
+		if node == null:
+			buildings.erase(record)
+			continue
+		if (record["footprints"] as Array).is_empty():
+			_footprint(Rect2(center - lot * 0.5, lot))
+			(record["footprints"] as Array).append(footprint_polys.size() - 1)
+			buildings.pop_back()
+		_finish(node as Node3D)
+		limit_range(node as Node3D, NEAR_RANGE)
+		lod_lots.append({"center": center, "size": Vector3(lot.x, height, lot.y), "yaw": 0.0, "color": color})
+		return true
+	return false
+
+## Draws every mesh under `node` only within `metres` (interiors keep their own shorter range).
+func limit_range(node: Node3D, metres: float) -> void:
+	for child: Node in node.find_children("*", "GeometryInstance3D", true, false):
+		var geometry: GeometryInstance3D = child as GeometryInstance3D
+		if geometry.visibility_range_end <= 0.0:
+			geometry.visibility_range_end = metres
+			geometry.visibility_range_end_margin = 6.0
+		_detail_ranges.append(geometry)
+
+## A water tank and a vent stack on a roof (breaks up the skyline; nothing solid).
+func _rooftop(center: Vector2, size: Vector2, height: float) -> void:
+	if size.x < 10.0 or size.y < 10.0 or _rng.randf() < 0.35:
+		return
+	var at: Vector3 = Vector3(center.x + _rng.randf_range(-0.25, 0.25) * size.x, height + 0.32, center.y + _rng.randf_range(-0.25, 0.25) * size.y)
+	if not _roofs.is_empty():
+		_roofs.back()["taken"] = _w2(Vector2(at.x, at.z))
+	if _rng.randf() < 0.5:
+		_cylinder(at + Vector3(0, 1.4, 0), 1.3, 2.4, Color(0.4, 0.3, 0.24), 8)
+		_cylinder(at + Vector3(0, 2.8, 0), 0.2, 0.7, Color(0.2, 0.2, 0.22), 6)
+	else:
+		_box(at + Vector3(0, 0.7, 0), Vector3(2.4, 1.4, 1.8), Color(0.45, 0.47, 0.46), false, "metal")
+		_box(at + Vector3(0.6, 1.7, 0.2), Vector3(0.5, 1.2, 0.5), Color(0.3, 0.3, 0.32))
+
+## One block of a district: the paved plinth, then its buildings (unless a plot or park takes it).
+func _district_block(rect: Rect2, style: String, paving: Color = Color(0.46, 0.45, 0.43), keep_clear: Rect2 = Rect2()) -> Rect2:
+	# Lamps go up after the buildings, so none stands in a prefab's doorway.
+	var buildable: Rect2 = _block(rect, paving, "tiles", false)
+	if style != "":
+		_fill_block(buildable, style, keep_clear)
+	_block_lamps(rect)
+	return buildable
+
+## A small paved park in a block: lawn, path, trees and benches (cover, no walls of text).
+func _pocket_park(rect: Rect2) -> void:
+	_block(rect, Color(0.4, 0.42, 0.36), "tiles")
+	var lawn: Rect2 = rect.grow(-3.2)
+	_box(Vector3(lawn.get_center().x, 0.2, lawn.get_center().y), Vector3(lawn.size.x, 0.05, lawn.size.y), Color(0.32, 0.44, 0.28), false, "grass")
+	plazas.append(_rect_poly(rect))
+	var trees: int = maxi(3, int(rect.get_area() / 260.0))
+	for index: int in range(trees):
+		var at: Vector2 = Vector2(_rng.randf_range(lawn.position.x + 2.0, lawn.end.x - 2.0), _rng.randf_range(lawn.position.y + 2.0, lawn.end.y - 2.0))
+		# The two crossing paths (city_detail.gd's park sites) stay open.
+		if absf(at.x - rect.get_center().x) < 3.2 or absf(at.y - rect.get_center().y) < 3.2:
+			continue
+		_tree(Vector3(at.x, 0.2, at.y))
+	_bench(Vector3(lawn.get_center().x, 0.2, lawn.position.y + 1.6), 0.0)
+	_bench(Vector3(lawn.get_center().x, 0.2, lawn.end.y - 1.6), PI)
+
+## A row of parking bays with a few cars (Motor Mile, Nightlife, the docks).
+func _parking_row(from: Vector3, count: int, direction: Vector3, colors: Array[Color], car_every: int = 2) -> void:
+	var across: Vector3 = Vector3(-direction.z, 0, direction.x)
+	for index: int in range(count):
+		var at: Vector3 = from + direction * (index * 3.2)
+		_box(at + across * 2.8 + Vector3(0, 0.05, 0), Vector3(0.09, 0.015, 5.2) if absf(direction.x) > 0.5 else Vector3(5.2, 0.015, 0.09), Color(0.74, 0.7, 0.53))
+		if index % car_every == 0 and index < count - 1:
+			var color: Color = colors[_rng.randi() % colors.size()]
+			var yaw: float = atan2(across.x, across.z)
+			_car_prop(at + direction * 1.6 + across * 2.8, yaw + PI, color, ["sedan", "coupe", "suv", "pickup"][_rng.randi() % 4])
+
+## A tall pole sign (Motor Mile pylons, the wharf's cannery).
+func _pylon(at: Vector3, words: String, color: Color, angle: float, height: float = 12.0) -> void:
+	_box(at + Vector3(0, height * 0.5, 0), Vector3(0.5, height, 0.5), Color(0.3, 0.3, 0.32), true, "metal")
+	_neon(words, at + Vector3(0, height + 1.6, 0), angle, color, 64)
+
+## Uptown: the tower blocks north-east of Midtown, between the harbour and Fountain Square.
+## The HALCYON TRUST high-rise and the HOTEL MERIDIAN plots sit on its northern blocks.
+func _build_uptown() -> void:
+	_begin("Uptown")
+	_street_palette = [Color(0.3, 0.4, 0.55), Color(0.75, 0.75, 0.78), Color(0.85, 0.7, 0.3), Color(0.25, 0.5, 0.45)]
+	_district_block(Rect2(106, -200, 38, 44), "", Color(0.5, 0.5, 0.5))
+	_district_block(Rect2(156, -200, 38, 44), "", Color(0.5, 0.5, 0.5))
+	_district_block(Rect2(106, -144, 38, 40), "highrise", Color(0.5, 0.5, 0.5))
+	# Trust Plaza: a paved square with a fountain-less water feature and trees.
+	_block(Rect2(156, -144, 38, 40), Color(0.6, 0.58, 0.54), "tiles")
+	plazas.append(_rect_poly(Rect2(156, -144, 38, 40)))
+	_cylinder(Vector3(175, 0.5, -124), 3.6, 0.7, Color(0.7, 0.68, 0.62), 14)
+	_cylinder(Vector3(175, 0.86, -124), 3.2, 0.06, Color.WHITE, 14, _material(Color(0.2, 0.4, 0.46), 0.1, "water"))
+	_cylinder(Vector3(175, 1.8, -124), 0.35, 2.0, Color(0.7, 0.68, 0.62), 8)
+	for at: Vector2 in [Vector2(162, -138), Vector2(188, -138), Vector2(162, -110), Vector2(188, -110)]:
+		_tree(Vector3(at.x, 0.16, at.y))
+	for at: Vector2 in [Vector2(167, -138), Vector2(183, -138), Vector2(167, -110), Vector2(183, -110)]:
+		_bench(Vector3(at.x, 0.16, at.y), 0.0 if at.y < -124.0 else PI)
+	_landmark("TRUST PLAZA", Vector3(175, 0, -124))
+	_landmark("UPTOWN", Vector3(150, 0, -172))
+
+## Motor Mile: the car-dealer strip along Union Street east of Midtown (the motel, the parking
+## garage and the burger joint are the plots), with pole signs and a used-car lot.
+func _build_motor_mile() -> void:
+	_begin("MotorMile")
+	_street_palette = [Color(0.85, 0.25, 0.2), Color(0.95, 0.75, 0.2), Color(0.2, 0.5, 0.75), Color(0.3, 0.6, 0.3)]
+	_district_block(Rect2(150, -9, 71, 38), "", Color(0.44, 0.44, 0.43))
+	_district_block(Rect2(100, 41, 40, 48), "", Color(0.44, 0.44, 0.43))
+	# The used-car lot behind the burger joint and pole signs along Union Street.
+	_parking_row(Vector3(104, 0.16, 76), 11, Vector3.RIGHT, [Color(0.7, 0.1, 0.12), Color(0.15, 0.3, 0.55), Color(0.85, 0.82, 0.7), Color(0.12, 0.12, 0.13)], 3)
+	_pylon(Vector3(146, 0.16, 27), "MOTOR MILE", Color(1.0, 0.75, 0.25), PI, 10.0)
+	_pylon(Vector3(97, 0.16, 43), "EATS", Color(1.0, 0.4, 0.3), 0.0, 8.0)
+	_landmark("MOTOR MILE", Vector3(146, 0, 40))
+
+## Nightlife: a grid of casinos, arcades and neon-fronted clubs between the old Strip site and
+## the Strip proper; the NIGHT CLUB and STRIP CLUB plots are its two southern blocks.
+func _build_nightlife() -> void:
+	_begin("Nightlife")
+	_street_palette = [Color(1.0, 0.3, 0.8), Color(0.3, 0.9, 1.0), Color(1.0, 0.85, 0.3), Color(0.5, 1.0, 0.4)]
+	var xs: Array[float] = [26.0, 78.0, 130.0]
+	var zs: Array[Vector2] = [Vector2(104, 44), Vector2(160, 46), Vector2(218, 52)]
+	for row: int in range(zs.size()):
+		for column: int in range(xs.size()):
+			var rect: Rect2 = Rect2(xs[column], zs[row].x, 40, zs[row].y)
+			if row == 2 and column >= 0:
+				# The two southern-east blocks are the night club and strip club plots; the west one is a car park.
+				_district_block(rect, "", Color(0.3, 0.3, 0.32) if column == 0 else Color(0.36, 0.35, 0.38))
+			elif row == 0 and column == 2:
+				_pocket_park(rect)
+			elif row == 1 and column == 1:
+				_district_block(rect, "neon", Color(0.36, 0.35, 0.38))
+			else:
+				_district_block(rect, "neon" if (row + column) % 2 == 0 else "midrise", Color(0.36, 0.35, 0.38))
+	_parking_row(Vector3(30, 0.16, 251), 10, Vector3.RIGHT, [Color(0.9, 0.2, 0.5), Color(0.15, 0.15, 0.2), Color(0.85, 0.85, 0.9), Color(0.2, 0.5, 0.7)], 2)
+	_pylon(Vector3(74, 0.16, 214), "NIGHTLIFE", Color(1.0, 0.3, 0.8), 0.0, 11.0)
+	_landmark("NIGHTLIFE", Vector3(100, 0, 154))
+
+## West End: rowhouses, lofts and corner shops where Lantern Row used to stand, between the
+## canal market and Midtown's west ring.
+func _build_west_end() -> void:
+	_begin("WestEnd")
+	_street_palette = [Color(0.55, 0.3, 0.25), Color(0.3, 0.4, 0.5), Color(0.8, 0.7, 0.4), Color(0.35, 0.5, 0.35)]
+	var columns: Array[Vector2] = [Vector2(-206, 50), Vector2(-144, 44)]
+	var rows: Array[Vector2] = [Vector2(-94, 38), Vector2(-44, 40)]
+	for row: int in range(rows.size()):
+		for column: int in range(columns.size()):
+			var rect: Rect2 = Rect2(columns[column].x, rows[row].x, columns[column].y, rows[row].y)
+			if row == 1 and column == 0:
+				_pocket_park(rect)
+			else:
+				_district_block(rect, "brick" if (row + column) % 2 == 0 else "flats", Color(0.4, 0.39, 0.38))
+	_landmark("WEST END", Vector3(-150, 0, -50))
+
+## Old Town: brick tenements and shopfronts north of Morris Park.
+func _build_old_town() -> void:
+	_begin("OldTown")
+	_street_palette = [Color(0.72, 0.15, 0.2), Color(0.16, 0.36, 0.24), Color(0.9, 0.82, 0.62), Color(0.2, 0.3, 0.55)]
+	var columns: Array[Vector2] = [Vector2(-144, 38), Vector2(-94, 38), Vector2(-44, 37)]
+	var rows: Array[Vector2] = [Vector2(100, 44), Vector2(156, 22)]
+	for row: int in range(rows.size()):
+		for column: int in range(columns.size()):
+			var rect: Rect2 = Rect2(columns[column].x, rows[row].x, columns[column].y, rows[row].y)
+			if row == 1 and column == 2:
+				_pocket_park(rect)
+			else:
+				_district_block(rect, "brick", Color(0.42, 0.4, 0.38))
+	_landmark("OLD TOWN", Vector3(-100, 0, 120))
+
+## Slip Side: boatyards, chandlers and warehouses along the south bank of the West Slip.
+func _build_slip_side() -> void:
+	_begin("SlipSide")
+	_street_palette = [Color(0.3, 0.5, 0.6), Color(0.7, 0.6, 0.3), Color(0.5, 0.5, 0.5), Color(0.6, 0.3, 0.25)]
+	var columns: Array[Vector2] = [Vector2(-386, 50), Vector2(-324, 46), Vector2(-272, 42), Vector2(-224, 30)]
+	for column: Vector2 in columns:
+		_district_block(Rect2(column.x, 68, column.y, 60), "warehouse", Color(0.44, 0.44, 0.42))
+	# Boats hauled out on the quay.
+	for index: int in range(5):
+		var at: Vector3 = Vector3(-380 + index * 34, 0.16, 57)
+		_box(at + Vector3(0, 0.6, 0), Vector3(2.6, 1.2, 7.0), Color(0.9, 0.9, 0.88), true, "panel")
+		_box(at + Vector3(0, 1.5, -0.6), Vector3(1.8, 0.8, 2.6), Color(0.2, 0.34, 0.45))
+	_landmark("SLIP SIDE", Vector3(-290, 0, 62))
+
+## The Old Wharf (north-west): a working shipyard and cannery west of the Canal Market.
+func _build_old_wharf() -> void:
+	_begin("OldWharf")
+	_street_palette = [Color(0.85, 0.5, 0.15), Color(0.2, 0.45, 0.7), Color(0.6, 0.6, 0.6), Color(0.75, 0.2, 0.15)]
+	_district_block(Rect2(-380, -236, 54, 35), "warehouse", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(-314, -236, 64, 35), "warehouse", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(-380, -189, 54, 37), "", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(-314, -189, 64, 37), "", Color(0.46, 0.46, 0.44))
+	var colors: Array[Color] = [Color(0.62, 0.22, 0.16), Color(0.18, 0.36, 0.56), Color(0.24, 0.5, 0.36), Color(0.78, 0.6, 0.18), Color(0.3, 0.52, 0.55)]
+	for row: int in range(3):
+		for column: int in range(6):
+			if (row + column) % 5 == 4:
+				continue
+			for level: int in range(1 + (row + column) % 3):
+				_container(Vector3(-374 + column * 8.2, level * 2.7, -184 + row * 3.2 * 1.0), colors[(row * 2 + column + level) % colors.size()], false)
+	_fence(Vector3(-382, 0.16, -156), Vector3(-320, 0.16, -156))
+	_fence(Vector3(-320, 0.16, -156), Vector3(-320, 0.16, -190))
+	for at: Vector3 in [Vector3(-360, 0, -170), Vector3(-296, 0, -170), Vector3(-296, 0, -215)]:
+		_box(at + Vector3(0, 8, 0), Vector3(0.5, 16, 0.5), Color(0.3, 0.3, 0.32), true)
+		_box_with(at + Vector3(0, 16.3, 0), Vector3(2.2, 0.8, 0.5), _glow(Color(1.0, 0.85, 0.6), 2.4))
+	_pylon(Vector3(-326, 0.16, -199), "OLD WHARF", Color(0.6, 0.9, 1.0), PI * 0.5, 9.0)
+	_landmark("OLD WHARF", Vector3(-320, 0, -200))
+
+## South Docks: quays, container stacks and cold stores between Kingsway and the Strip.
+func _build_south_docks() -> void:
+	_begin("SouthDocks")
+	_street_palette = [Color(0.85, 0.5, 0.15), Color(0.2, 0.45, 0.7), Color(0.6, 0.6, 0.6), Color(0.75, 0.2, 0.15)]
+	_district_block(Rect2(246, 306, 48, 62), "warehouse", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(306, 306, 72, 62), "", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(246, 262, 48, 32), "warehouse", Color(0.46, 0.46, 0.44))
+	_district_block(Rect2(306, 262, 72, 32), "", Color(0.46, 0.46, 0.44))
+	var colors: Array[Color] = [Color(0.62, 0.22, 0.16), Color(0.18, 0.36, 0.56), Color(0.24, 0.5, 0.36), Color(0.78, 0.6, 0.18), Color(0.5, 0.5, 0.5)]
+	for stack: Vector2 in [Vector2(312, 270), Vector2(326, 270), Vector2(340, 270), Vector2(354, 270), Vector2(312, 282), Vector2(326, 282), Vector2(340, 282), Vector2(312, 314), Vector2(326, 314), Vector2(340, 314), Vector2(354, 314), Vector2(312, 326), Vector2(340, 326), Vector2(354, 326)]:
+		for level: int in range(1 + int(absf(stack.x + stack.y)) % 3):
+			_container(Vector3(stack.x, level * 2.7, stack.y), colors[(int(stack.x) / 7 + level) % colors.size()], false)
+	for crane_z: float in [340.0]:
+		for side: float in [-1.0, 1.0]:
+			for leg_x: float in [344.0, 353.0]:
+				_box(Vector3(leg_x, 13, crane_z + side * 7), Vector3(1.2, 26, 1.2), Color(0.85, 0.55, 0.15), true)
+		_box(Vector3(348.5, 26.5, crane_z), Vector3(36, 1.6, 16), Color(0.85, 0.55, 0.15))
+		_box_with(Vector3(366, 27.6, crane_z), Vector3(0.6, 0.6, 0.6), _glow(Color(1.0, 0.2, 0.15), 3.0))
+	_landmark("SOUTH DOCKS", Vector3(300, 0, 300))
+
+## The north bluff and the east shore: parkland, a ball field and long lawns (the gun club sits
+## on its own spur road, see scripts/buildings/gunstore.gd).
+func _build_east_shore() -> void:
+	_begin("EastShore")
+	_street_palette = [Color(0.3, 0.55, 0.3), Color(0.8, 0.7, 0.4), Color(0.4, 0.5, 0.7), Color(0.7, 0.3, 0.25)]
+	# Sunset Park: a wide lawn south of the gun club, with a ball diamond.
+	var park: Rect2 = Rect2(236, 22, 96, 76)
+	plazas.append(_rect_poly(park))
+	_box(Vector3(park.get_center().x, 0.02, park.get_center().y), Vector3(park.size.x, 0.03, park.size.y), Color(0.3, 0.42, 0.27), false, "grass")
+	_box(Vector3(284, 0.05, 62), Vector3(22, 0.02, 22), Color(0.6, 0.45, 0.3), false, "planks").rotation.y = PI * 0.25
+	for corner: Vector2 in [Vector2(0, 0), Vector2(10, -10), Vector2(-10, -10), Vector2(0, -20)]:
+		_box(Vector3(284 + corner.x, 0.1, 72 + corner.y), Vector3(0.6, 0.12, 0.6), Color(0.95, 0.95, 0.9))
+	for index: int in range(10):
+		var angle: float = 0.6 + index * 0.25
+		_fence(Vector3(284 + cos(angle) * 30.0, 0.16, 72 - sin(angle) * 34.0 + 6.0), Vector3(284 + cos(angle + 0.25) * 30.0, 0.16, 72 - sin(angle + 0.25) * 34.0 + 6.0), 2.4)
+	for at: Vector2 in [Vector2(244, 30), Vector2(252, 90), Vector2(324, 30), Vector2(324, 90), Vector2(264, 28), Vector2(304, 92)]:
+		_tree(Vector3(at.x, 0.0, at.y))
+	_bench(Vector3(262, 0.0, 60), PI * 0.5)
+	_bench(Vector3(306, 0.0, 58), -PI * 0.5)
+	_landmark("SUNSET PARK", Vector3(284, 0, 60))
+	# Palms along the coast road and the bluff.
+	for z: int in range(-96, 120, 24):
+		_tree(Vector3(352.0, 0.0, float(z)), "palm")
+	for x: int in range(250, 400, 30):
+		_tree(Vector3(float(x), 0.0, -256.0 + absf(float(x) - 330.0) * 0.1), "palm")
 
 func _rect_poly(rect: Rect2) -> PackedVector2Array:
 	return PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)])
@@ -2132,6 +3068,17 @@ func _define_districts() -> void:
 	_district_polys("THE STRIP", [_kit_poly("strip", 6.0), BEACH], Color(0.9, 0.5, 0.75), "")
 	_district("EASTGATE", Rect2(94, -94, 147, 73), Color(0.62, 0.72, 0.6), "")
 	_district("WEST BANK", Rect2(-241, 6, 147, 46), Color(0.66, 0.66, 0.74), "")
+	# 0.6: the new ring of land (Midtown's neighbours first, then the outer districts).
+	_district("UPTOWN", Rect2(94, -212, 112, 116), Color(0.62, 0.66, 0.8), "")
+	_district("MOTOR MILE", Rect2(94, -17, 133, 114), Color(0.85, 0.7, 0.45), "")
+	_district("NIGHTLIFE", Rect2(14, 98, 168, 180), Color(0.85, 0.4, 0.8), "")
+	_district("WEST END", Rect2(-241, -106, 153, 115), Color(0.68, 0.6, 0.55), "")
+	_district("OLD TOWN", Rect2(-157, 82, 143, 108), Color(0.75, 0.55, 0.5), "")
+	_district("SLIP SIDE", Rect2(-398, 52, 206, 92), Color(0.6, 0.66, 0.7), "")
+	_district("OLD WHARF", Rect2(-404, -252, 160, 112), Color(0.58, 0.62, 0.64), "")
+	_district("EAST SHORE", Rect2(233, -110, 177, 238), Color(0.55, 0.7, 0.55), "")
+	_district("SOUTH DOCKS", Rect2(190, 255, 220, 145), Color(0.6, 0.64, 0.68), "")
+	_district("NORTH BLUFF", Rect2(228, -290, 180, 58), Color(0.7, 0.68, 0.5), "")
 
 func _district_polys(title: String, polys: Array, color: Color, crew: String) -> void:
 	var first: PackedVector2Array = polys[0]
@@ -2231,4 +3178,3 @@ func _build_beach() -> void:
 		leg.rotation.x = side * 0.28
 	_neon("HALCYON PIER", Vector3(240, 4.2, 4.3), 0.0, Color(0.3, 0.9, 1.0), 70, true)
 	_landmark("HALCYON PIER", Vector3(262, 0, 0))
-

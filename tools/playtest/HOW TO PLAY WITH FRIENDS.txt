@@ -1,0 +1,78 @@
+FAST TALKERS - PLAYTEST BUILD - HOW TO PLAY WITH FRIENDS
+=========================================================
+Everyone must run the SAME zip. If one person has a different build, the join is refused
+with "different version of the game".
+
+STEAM (the easy way)
+--------------------
+1. Install Steam, start it and log in. Leave it running.
+2. Unzip this folder anywhere (the Desktop is fine) and run "Fast Talkers.exe".
+   When you open PLAY ONLINE, Steam shows you as playing "Spacewar". That is expected: it is
+   Valve's free test app, and it is how invites work before the game has its own Steam page.
+   If Windows SmartScreen appears, click "More info", then "Run anyway".
+3. HOST: PLAY ONLINE, then HOST ON STEAM (INVITE FRIENDS). The Steam overlay opens;
+   pick your friends. (INVITE STEAM FRIENDS in the lobby opens it again.)
+4. FRIENDS: START FAST TALKERS FIRST and open PLAY ONLINE, then accept the Steam
+   invite (the chat popup, or Shift+Tab > Friends). You can also right-click the host in your
+   Steam friends list and pick "Join Game".
+   Don't accept the invite while the game is closed: Steam would try to start Spacewar
+   instead of Fast Talkers.
+5. In the lobby everyone picks a crew. The host can tick "Quick Week" (Wednesday to Friday)
+   for a shorter session, then presses START MATCH.
+6. Use a headset. Voice is open mic: people near you hear you, and walls block passers-by.
+   A name tag reading (( NAME )) means that player is talking to you.
+   Hold Y for the crew radio: only your crew hears you, at any distance.
+   N is push-to-talk if you turn open mic off in Settings.
+
+Waiting for friends? SOLO WEEK on the title screen plays the same Week alone.
+
+CONTROLLER STOPPED WORKING AFTER PLAY ONLINE?
+---------------------------------------------
+Steam Input can grab pads for the "Spacewar" test app; the game shows a message when it
+notices. Fix once: Steam > Library > Spacewar (it appears after the first run) > Properties >
+Controller > "Disable Steam Input", then restart Fast Talkers. Offline modes never sign in to Steam.
+
+IF THE HOST ON STEAM BUTTON IS MISSING
+--------------------------------------
+The menu shows a line saying why (for example "Steam not running"). Start Steam, log in and
+restart the game. Otherwise use the fallback below.
+
+IF THE STEAM INVITE WINDOW DOESN'T POP UP FOR THE HOST
+------------------------------------------------------
+The host stays in the lobby. Each friend opens the Steam friends list (in the Steam app, not in
+the game), right-clicks the host and picks "Join Game" while Fast Talkers is running.
+(Steam > Settings > In Game > "Enable the Steam Overlay while in-game" makes the invite window work.)
+
+FALLBACK: DIRECT IP (ENet)
+--------------------------
+- Easiest over the internet: everyone installs Tailscale (free, tailscale.com/download) and
+  joins the host's tailnet. The HOST presses HOST GAME; the lobby lists an address starting
+  with 100. FRIENDS type it and press JOIN.
+- Same house or Wi-Fi: use the host's 192.168.x.x or 10.x.x.x address.
+- Without Tailscale: the host forwards UDP port 24650 to their PC. Friends join the host's
+  public IP address.
+- When Windows asks whether Fast Talkers may use the network, click Allow
+  (tick Private and Public).
+
+THE GAME IN ONE MINUTE
+----------------------
+- A match is a WEEK of five DAYS, Monday to Friday. Crews win on BANKED MONEY, not kills.
+- Each morning you are at your HQ: a 30 s buy phase (B, or D-pad left) and the morning paper
+  (yesterday's results in chat). Then 10 minutes on the street.
+- Contracts grow through the Week: Monday pays x0.6, Friday pays x1.6.
+- Don't sit on the goods. If nobody moves them for 4 minutes, the client gets nervous and the
+  contract loses 10% a minute until someone picks them up.
+- Mon-Thu: one crew holds THE LEDGER and another holds the CASH CASE. Bank the Ledger as
+  the buyer, or steal either one and bank it at your own HQ.
+  Clean deal (both banked, no kills between the two crews): a bonus for both.
+- FRIDAY IS THE DEAD DROP. Both cases appear on a street when the doors open, and the chat
+  names the spot. Whoever banks them gets paid. No rules.
+- ONE case at a time. While you carry one, only your SIDEARM works. G drops it.
+- THE CREW PHONE sits at your HQ spawn. Whoever holds it calls other crews: ENTER opens chat,
+  TAB picks "CALL <crew>". K drops it. A stolen phone calls as its owners.
+- Hands up: X (pad: R3). It really holsters your gun. Binoculars: hold Z (pad: hold D-pad up).
+- Die and you drop what you carry, and you are back at HQ 10 s later with a pistol.
+  Survivors keep their gear into tomorrow.
+- F3 shows FPS. In Settings, POTATO MODE helps slow PCs.
+
+Found a bug? Note the Day, what you were doing and roughly where, and tell the host.

@@ -1,13 +1,19 @@
 extends SceneTree
 ## Windowed performance sample: draw calls, objects, primitives and frame time at several
 ## views (vsync off). Run (not headless): godot --path . --script res://tests/capture_perf.gd
+## Optional user args: `-- views=midtown,gunstore settle=30 sample=60` for a quicker subset
+## (draw-call/object/primitive counts settle within a few frames; frame time needs the full sample).
 
 const VIEWS: Array = [
 	["midtown", Vector3(0, 0.2, -18), Vector3(0, 3, -45)],
 	["midtown_north_long", Vector3(0, 0.2, 60), Vector3(0, 2, -100)],
 	["harbor", Vector3(0, 0.2, -140), Vector3(-40, 6, -185)],
-	["strip_beach", Vector3(60, 0.2, 200), Vector3(110, 3, 250)],
-	["lantern_row", Vector3(-150, 0.2, -50), Vector3(-192, 6, -22)],
+	["strip_beach", Vector3(60, 0.2, 270), Vector3(110, 3, 330)],
+	["lantern_row", Vector3(-270, 0.2, -60), Vector3(-312, 6, -36)],
+	["uptown", Vector3(140, 0.2, -112), Vector3(130, 24, -176)],
+	["motor_mile", Vector3(104, 0.2, 45), Vector3(185, 4, 12)],
+	["nightlife", Vector3(56, 0.2, 212), Vector3(118, 6, 244)],
+	["gunstore", Vector3(226, 0.2, -50), Vector3(255, 2.5, -66)],
 	["exchange_interior", Vector3(-15, 0.2, 15), Vector3(-30, 1.8, 15)],
 	["aerial", Vector3(-60, 90, 170), Vector3(10, 0, -20)],
 ]
@@ -31,20 +37,46 @@ func _run() -> void:
 	game.pause_on_focus_loss = false
 	game.settings_path = "user://perf_settings.cfg"
 	root.add_child(game)
+	var only: PackedStringArray = PackedStringArray()
+	var hide_prefix: String = ""
+	var settle_frames: int = 30
+	var sample: int = 60
+	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("views="):
+			only = arg.trim_prefix("views=").split(",", false)
+		elif arg.begins_with("hide="):
+			hide_prefix = arg.trim_prefix("hide=")
+		elif arg.begins_with("settle="):
+			settle_frames = maxi(2, int(arg.trim_prefix("settle=")))
+		elif arg.begins_with("sample="):
+			sample = maxi(1, int(arg.trim_prefix("sample=")))
 	await _frames(30)
 	game._start_free_roam()
+	if not hide_prefix.is_empty():
+		# Diagnostic: hide the top-level nodes of the world whose name starts with the prefix.
+		var hidden: int = 0
+		for child: Node in game.world.get_children():
+			var match_any: bool = false
+			for prefix: String in hide_prefix.split(","):
+				match_any = match_any or str(child.name).begins_with(prefix)
+			if match_any and child is Node3D:
+				(child as Node3D).visible = false
+				hidden += 1
+		print("HIDDEN ", hidden, " nodes starting with ", hide_prefix)
 	game.player.invulnerable = true
 	for view: Array in VIEWS:
+		if not only.is_empty() and not only.has(view[0]):
+			continue
 		var from: Vector3 = view[1]
 		var target: Vector3 = view[2]
 		game.player.global_position = from
 		var direction: Vector3 = target - (from + Vector3(0, 1.62, 0))
 		game.player.face(atan2(-direction.x, -direction.z))
 		game.player._pitch = atan2(direction.y, Vector2(direction.x, direction.z).length())
-		await _frames(30)
+		await _frames(settle_frames)
 		var start: int = Time.get_ticks_usec()
-		await _frames(60)
-		var frame_ms: float = float(Time.get_ticks_usec() - start) / 60.0 / 1000.0
+		await _frames(sample)
+		var frame_ms: float = float(Time.get_ticks_usec() - start) / float(sample) / 1000.0
 		print("PERF %-20s draw calls %5d  objects %5d  primitives %8d  frame %.2f ms (%d fps)" % [view[0], Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME), frame_ms, int(1000.0 / maxf(frame_ms, 0.01))])
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://perf_settings.cfg"))
 	game.queue_free()

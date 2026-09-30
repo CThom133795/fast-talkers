@@ -415,6 +415,12 @@ func _round_begin() -> bool:
 	var buy: bool = await _wait_until(func() -> bool: return str(online.phase) == "buy", 15.0)
 	_check(buy, "round_state phase 'buy' arrived (got '%s')" % str(online.phase))
 	_check(game.phase == game.Phase.BUY, "game.phase is BUY")
+	var range_closed: bool = game.world.mode == "online" and not game.armory.is_open()
+	for index: int in game.world.gun_doors:
+		range_closed = range_closed and game.world.is_door_locked(index) and not bool(game.world.interactable_doors[index]["open"])
+	for target: StaticBody3D in game.armory.targets:
+		range_closed = range_closed and not bool(target.get("active")) and target.collision_layer == 0
+	_check(range_closed, "The online round hides practice targets and locks the range on this peer")
 
 	var crews: Array[String] = []
 	for crew_id: String in Factions.ORDER:
@@ -444,6 +450,7 @@ func _round_begin() -> bool:
 		online.call("_host_set_phase", "live", 600.0)
 	var live: bool = await _wait_until(func() -> bool: return str(online.phase) == "live" and game.phase == game.Phase.LIVE, 8.0)
 	_check(live, "phase is live and game.phase is LIVE (online '%s')" % str(online.phase))
+	_check(not bool(game.armory.targets[0].get("active")), "Going live cannot reactivate the practice range")
 	await _sync("live")
 	return live
 
@@ -499,11 +506,11 @@ func _round_ledger() -> void:
 		_check(bool(online.interact()), "buyer interact() handled the bank request")
 	var banked: bool = await _wait_until(func() -> bool: return str(_item(0).get("banked", "")) == _buyer_crew, 5.0)
 	_check(banked, "Ledger banked by the buyer crew '%s' (saw '%s')" % [_buyer_crew, str(_item(0).get("banked", ""))])
-	var bank_ok: bool = await _wait_until(func() -> bool: return int(online.bank.get(_buyer_crew, 0)) == 9000, 3.0)
-	_check(bank_ok, "round bank shows $9000 for the buyer crew (got %d)" % int(online.bank.get(_buyer_crew, 0)))
+	var bank_ok: bool = await _wait_until(func() -> bool: return int(online.bank.get(_buyer_crew, 0)) == int(online.contract_value(0)), 3.0)
+	_check(bank_ok, "day bank shows $%d for the buyer crew (got %d)" % [int(online.contract_value(0)), int(online.bank.get(_buyer_crew, 0))])
 	if i_buy:
-		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + 9000, 5.0)
-		_check(paid, "buyer's cash rose by 9000 (%d -> %d)" % [cash_before, int(game.cash)])
+		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + int(online.contract_value(0)), 5.0)
+		_check(paid, "buyer's cash rose by the Ledger value (%d -> %d)" % [cash_before, int(game.cash)])
 	else:
 		await _wait_seconds(0.5)
 		_check(int(game.cash) == cash_before, "the seller's cash did not change (%d -> %d)" % [cash_before, int(game.cash)])
@@ -570,6 +577,10 @@ func _round_damage() -> void:
 		expected_loss = 30.0 - minf(game.player.armor, 30.0 * 0.65)
 	await _sync("dmg_ready")
 	if role == "host":
+		# These are synthetic claims fired across the city, through buildings. The host's line-of-sight
+		# hook (main.gd _net_los_clear, covered by tests/social_features.gd) would rightly drop them.
+		_check(net.los_check.is_valid(), "the host has a line-of-sight hook for hit claims")
+		net.los_check = Callable()
 		var remote: Node3D = online.remotes.get(client_id)
 		_check(remote != null, "host has the client's remote to aim at")
 		if remote != null:
@@ -637,8 +648,8 @@ func _round_cash_and_settle() -> void:
 	var banked: bool = await _wait_until(func() -> bool: return str(_item(1).get("banked", "")) == _seller_crew, 5.0)
 	_check(banked, "cash case banked by the seller crew '%s' (saw '%s')" % [_seller_crew, str(_item(1).get("banked", ""))])
 	if i_sell:
-		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + 6000, 5.0)
-		_check(paid, "seller's cash rose by 6000 (%d -> %d)" % [cash_before, int(game.cash)])
+		var paid: bool = await _wait_until(func() -> bool: return int(game.cash) == cash_before + int(_online().contract_value(1)), 5.0)
+		_check(paid, "seller's cash rose by the cash value (%d -> %d)" % [cash_before, int(game.cash)])
 	# Both items banked: the round settles. A kill happened, so there is no clean-deal bonus.
 	var settled: bool = await _wait_until(func() -> bool: return str(online.phase) == "settle" and game.phase == game.Phase.RESULT, 8.0)
 	_check(settled, "round settled once both items were banked (online '%s')" % str(online.phase))
