@@ -58,3 +58,7 @@ Run from the project dir, for example:
 - `main.gd` stores state in many globals: `phase`, `free_roam`, `vehicle`, `seat`, `carrying`, `cash`. New
   per-round state must be reset in `_reset_world_state()` / `_start_round()`.
 - Car glass is one merged mesh per car, rebuilt on change. `window_closed(pane)` replaced the old `_panes`.
+- **New `class_name` scripts are invisible until the class cache refreshes.** After creating one, run
+  `timeout 120 "$GODOT" --headless --import --path .` once, or you get "Could not find type".
+- The project is now a **git repo**. Do not commit; the lead commits. `git diff` shows your changes.
+- Networking contract: `docs/NET_M1_SPEC.md`.
