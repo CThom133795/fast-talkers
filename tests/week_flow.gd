@@ -95,6 +95,8 @@ func _run() -> void:
 	# The title menu's SOLO WEEK: a localhost-only host (no firewall prompt, no UPnP) that starts at once.
 	online.start_solo_week()
 	_check(bool(net.call("is_host")), "SOLO WEEK hosts a match on this PC")
+	# Steam signs in only when the online lobby opens, so offline play keeps the controller (Steam Input).
+	_check(not bool(online.get("_steam_started")), "SOLO WEEK never signs in to Steam")
 	var started: bool = await _wait_until(func() -> bool: return bool(online.active) and str(online.phase) == "buy", 5.0)
 	_check(started, "the solo host's Week starts in the buy phase")
 	if not started:
