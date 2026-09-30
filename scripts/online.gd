@@ -51,6 +51,9 @@ var _remote_root: Node3D
 var _state_timer: float = 0.0
 var _car_timer: float = 0.0
 var _host_car_timer: float = 0.0
+## Host: the last transform sent for each undriven car, so a car that comes to rest still
+## sends its settled pose once (and a reset car its new spot).
+var _host_car_sent: Dictionary = {}
 var _broadcast_timer: float = 0.0
 var _respawn_timer: float = -1.0
 var _last_attacker: int = 0
@@ -916,10 +919,18 @@ func _host_tick(delta: float) -> void:
 		_host_car_timer = HOST_CAR_RATE
 		for index: int in range(game.cars.size()):
 			var ride: FastCar = game.cars[index]
-			if ride.net_puppet or ride.is_resting() or (ride == game.vehicle and game.seat == 0):
+			if ride.net_puppet or (ride == game.vehicle and game.seat == 0):
 				continue
 			var data: Dictionary = ride.net_state()
-			net.send_car_state(index, data["xform"], data["vel"], data["steer"], data["speed"], data["flags"])
+			var xform: Transform3D = data["xform"]
+			if ride.is_resting():
+				var sent: Variant = _host_car_sent.get(index)
+				if sent != null and (sent as Transform3D).is_equal_approx(xform):
+					continue
+				data["vel"] = Vector3.ZERO
+				data["speed"] = 0.0
+			_host_car_sent[index] = xform
+			net.send_car_state(index, xform, data["vel"], data["steer"], data["speed"], data["flags"])
 
 
 func _host_broadcast() -> void:

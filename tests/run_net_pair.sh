@@ -19,7 +19,8 @@ fi
 GODOT="${GODOT:-$DEFAULT_GODOT}"
 HOST_LOG="$WORK/net-host.log"
 CLIENT_LOG="$WORK/net-client.log"
-LIMIT="${NET_PAIR_LIMIT:-70}"   # hard per-process cap in seconds (the scripts' own watchdog fires at 45 s)
+LIMIT="${NET_PAIR_LIMIT:-70}"   # hard per-process cap in seconds (the scripts' own watchdog fires at 45 s, 120 s with the round step)
+case ",$STEPS," in *,round,*) LIMIT="${NET_PAIR_LIMIT:-140}" ;; esac
 
 HOST_PID=""; CLIENT_PID=""
 

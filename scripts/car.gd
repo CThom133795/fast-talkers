@@ -505,9 +505,12 @@ func _follow_net(delta: float) -> void:
 	var to: Transform3D = newer["xform"]
 	var target: Transform3D = from.interpolate_with(to, weight)
 	if render > float(newer["t"]):
-		# Past the newest snapshot: coast on its velocity for up to 0.2 s.
+		# Past the newest snapshot: coast along the ground on its velocity for up to 0.2 s
+		# (never vertically, so a stale falling snapshot can't sink or lift the car).
 		var ahead: float = minf(render - float(newer["t"]), 0.2)
-		target = Transform3D(to.basis, to.origin + (newer["vel"] as Vector3) * ahead)
+		var coast: Vector3 = newer["vel"]
+		coast.y = 0.0
+		target = Transform3D(to.basis, to.origin + coast * ahead)
 	global_transform = target
 	velocity = (newer["vel"] as Vector3)
 	_steering = lerpf(float(older["steer"]), float(newer["steer"]), weight)
@@ -704,6 +707,8 @@ func reset_car(pos: Vector3) -> void:
 		entry["open"] = false
 		entry["broken"] = false
 	_rebuild_glass()
+	# Old snapshots would drag a reset puppet back to where it was.
+	_net_buffer.clear()
 	reset_physics_interpolation()
 
 
