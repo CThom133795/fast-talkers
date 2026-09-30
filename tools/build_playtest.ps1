@@ -1,8 +1,9 @@
 # Builds the friends playtest zip: exported exe (pck embedded), GodotSteam DLLs, steam_appid.txt (480),
-# the walkthrough and licences. Never touches ../play-fast-talkers (the user's own exe).
+# the walkthrough and licences. It then installs the same build into ../play-fast-talkers (the user's own local
+# exe, backed up first; standing request: every finished build updates it). Pass -NoInstall to skip that.
 #   powershell -ExecutionPolicy Bypass -File tools\build_playtest.ps1
 # Output: ..\playtest-build\Fast Talkers\ and ..\Fast Talkers Playtest.zip (next to the project folder).
-param([string]$OutRoot = "")
+param([string]$OutRoot = "", [switch]$NoInstall)
 $ErrorActionPreference = "Stop"
 $project = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $outputs = (Resolve-Path (Join-Path $project "..")).Path
@@ -39,4 +40,19 @@ if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $folder -DestinationPath $zip
 $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host "Built $zip ($size MB)"
+
+# Install into the user's own local build folder (../play-fast-talkers), backing up what was there first.
+# Every finished build goes here too (the user's standing request), so the local exe is never stale.
+$local = Join-Path $outputs "play-fast-talkers"
+if (-not $NoInstall -and (Test-Path $local)) {
+	$version = (Select-String -Path (Join-Path $project "project.godot") -Pattern 'config/version="([^"]+)"').Matches[0].Groups[1].Value
+	$backup = Join-Path $outputs "..\work\backup-before-$version-exe"
+	if (-not (Test-Path $backup)) {
+		New-Item -ItemType Directory -Force $backup | Out-Null
+		Copy-Item (Join-Path $local "*") $backup -Recurse -Force
+	}
+	Get-ChildItem $folder | ForEach-Object { Copy-Item $_.FullName $local -Force }
+	$same = (Get-FileHash (Join-Path $local "Fast Talkers.exe")).Hash -eq (Get-FileHash $exe).Hash
+	Write-Host "Installed $version into $local (matches build: $same)"
+}
 Get-ChildItem $folder | Select-Object Name, Length | Format-Table -AutoSize
