@@ -48,6 +48,27 @@ Meetings can happen **anywhere**. There are no official deal zones. "Meet me beh
   encounters, bait and paranoia. Answering one is a gamble; ignoring one is a choice. They must never become the
   dependable way to win or catch up.
 
+## Inventory: weapons, one trade item, the phone
+
+Proposed by the user (2026-09-30); **not built yet**. Each player carries three independent things:
+- **Weapons:** unchanged. Primary and sidearm slots, the buy menu and the locker all work as today.
+- **One trade item, and only one:** a briefcase (cash or anything in it), the Project (the contract Ledger) or a
+  cash bundle. Picking up a second trade item is refused ("hands full") until you drop the first. Two items can't
+  be stacked into one carry.
+- **The crew phone:** its own slot, separate from the trade item. One per crew, grabbed from the HQ spawn.
+
+Each drops **independently**:
+- **G (D-pad down) drops the trade item.** This key already drops the contract case today; keep it.
+- **K (hold D-pad down) drops the phone.** K is currently unbound; check the pad mapping for conflicts.
+- Dropped items are server-owned world objects with IDs and contents. Anyone can pick them up, including rivals.
+  On death, both the trade item and the phone fall where you died.
+- **Hand-over:** dropping the item at someone's feet is the physical trade. The optional handshake trade in
+  `docs/MULTIPLAYER_DESIGN.md` §5 swaps two players' trade items atomically.
+- **HUD:** show both slots (for example "CASE" and "PHONE"), so everyone knows what they're holding. What a rival
+  holds stays visible on their model (a briefcase in hand, the phone at the ear during a call), never as a map marker.
+- **Open question for the user:** should carrying a trade item limit you, e.g. sidearm only (one hand on the case)
+  or no sprinting? The weapons system itself stays as is.
+
 ## The core loop
 
 **Contract, then call, then choose a place, then travel, then meet, then inspect, then trade (or betray), then escape,
@@ -102,7 +123,7 @@ street news, a risky lifeline for the last-place crew, the audit call, and honou
   - the hands-up gesture.
 - **Not built yet:**
   - the **Week itself** (no weekday state, carry-over or standings in code);
-  - cash, counterfeit and briefcase items;
+  - cash, counterfeit and briefcase items, and the one-trade-item plus phone inventory;
   - inspection;
   - physical phones for crew-to-crew calls (text chat channels exist);
   - the deals board;

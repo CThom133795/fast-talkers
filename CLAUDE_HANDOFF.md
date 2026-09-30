@@ -302,6 +302,12 @@ distractions** that stir unrest and pull crews across each other's paths; they a
 system. `docs/MULTIPLAYER_DESIGN.md` §4 (the optional Boss role, and tips as tradeable information) is superseded on
 these points. See `docs/GAME_VISION.md`.
 
+### Inventory (the user's proposal, 2026-09-30; not built)
+Weapons stay as they are. Each player carries **one trade item** (a briefcase, the Project/Ledger or a cash bundle;
+a second is refused until the first is dropped) and, separately, the **crew phone**. Each drops independently:
+**G** for the trade item (already today's drop key) and **K** for the phone. Both are server-owned objects and fall
+on death. Details are in `docs/GAME_VISION.md` ("Inventory").
+
 ### Interim-lead design proposal: trust and the Week
 `docs/DESIGN_WEEK_TRUST.md` diagnoses why Sub Rosa and No Big Deal weeks collapse mid-week, and proposes phone-driven
 tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire rumours on payphones,

@@ -62,7 +62,10 @@ D. "gameplay-week" (owns: scripts/main.gd, scripts/player.gd, scripts/character_
    tests/integration.gd, tests/free_roam.gd, NEW tests/week_flow.gd; coordinate online.gd changes with B):
    build the Week foundation (W0 in docs/DESIGN_WEEK_TRUST.md: host-owned week_state, weekday HUD, morning recap,
    CS gear carry-over, Friday Dead Drop, END OF WEEK standings, rejoin restores state), then the user-approved
-   trust items in T0-T5 order; also wire remaining audio hooks and gamepad binds for hands-up/binoculars.
+   trust items in T0-T5 order. Include the inventory in docs/GAME_VISION.md: weapons unchanged, ONE trade item
+   (briefcase / Project / cash bundle) and a separate crew-phone slot, each dropped independently (G = trade item,
+   K = phone), server-owned objects with host-validated pickup, drop and hand-over (coordinate with B for sync);
+   also wire remaining audio hooks and gamepad binds for hands-up/binoculars.
 E. "city" (owns: scripts/world.gd, scripts/city_detail.gd, scripts/mesh_merge.gd, scripts/interiors.gd,
    scripts/retro_textures.gd, tests/city_detail.gd, tests/city_audit.gd, tests/map_06.gd, capture scripts for the city):
    fix the remaining city_audit REPORTs, the Strip ring vs beach rocks step at (24, 400), harsh texture tiling,
