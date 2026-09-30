@@ -20,11 +20,11 @@ signal wrecked
 ## A window broke (bullet or crash): `at` is where, in world space.
 signal glass_broken(index: int, at: Vector3)
 
-## Handling and layout per type. Sedan numbers are Codex's tuned originals.
+## Handling and layout per type. City playtest tuning: roughly 20% lower top speed, 20-25% less acceleration.
 ## Seat arcs: (centre, half-width) in radians, +yaw turns left. shoot: "driveby" (driver,
 ## one-handed, while aiming), "window", "open" (bed / pillion) or "none".
 const TYPES: Dictionary = {
-	"sedan": {"label": "SEDAN", "accel": 7.2, "brake": 19.0, "top": 31.5, "reverse": 8.0, "grip": 19.0, "handbrake": 3.8,
+	"sedan": {"label": "SEDAN", "accel": 5.6, "brake": 19.0, "top": 25.0, "reverse": 8.0, "grip": 19.0, "handbrake": 3.8,
 		"wheelbase": 2.7, "hull": Vector3(1.92, 1.5, 4.4), "belt": 1.0, "roof": 1.5, "cabin": Vector2(-1.1, 1.25), "mid": 0.21, "health": 800.0,
 		"wheel_r": 0.34, "axles": Vector2(-1.36, 1.34), "track": 0.89, "chase": 7.2, "engine_pitch": 1.0,
 		"seats": [
@@ -33,14 +33,14 @@ const TYPES: Dictionary = {
 			{"name": "REAR LEFT", "eye": Vector3(-0.56, 1.16, 0.72), "door": Vector3(-1.62, 0.12, 0.72), "arc": Vector2(1.66, 1.4), "shoot": "window", "pane": 2},
 			{"name": "REAR RIGHT", "eye": Vector3(0.56, 1.16, 0.72), "door": Vector3(1.62, 0.12, 0.72), "arc": Vector2(-1.66, 1.4), "shoot": "window", "pane": 3},
 		]},
-	"coupe": {"label": "COUPE", "accel": 9.0, "brake": 21.0, "top": 36.0, "reverse": 8.0, "grip": 21.0, "handbrake": 3.4,
+	"coupe": {"label": "COUPE", "accel": 7.0, "brake": 21.0, "top": 28.5, "reverse": 8.0, "grip": 21.0, "handbrake": 3.4,
 		"wheelbase": 2.55, "hull": Vector3(1.88, 1.3, 4.3), "belt": 0.9, "roof": 1.3, "cabin": Vector2(-0.55, 0.95), "health": 650.0,
 		"wheel_r": 0.33, "axles": Vector2(-1.4, 1.3), "track": 0.88, "chase": 6.8, "engine_pitch": 1.18,
 		"seats": [
 			{"name": "DRIVER", "eye": Vector3(-0.38, 1.02, 0.25), "door": Vector3(-1.6, 0.12, 0.2), "arc": Vector2(1.57, 1.3), "shoot": "driveby", "pane": 0},
 			{"name": "PASSENGER", "eye": Vector3(0.56, 1.02, 0.25), "door": Vector3(1.6, 0.12, 0.2), "arc": Vector2(-1.57, 1.4), "shoot": "window", "pane": 1},
 		]},
-	"suv": {"label": "SUV", "accel": 6.0, "brake": 17.0, "top": 28.0, "reverse": 7.5, "grip": 17.5, "handbrake": 4.6,
+	"suv": {"label": "SUV", "accel": 4.8, "brake": 17.0, "top": 22.5, "reverse": 7.5, "grip": 17.5, "handbrake": 4.6,
 		"wheelbase": 2.95, "hull": Vector3(2.06, 1.95, 4.8), "belt": 1.3, "roof": 1.92, "cabin": Vector2(-1.05, 2.05), "mid": 0.27, "health": 1250.0,
 		"wheel_r": 0.4, "axles": Vector2(-1.5, 1.45), "track": 0.94, "chase": 8.0, "engine_pitch": 0.85,
 		"seats": [
@@ -49,7 +49,7 @@ const TYPES: Dictionary = {
 			{"name": "REAR LEFT", "eye": Vector3(-0.6, 1.53, 0.85), "door": Vector3(-1.72, 0.12, 0.85), "arc": Vector2(1.66, 1.4), "shoot": "window", "pane": 2},
 			{"name": "REAR RIGHT", "eye": Vector3(0.6, 1.53, 0.85), "door": Vector3(1.72, 0.12, 0.85), "arc": Vector2(-1.66, 1.4), "shoot": "window", "pane": 3},
 		]},
-	"pickup": {"label": "PICKUP", "accel": 6.4, "brake": 17.5, "top": 29.0, "reverse": 7.5, "grip": 17.0, "handbrake": 4.2,
+	"pickup": {"label": "PICKUP", "accel": 5.0, "brake": 17.5, "top": 23.0, "reverse": 7.5, "grip": 17.0, "handbrake": 4.2,
 		"wheelbase": 3.2, "hull": Vector3(2.0, 1.85, 5.3), "belt": 1.05, "roof": 1.9, "cabin": Vector2(-1.25, 0.15), "health": 1050.0,
 		"wheel_r": 0.39, "axles": Vector2(-1.7, 1.55), "track": 0.92, "chase": 8.4, "engine_pitch": 0.8,
 		"seats": [
@@ -58,7 +58,7 @@ const TYPES: Dictionary = {
 			{"name": "BED LEFT", "eye": Vector3(-0.45, 2.2, 1.35), "door": Vector3(-1.65, 0.12, 2.1), "arc": Vector2(1.57, PI), "shoot": "open", "pane": -1},
 			{"name": "BED RIGHT", "eye": Vector3(0.45, 2.2, 1.35), "door": Vector3(1.65, 0.12, 2.1), "arc": Vector2(-1.57, PI), "shoot": "open", "pane": -1},
 		]},
-	"motorcycle": {"label": "MOTORCYCLE", "accel": 11.0, "brake": 22.0, "top": 38.0, "reverse": 3.0, "grip": 23.0, "handbrake": 2.8,
+	"motorcycle": {"label": "MOTORCYCLE", "accel": 8.2, "brake": 22.0, "top": 30.0, "reverse": 3.0, "grip": 23.0, "handbrake": 2.8,
 		"wheelbase": 1.45, "hull": Vector3(0.62, 1.0, 2.1), "belt": 0.0, "roof": 0.0, "cabin": Vector2.ZERO, "health": 380.0,
 		"wheel_r": 0.33, "axles": Vector2(-0.72, 0.72), "track": 0.0, "chase": 5.4, "engine_pitch": 1.55,
 		"seats": [
@@ -68,9 +68,9 @@ const TYPES: Dictionary = {
 }
 
 @export var vehicle_type: String = "sedan"
-@export var engine_acceleration: float = 7.2
+@export var engine_acceleration: float = 5.6
 @export var braking_deceleration: float = 19.0
-@export var maximum_forward_speed: float = 31.5
+@export var maximum_forward_speed: float = 25.0
 @export var maximum_reverse_speed: float = 8.0
 @export var lateral_grip: float = 17.5
 @export var handbrake_grip: float = 3.8

@@ -1,5 +1,7 @@
 # Project Fast Talkers — shared handoff
 
+**Latest pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
+
 ## Shared objective
 Original low-poly round-based business-negotiation shooter, eventual Steam release.
 References for desired feel: Sub Rosa / No Big Deal round negotiations, GTA IV vehicle weight,
@@ -87,3 +89,16 @@ Visual finding: `world.gd:1512` still paints a giant "MEETING POINT" on the stre
 
 ### 2026-09-29 15:55 EDT — Vehicle render review
 I pulled your new `car.gd` + `vehicle_kit.gd` into staging and captured the five-vehicle lineup. The external silhouettes are much more coherent (coupe, SUV and pickup read distinctly). Two capture issues: `capture_vehicles.gd` lineup_rear view at (10,1.6,52) is blocked by a large streetside post/new geometry, so move the review camera to actually show the rears; and the sedan driver's first-person `driver_chase` / `driver_driveby` views have a large opaque tan wedge along the left quarter of the screen that obscures the road. Please check the new interior/side shell geometry against the existing driver eye point, and adjust mesh or seat eye so the driver has a clear forward view while keeping pillars/doors as real cover.
+
+---
+
+## 2026-09-29 session — Codex COMPLETE: city detail, slower cars, diner and motel
+
+Continue from cloud/map-integration (draft PR #1), not the map-only branch or master.
+Full current handoff: docs/CITY_DETAIL_HANDOFF.md. Codex releases the changed files for Claude's next coordinated pass; earlier IN PROGRESS/ownership notes above are historical.
+
+Built eight public spaces with 85 static furniture pieces, marked parking, protected park entrances, modest speed/acceleration reductions for all five vehicle types, a walk-in diner and a starter motel lobby/two rooms. Reused world batching and BuildingKit. No new core deal/trust/social mechanics implemented: those remain proposals per the user's explicit request. Same build required on every multiplayer machine.
+
+Validation: 1,075 passing assertions, 6,000-frame soak, localhost host/client rounds, rendered screenshots and release startup. Busy downtown still exceeds the ~1,550 draw-call target. User will test friends tomorrow; genuine internet/human balance remains unverified. Next priority is that test and measured visibility/material optimization, then extend motel/diner and remaining placeholder landmark interiors. Preserve both exits, crew route fairness, deterministic creation order and actual collision tests.
+
+My take: make Halcyon memorable through recognizable ordinary places and choices of approach/escape. Players should invent stories and meeting locations. Keep original art, readable low-poly silhouettes and purposeful detail. No official meeting zones or copied game appearance.

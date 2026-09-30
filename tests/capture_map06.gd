@@ -10,6 +10,14 @@ const ArmoryScript = preload("res://scripts/armory.gd")
 
 ## [label, camera position, look-at point]
 const VIEWS: Array = [
+	["detail_trust", Vector3(174, 1.7, -107), Vector3(171, 1.1, -123)],
+	["detail_garden", Vector3(-161, 1.7, -22), Vector3(-185, 1.1, -24)],
+	["detail_nightlife", Vector3(148, 1.7, 105), Vector3(150, 1.1, 126)],
+	["detail_wharf_lot", Vector3(-254, 2.8, -154), Vector3(-286, 0.5, -171)],
+	["detail_diner", Vector3(120, 1.7, 53.5), Vector3(114, 1.2, 64)],
+	["detail_diner_kitchen", Vector3(120, 1.7, 65), Vector3(126, 1.5, 70)],
+	["detail_motel", Vector3(170, 1.7, 19), Vector3(163, 1.4, 13)],
+	["detail_motel_room", Vector3(166.5, 1.7, 7), Vector3(161.5, 1.1, 3.5)],
 	["uptown", Vector3(140, 1.7, -112), Vector3(130, 24, -176)],
 	["uptown_hotel", Vector3(190, 1.7, -140), Vector3(175, 10, -176)],
 	["motor_mile", Vector3(104, 1.7, 45), Vector3(185, 4, 12)],

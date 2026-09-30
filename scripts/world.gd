@@ -21,6 +21,7 @@ const RetroTextures = preload("res://scripts/retro_textures.gd")
 const Factions = preload("res://scripts/factions.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
 const Interiors = preload("res://scripts/interiors.gd")
+const CityDetail = preload("res://scripts/city_detail.gd")
 ## Kept for the city-limit tests: the Harbor mole's north quay is at z = -HALF on Halcyon
 ## Avenue, and Union Street ends at the West Slip quay at x = -HALF.
 const HALF: float = 200.0
@@ -71,6 +72,9 @@ var landmarks: Array[Dictionary] = []
 var crew_spawns: Dictionary = {}
 ## Open paved squares and parks (x/z polygons) for the map.
 var plazas: Array[PackedVector2Array] = []
+## Authored public spaces and their solid furniture; used by collision/playtest checks.
+var public_spaces: Array[Dictionary] = []
+var city_furniture: Array[Dictionary] = []
 ## Walk-in doors: {index, label, kind, position, inside, outside, open, district}.
 ## Doors start open; `set_door_open(index, open)` swings one (main.gd can bind E to it).
 var interactable_doors: Array[Dictionary] = []
@@ -145,6 +149,7 @@ func _ready() -> void:
 	# Walk-in businesses last: each interior is its own node so its lamp only lights it.
 	for shop: Dictionary in Interiors.SHOPS:
 		Interiors.new(self, shop).build_interior()
+	CityDetail.new(self).build()
 	_xf = Transform3D.IDENTITY
 	_xf_yaw = 0.0
 	set_dusk(dusk)
@@ -1021,7 +1026,7 @@ func _street_life(rect: Rect2) -> void:
 			at = Vector2(rect.end.x - 1.5, rect.position.y + t - rect.size.x * 2.0 - rect.size.y)
 			facing = PI * 0.5
 		var world_at2: Vector2 = _w2(at)
-		if not _on_land(world_at2) or not _free_spot(world_at2, 0.7):
+		if not _on_land(world_at2) or not _free_spot(world_at2, 0.7) or CityDetail.is_path_entrance(world_at2):
 			continue
 		_occupied.append(world_at2)
 		var world_at: Vector3 = Vector3(at.x, 0.16, at.y)
