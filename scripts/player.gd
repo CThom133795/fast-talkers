@@ -14,6 +14,8 @@ signal died
 signal damaged(amount: float, source: Vector3)
 signal footstep(loud: bool)
 signal landed(speed: float)
+## Social gesture changed (hands up = weapon away, cannot fire). For replication to others.
+signal gesture_changed(hands_up: bool)
 
 const WALK_SPEED: float = 4.3
 const SPRINT_SPEED: float = 6.5
@@ -162,6 +164,11 @@ var stamina: float = 100.0
 var camera: Camera3D
 var mouse_sensitivity: float = 0.0023
 var base_fov: float = BASE_FOV
+## Held binoculars: a narrow field of view for scouting a meeting; the weapon is lowered.
+var binoculars: bool = false
+const BINOCULAR_FOV: float = 16.0
+## Hands up: a readable peace signal. The weapon is put away and cannot fire or reload.
+var hands_up: bool = false
 var aiming: bool = false
 var crouching: bool = false
 var sprinting: bool = false
@@ -290,6 +297,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		# Aim is applied immediately; ADS scales sensitivity with the zoomed field of view.
 		var zoom_scale: float = lerpf(1.0, camera.fov / base_fov, ads_blend)
+		if binoculars:
+			zoom_scale = camera.fov / base_fov
 		var sensitivity: float = mouse_sensitivity * zoom_scale
 		_turn(-motion.screen_relative.x * sensitivity)
 		_pitch = clampf(_pitch - motion.screen_relative.y * sensitivity, -1.48, 1.48)
@@ -414,13 +423,13 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_aim(delta: float, controls_active: bool) -> void:
-	aiming = controls_active and allow_ads and Input.is_action_pressed("aim") and not reloading and _draw_time <= 0.0
+	aiming = controls_active and allow_ads and Input.is_action_pressed("aim") and not reloading and _draw_time <= 0.0 and weapon_ready()
 	var ads_time: float = float(_stats.get("ads_time", 0.18))
 	ads_blend = move_toward(ads_blend, 1.0 if aiming else 0.0, delta / ads_time)
 
 
 func _weapon_input(controls_active: bool) -> void:
-	if not controls_active:
+	if not controls_active or not weapon_ready():
 		return
 	if Input.is_action_just_pressed("reload"):
 		_start_reload()
@@ -507,6 +516,24 @@ func weapon_stats() -> Dictionary:
 	return _stats
 
 
+## False while the hands are up or the binoculars are raised: no firing, no reloading.
+func weapon_ready() -> bool:
+	return not hands_up and not binoculars
+
+
+## Raises or lowers the hands. Returns true when the state changed.
+func set_hands_up(value: bool) -> bool:
+	if value == hands_up or (value and (_dead or in_vehicle)):
+		return false
+	hands_up = value
+	if value:
+		aiming = false
+		ads_blend = 0.0
+		reloading = false
+	gesture_changed.emit(hands_up)
+	return true
+
+
 func is_scoped() -> bool:
 	return bool(_stats.get("scope", false)) and ads_blend > 0.82 and (not in_vehicle or seat_can_shoot) and not _dead
 
@@ -528,6 +555,8 @@ static func is_primary(id: String) -> bool:
 
 
 func _try_fire() -> void:
+	if not weapon_ready():
+		return
 	if _cooldown > 0.0 or _draw_time > 0.0 or not enabled or not can_fire or _dead or hold_fire:
 		return
 	if in_vehicle and not seat_can_shoot:
@@ -791,6 +820,8 @@ func reset_player(pos: Vector3) -> void:
 	_dead = false
 	_death_tilt = 0.0
 	enabled = true
+	binoculars = false
+	set_hands_up(false)
 	aiming = false
 	ads_blend = 0.0
 	sprinting = false
@@ -947,6 +978,8 @@ func _update_camera(delta: float) -> void:
 	var target_fov: float = lerpf(base_fov, float(_stats["fov"]), ads_blend * ads_blend * (3.0 - 2.0 * ads_blend))
 	if sprinting:
 		target_fov += 4.0
+	if binoculars and not _dead:
+		target_fov = BINOCULAR_FOV
 	camera.fov = lerpf(camera.fov, target_fov, 1.0 - exp(-delta * 20.0))
 
 
@@ -954,7 +987,7 @@ func _update_weapon_visuals(delta: float) -> void:
 	if not is_instance_valid(_gun):
 		return
 	delta = minf(delta, 0.05)
-	_gun.visible = (not in_vehicle or seat_can_shoot) and not _dead and not is_scoped()
+	_gun.visible = (not in_vehicle or seat_can_shoot) and not _dead and not is_scoped() and weapon_ready()
 	_gun_kick = move_toward(_gun_kick, 0.0, delta * 9.0)
 	_flash_time = maxf(0.0, _flash_time - delta)
 	if is_instance_valid(_flash):

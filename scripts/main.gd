@@ -174,6 +174,19 @@ var full_map: Control
 var map_open: bool = false
 ## Film grade post-process (grain, contrast, split tone, vignette) under the HUD.
 var film_grade: bool = true
+## Potato mode (bare-minimum PCs): hides collision-free dressing via world.set_potato_mode.
+var potato_mode: bool = false
+## Audio-only city life: a local RNG (never gameplay) schedules distant dogs and sirens.
+var _ambient_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _ambient_wait: float = 30.0
+var _space_check: float = 0.0
+var _space: String = "outdoor"
+var _interior_nodes: Array[Node3D] = []
+var _interiors_scanned: bool = false
+## Round summary bookkeeping (contract rounds).
+var _round_started_msec: int = 0
+var _round_shots_base: int = 0
+var _round_hits_base: int = 0
 var grade_rect: ColorRect
 var _steam_timer: float = 0.0
 var laser_dot: MeshInstance3D
@@ -233,6 +246,7 @@ func _ready() -> void:
 	player.shot_fired.connect(_on_shot)
 	player.weapon_fired.connect(_on_weapon_fired)
 	player.weapon_event.connect(_on_weapon_event)
+	_ambient_rng.seed = 0x5A1E5
 	player.damaged.connect(_on_player_damaged)
 	player.footstep.connect(_on_footstep)
 	player.landed.connect(func(_speed: float): sfx.play("land"))
@@ -336,7 +350,8 @@ func _all_guards() -> Array[FastGuard]:
 func _setup_input() -> void:
 	var keys: Dictionary = {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"crouch":KEY_CTRL,"jump":KEY_SPACE,"handbrake":KEY_SPACE,"reload":KEY_R,"interact":KEY_E,"buy":KEY_B,"escape":KEY_ESCAPE,"drop":KEY_G,
 		"weapon_1":KEY_1,"weapon_2":KEY_2,"weapon_3":KEY_3,"weapon_4":KEY_4,"weapon_5":KEY_5,"quick_swap":KEY_Q,"horn":KEY_H,"rearm":KEY_T,"fullscreen":KEY_F11,"fps":KEY_F3,
-		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER}
+		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER,
+		"hands_up":KEY_X,"binoculars":KEY_Z}
 	for action: String in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
@@ -480,6 +495,10 @@ func _process(delta: float) -> void:
 		_tick_guard_respawns(delta)
 		_update_driveby()
 		_update_gps(delta)
+		_update_ambient_events(delta)
+	player.binoculars = (phase == Phase.LIVE or phase == Phase.BUY) and not paused and not player.is_dead() \
+		and (vehicle == null or not _driving()) and InputMap.has_action("binoculars") and Input.is_action_pressed("binoculars")
+	_update_space(delta)
 	if vehicle != null and phase != Phase.MENU:
 		_update_seat_modifiers()
 		_update_vehicle_camera(delta)
@@ -549,6 +568,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("map") and phase == Phase.LIVE and not paused:
 		map_open = not map_open
+		return
+	if event.is_action_pressed("hands_up") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
+		toggle_hands_up()
 		return
 	if event.is_action_pressed("fullscreen"):
 		_toggle_fullscreen()
@@ -765,7 +787,9 @@ func _enter_vehicle(target: FastCar, index: int) -> void:
 	_chase_idle = 10.0
 	chase.fov = 70.0
 	chase.position = target.position + target.global_basis.z * float(target.spec.get("chase", 7.2)) + Vector3(0, 4, 0)
-	sfx.play("door")
+	sfx.play("car_door_close")
+	if index == 0 and not target.is_bike():
+		sfx.play("engine_start", 1.0, -4.0)
 	if index != 0 and free_roam and target.seat_free(0):
 		_start_wheelman(target)
 	if target.disabled:
@@ -836,7 +860,7 @@ func _exit_vehicle(force: bool = false) -> bool:
 	player.face(leaving.rotation.y)
 	player.camera.make_current()
 	horn_player.stop()
-	sfx.play("door", 1.05)
+	sfx.play("car_door_open")
 	_dismiss_wheelman(leaving)
 	return true
 
@@ -1020,6 +1044,7 @@ func _near_rack() -> bool:
 	return _flat_distance(player.position, ArmoryScript.RACK + Vector3(0, 0, 0.8)) < 2.4
 
 func _collect_case() -> void:
+	sfx.play("briefcase_open")
 	carrying = true
 	case_mesh.visible = false
 	_message("Briefcase secured. Get it home to your HQ (teal marker).")
@@ -1044,7 +1069,8 @@ func _pay_deal() -> void:
 		return
 	cash -= DEAL_COST
 	paid = true
-	sfx.play("cash")
+	sfx.play("cash_riffle")
+	sfx.play("cash", 1.0, -4.0)
 	_collect_case()
 	_resume()
 
@@ -1692,8 +1718,80 @@ func _start_live() -> void:
 	for ride: FastCar in cars:
 		ride.enabled = true
 	for guard: FastGuard in guards: guard.active = true
+	_round_started_msec = Time.get_ticks_msec()
+	_round_shots_base = shots_fired
+	_round_hits_base = shots_hit
 	_resume()
 	_message("Doors open. Collect the documents at the Exchange in Midtown (amber), then bring them home to your HQ (teal). Follow the route line on your radar, or take your own way.")
+
+## One line for the round-end screen: time on the clock, shots, hits and what you carried out.
+func round_summary() -> String:
+	var seconds: int = maxi(0, (Time.get_ticks_msec() - _round_started_msec) / 1000) if _round_started_msec > 0 else 0
+	var shots: int = maxi(0, shots_fired - _round_shots_base)
+	var hits: int = maxi(0, shots_hit - _round_hits_base)
+	var outcome: String = "documents delivered" if paid else ("documents lost" if carrying or tip_state == "done" else "no documents moved")
+	return "Round report: %d:%02d on the clock  /  %d shot%s, %d hit%s  /  %s." % [seconds / 60, seconds % 60, shots, "" if shots == 1 else "s", hits, "" if hits == 1 else "s", outcome]
+
+
+## Hands up / down: weapon away as a readable peace signal (X). Not while driving or dead.
+func toggle_hands_up() -> bool:
+	if vehicle != null or player.is_dead():
+		return false
+	if not player.set_hands_up(not player.hands_up):
+		return false
+	_message("HANDS UP: weapon away, you cannot fire. Press %s to lower them." % _glyph("hands_up") if player.hands_up else "Hands down. Weapon ready.", 3.0)
+	return true
+
+
+## Occasional far-off city life (audio only; a local RNG, so gameplay stays deterministic).
+func _update_ambient_events(delta: float) -> void:
+	_ambient_wait -= delta
+	if _ambient_wait > 0.0:
+		return
+	_ambient_wait = _ambient_rng.randf_range(25.0, 60.0)
+	if _space != "outdoor" or not sfx.has_method("play_at"):
+		return
+	var angle: float = _ambient_rng.randf() * TAU
+	var sound: String = "dog_far" if _ambient_rng.randf() < 0.7 else "siren_far"
+	sfx.play_at(sound, player.global_position + Vector3(cos(angle), 0.0, sin(angle)) * 90.0, 1.0, -3.0)
+
+
+## Indoor/outdoor reverb from the building footprints that declare an interior
+## (meta "interior_half": half extents in the building's local XZ).
+func _update_space(delta: float) -> void:
+	_space_check -= delta
+	if _space_check > 0.0:
+		return
+	_space_check = 0.25
+	var next: String = "indoor" if player_indoors() else "outdoor"
+	if next != _space:
+		_space = next
+		if sfx.has_method("set_space"):
+			sfx.set_space(next)
+
+
+func player_indoors() -> bool:
+	if not _interiors_scanned and is_instance_valid(world):
+		_interiors_scanned = true
+		_collect_interiors(world, 0)
+	var at: Vector3 = player.global_position
+	for node: Node3D in _interior_nodes:
+		if not is_instance_valid(node):
+			continue
+		var local: Vector3 = node.global_transform.affine_inverse() * at
+		var half: Vector2 = node.get_meta("interior_half")
+		if absf(local.x) < half.x and absf(local.z) < half.y and local.y > -1.0 and local.y < 9.0:
+			return true
+	return false
+
+
+func _collect_interiors(node: Node, depth: int) -> void:
+	for child: Node in node.get_children():
+		if child is Node3D and child.has_meta("interior_half") and child.get_meta("interior_half") is Vector2:
+			_interior_nodes.append(child as Node3D)
+		elif depth < 2:
+			_collect_interiors(child, depth + 1)
+
 
 func _finish(won: bool, title: String, detail: String) -> void:
 	if phase != Phase.LIVE: return
@@ -1710,6 +1808,7 @@ func _finish(won: bool, title: String, detail: String) -> void:
 	cash = mini(cash,16000)
 	if not player.is_dead():
 		detail += "\nYou walked away: your weapons, parts and armour carry into the next round."
+	detail += "\n" + round_summary()
 	_lock_controls(true)
 	_clear_menu()
 	_heading(title.to_upper(),"ROUND %02d  /  %s" % [round_number,"SETTLED" if won else "FAILED"])
@@ -1846,7 +1945,7 @@ func _settings(from_title: bool) -> void:
 		if from_title: _show_title()
 		else: _pause()
 	_heading("OPERATOR HANDBOOK", "CONTROLS & SETTINGS")
-	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        T  rearm (free roam)\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
+	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        T  rearm (free roam)\nX  hands up (weapon away: a peace signal)        Z  hold for binoculars\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
 	_text("Sound volume",14,TEAL)
 	var slider := HSlider.new()
 	slider.min_value = 0.0
@@ -1915,6 +2014,11 @@ func _settings(from_title: bool) -> void:
 		_apply_settings()
 		_save_settings()
 		_settings(from_title))
+	_button("POTATO MODE (LOW-END PCs):  %s" % ("ON" if potato_mode else "OFF"),func():
+		potato_mode = not potato_mode
+		_apply_settings()
+		_save_settings()
+		_settings(from_title))
 	_button("FPS COUNTER:  %s" % ("ON" if show_fps else "OFF"),func():
 		show_fps = not show_fps
 		_save_settings()
@@ -1942,6 +2046,8 @@ func _apply_settings() -> void:
 		world.set_dusk(lighting_dusk)
 	if is_instance_valid(grade_rect):
 		grade_rect.visible = film_grade
+	if world.has_method("set_potato_mode"):
+		world.call("set_potato_mode", potato_mode)
 
 func _load_settings() -> void:
 	var config := ConfigFile.new()
@@ -1953,6 +2059,7 @@ func _load_settings() -> void:
 		shadow_quality = clampi(int(config.get_value("video", "shadows", shadow_quality)), 0, 2)
 		lighting_dusk = bool(config.get_value("video", "dusk", lighting_dusk))
 		film_grade = bool(config.get_value("video", "film_grade", film_grade))
+		potato_mode = bool(config.get_value("video", "potato_mode", potato_mode))
 		player.pad_sensitivity = float(config.get_value("input", "pad_sensitivity", player.pad_sensitivity))
 		player.invert_y = bool(config.get_value("input", "invert_y", player.invert_y))
 		vibration = bool(config.get_value("input", "vibration", vibration))
@@ -1973,6 +2080,7 @@ func _save_settings() -> void:
 	config.set_value("video", "shadows", shadow_quality)
 	config.set_value("video", "dusk", lighting_dusk)
 	config.set_value("video", "film_grade", film_grade)
+	config.set_value("video", "potato_mode", potato_mode)
 	config.set_value("input", "pad_sensitivity", player.pad_sensitivity)
 	config.set_value("input", "invert_y", player.invert_y)
 	config.set_value("input", "vibration", vibration)
@@ -2178,11 +2286,18 @@ func _on_weapon_event(event: String) -> void:
 	match event:
 		"dry": sfx.play("dry")
 		"mag_out": sfx.play("mag_out")
-		"mag_in": sfx.play("mag_in")
+		"mag_in":
+			sfx.play("mag_in")
+			# Pistols rack the slide once the new magazine is seated.
+			if FastPlayer.class_of(player.weapon_id) == "pistol" and is_inside_tree():
+				get_tree().create_timer(0.16).timeout.connect(func(): sfx.play("slide"))
 		"shell": sfx.play("shell")
 		"pump": sfx.play("pump")
 		"reload_start": sfx.play("shell", 0.85)
-		"draw": sfx.play("draw")
+		"draw":
+			# The previous weapon goes away first, then the new one is drawn.
+			sfx.play("holster", 1.0, -3.0)
+			sfx.play("draw")
 		"break_open": sfx.play("break_open")
 
 func _on_player_damaged(amount: float, source: Vector3) -> void:
@@ -2212,7 +2327,7 @@ func guard_shot(origin:Vector3,end:Vector3,hit:bool = true) -> void:
 			sfx.play("whiz", randf_range(0.85, 1.15))
 	effects.call("tracer", origin, finish, Color("f08a5d"), 0.022, 0.08)
 	effects.call("muzzle_light", origin)
-	sfx.play_at("guard_shot", origin)
+	sfx.play_shot_at("guard_shot", origin, player.global_position)
 	if hit and msg_timer < 2.5:
 		_message("Taking fire! Find cover or leave the exchange.", 3.0)
 
@@ -2452,18 +2567,21 @@ func _tip_interact() -> bool:
 		tip_state = "active"
 		tip_timer = TIP_WINDOW
 		_place_stash(tip_site["at"])
-		sfx.play("ui", 0.7)
+		sfx.play("phone_pickup")
+		if is_inside_tree():
+			get_tree().create_timer(2.6).timeout.connect(func(): sfx.play("phone_hangup"))
 		_message("Voice on the line: \"There's a bag at %s. Nobody's watching it. Yet.\" You have %d seconds." % [tip_site["name"], int(TIP_WINDOW)], 7.0)
 		return true
 	if tip_state == "active" and is_instance_valid(stash_mesh) and stash_mesh.visible and player.global_position.distance_to(stash_mesh.global_position) < 2.8:
 		tip_state = "carried"
 		stash_mesh.visible = false
-		sfx.play("cash", 0.8)
+		sfx.play("cash_bundle")
 		_message("Stash grabbed. Bank it at your HQ; if you drop, it's gone.", 4.0)
 		return true
 	if tip_state == "carried" and _flat_distance(player.position, HOME) < 4.5:
 		tip_state = "done"
 		cash = mini(cash + TIP_VALUE, 16000)
+		sfx.play("cash_riffle")
 		sfx.play("cash")
 		_message("Stash banked: +$%s. The contract still needs the case." % _money(TIP_VALUE), 4.0)
 		return not carrying

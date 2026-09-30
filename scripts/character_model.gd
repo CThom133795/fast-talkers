@@ -45,6 +45,8 @@ var knee_r: int = Bone.SHIN_R
 var personality: float = 0.0
 ## Sitting in a vehicle seat (hands forward to the wheel) or astride a motorcycle.
 var seated: bool = false
+## Hands up (surrender / "I come in peace"): both arms raised, open palms, readable at range.
+var hands_up: bool = false
 var riding: bool = false
 
 var _angles: Array[Vector3] = []
@@ -684,7 +686,16 @@ func animate(delta: float, velocity: Vector3, aiming: bool) -> void:
 	_spring(Bone.CHEST, Vector3(breathe, -sin(_phase) * 0.06 * amount, 0), delta)
 	var glance: float = sin(_time * 0.37 + personality * 9.0) * 0.3 * calm
 	_spring(Bone.HEAD, Vector3(amount * 0.04 + sin(_time * 0.7) * 0.02, glance + sin(_phase) * 0.06 * amount, 0), delta, 80.0, 11.0)
-	if aiming:
+	if is_instance_valid(_weapon):
+		_weapon.visible = not hands_up
+	if hands_up:
+		# Both upper arms raised and splayed, forearms bent back so the palms show.
+		_spring(Bone.UPPERARM_R, Vector3(2.75, 0, -0.45), delta, 150.0, 14.0)
+		_spring(Bone.UPPERARM_L, Vector3(2.75, 0, 0.45), delta, 150.0, 14.0)
+		_spring(Bone.FOREARM_R, Vector3(0.35, 0, 0), delta, 150.0, 14.0)
+		_spring(Bone.FOREARM_L, Vector3(0.35, 0, 0), delta, 150.0, 14.0)
+		_spring(Bone.HAND_R, Vector3(0, 0, 0), delta)
+	elif aiming:
 		# Two-handed pistol grip: gun arm straight out, support hand wrapped under it.
 		_spring(Bone.UPPERARM_R, Vector3(1.48, 0.1, 0.05), delta, 150.0, 14.0)
 		_spring(Bone.FOREARM_R, Vector3(0.04, 0, 0), delta, 150.0, 14.0)
