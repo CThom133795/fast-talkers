@@ -13,6 +13,7 @@ const ArmoryScript = preload("res://scripts/armory.gd")
 const Factions = preload("res://scripts/factions.gd")
 const CharacterModel = preload("res://scripts/character_model.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
+const NetScript = preload("res://scripts/net.gd")
 const START_CASH: int = 3200
 const DEAL_COST: int = 800
 const PAYOUT: int = 2600
@@ -70,6 +71,8 @@ var avatar: CharacterModel
 var guards: Array[FastGuard] = []
 var drill_guards: Array[FastGuard] = []
 var world: FastWorld
+## Online session (docs/NET_M1_SPEC.md). Always present; idle offline.
+var net: FastNet
 var armory: ArmoryScript
 var effects: EffectsScript
 var sfx: SfxScript
@@ -198,6 +201,9 @@ var _ring_clock: float = 0.0
 
 func _ready() -> void:
 	_setup_input()
+	net = NetScript.new()
+	net.name = "Net"
+	add_child(net)
 	world = WorldScript.new()
 	add_child(world)
 	armory = ArmoryScript.new()
