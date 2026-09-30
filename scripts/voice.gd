@@ -14,6 +14,7 @@ signal speaking_changed(local_active: bool, radio: bool)
 
 const CAPTURE_BUS: String = "VoiceCapture"
 const RADIO_BUS: String = "VoiceRadio"
+const PHONE_BUS: String = "VoicePhone"
 const ACTION_RADIO: String = "voice_radio"
 const ACTION_PTT: String = "voice_ptt"
 const PEER_TIMEOUT_MS: int = 4000
@@ -30,6 +31,9 @@ var output_volume: float = 1.0
 var proximity_mode: String = "open"
 var net: FastNet
 var sfx: Node
+## `phone_locator.call(talker_id) -> Vector3`: where a PHONE frame from that talker comes out (the far phone of
+## their live call: its holder's position, or the dropped phone). Vector3.INF when unknown. Set by main.gd.
+var phone_locator: Callable = Callable()
 
 var _capture: AudioEffectCapture
 var _mic_player: AudioStreamPlayer
@@ -62,6 +66,7 @@ func setup(owner_net: FastNet, owner_sfx: Node = null) -> void:
 func _ready() -> void:
 	_build_hud()
 	_setup_radio_bus()
+	_setup_phone_bus()
 	_setup_capture()
 	set_process(true)
 
@@ -113,6 +118,26 @@ func _setup_radio_bus() -> void:
 	var crunch: AudioEffectDistortion = AudioEffectDistortion.new()
 	crunch.mode = AudioEffectDistortion.MODE_OVERDRIVE
 	crunch.drive = 0.25
+	AudioServer.add_bus_effect(index, crunch)
+
+
+## A phone handset: a narrow 300-3400 Hz telephone band with a little crunch (radio-like, but thinner).
+func _setup_phone_bus() -> void:
+	if AudioServer.get_bus_index(PHONE_BUS) >= 0:
+		return
+	AudioServer.add_bus()
+	var index: int = AudioServer.bus_count - 1
+	AudioServer.set_bus_name(index, PHONE_BUS)
+	AudioServer.set_bus_send(index, "Master")
+	var low_cut: AudioEffectHighPassFilter = AudioEffectHighPassFilter.new()
+	low_cut.cutoff_hz = 300.0
+	AudioServer.add_bus_effect(index, low_cut)
+	var high_cut: AudioEffectLowPassFilter = AudioEffectLowPassFilter.new()
+	high_cut.cutoff_hz = 3400.0
+	AudioServer.add_bus_effect(index, high_cut)
+	var crunch: AudioEffectDistortion = AudioEffectDistortion.new()
+	crunch.mode = AudioEffectDistortion.MODE_OVERDRIVE
+	crunch.drive = 0.18
 	AudioServer.add_bus_effect(index, crunch)
 
 
@@ -223,10 +248,21 @@ func process_mic_frame(frame: PackedFloat32Array, radio: bool, ptt: bool) -> int
 
 # ---------------------------------------------------------------- playback
 
-func _make_stream_player(radio: bool) -> Node:
+func _make_stream_player(radio: bool, phone: bool = false) -> Node:
 	var generator: AudioStreamGenerator = AudioStreamGenerator.new()
 	generator.mix_rate = float(Codec.RATE)
 	generator.buffer_length = 0.5
+	if phone:
+		# A handset or speakerphone: heard only close to the phone, through the telephone band.
+		var handset: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
+		handset.stream = generator
+		handset.bus = PHONE_BUS
+		handset.unit_size = 2.5
+		handset.max_distance = 14.0
+		handset.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		add_child(handset)
+		handset.play()
+		return handset
 	if radio:
 		var flat: AudioStreamPlayer = AudioStreamPlayer.new()
 		flat.stream = generator
@@ -247,7 +283,7 @@ func _make_stream_player(radio: bool) -> Node:
 
 func _entry(id: int) -> Dictionary:
 	if not _peers.has(id):
-		_peers[id] = {"prox": null, "radio": null, "last_ms": 0, "radio_ms": 0, "mode": 0}
+		_peers[id] = {"prox": null, "radio": null, "phone": null, "last_ms": 0, "radio_ms": 0, "phone_ms": 0, "mode": 0}
 	return _peers[id]
 
 
@@ -258,18 +294,30 @@ func _on_voice_frame(from_id: int, mode: int, frame: PackedByteArray, distance: 
 	if samples.is_empty():
 		return
 	var radio: bool = mode == Relay.Mode.CREW
+	var phone: bool = mode == Relay.Mode.PHONE
+	if phone and not phone_locator.is_valid():
+		return
 	var entry: Dictionary = _entry(from_id)
-	var key: String = "radio" if radio else "prox"
+	var key: String = "phone" if phone else ("radio" if radio else "prox")
 	var now: int = Time.get_ticks_msec()
 	if radio and now - int(entry["radio_ms"]) > 600 and sfx != null:
 		sfx.call("play", "radio_squelch", 1.1, -8.0)
 	if radio:
 		entry["radio_ms"] = now
-	entry["last_ms"] = now
-	entry["mode"] = mode
+	if phone:
+		# A phone frame is a second copy of someone's voice: it must not make them look like they speak here.
+		entry["phone_ms"] = now
+	else:
+		entry["last_ms"] = now
+		entry["mode"] = mode
 	if entry[key] == null:
-		entry[key] = _make_stream_player(radio)
+		entry[key] = _make_stream_player(radio, phone)
 	var player: Node = entry[key]
+	if phone:
+		var at: Vector3 = phone_locator.call(from_id)
+		if not at.is_finite():
+			return
+		(player as Node3D).global_position = at
 	var volume_db: float = linear_to_db(maxf(output_volume, 0.0001)) - (8.0 if muffled else 0.0)
 	player.set("volume_db", volume_db)
 	if player is AudioStreamPlayer3D:
@@ -296,9 +344,14 @@ func _update_playback() -> void:
 	var now: int = Time.get_ticks_msec()
 	for id: int in _peers.keys():
 		var entry: Dictionary = _peers[id]
-		if now - int(entry["last_ms"]) > PEER_TIMEOUT_MS * 5:
+		if now - maxi(int(entry["last_ms"]), int(entry["phone_ms"])) > PEER_TIMEOUT_MS * 5:
 			_drop_peer(id)
 			continue
+		var handset: Node = entry["phone"]
+		if handset is Node3D and phone_locator.is_valid() and now - int(entry["phone_ms"]) < 1000:
+			var spot: Vector3 = phone_locator.call(id)
+			if spot.is_finite():
+				(handset as Node3D).global_position = spot
 		var prox: Node = entry["prox"]
 		if prox is Node3D:
 			var state: Dictionary = net.latest_state(id)
@@ -310,7 +363,7 @@ func _drop_peer(id: int) -> void:
 	if not _peers.has(id):
 		return
 	var entry: Dictionary = _peers[id]
-	for key: String in ["prox", "radio"]:
+	for key: String in ["prox", "radio", "phone"]:
 		var player: Node = entry[key]
 		if player != null and is_instance_valid(player):
 			player.queue_free()
@@ -338,6 +391,8 @@ func speakers() -> PackedStringArray:
 	for id: int in _peers.keys():
 		if now - int((_peers[id] as Dictionary)["last_ms"]) < 500:
 			out.append(("%s%s" % ["[radio] " if int((_peers[id] as Dictionary)["mode"]) == Relay.Mode.CREW else "", net.name_of(id)]).replace("[", "(").replace("]", ")"))
+		elif now - int((_peers[id] as Dictionary)["phone_ms"]) < 500:
+			out.append("(phone) %s" % net.name_of(id))
 	return out
 
 

@@ -10,6 +10,8 @@ extends Node
 const Factions = preload("res://scripts/factions.gd")
 const RemoteScript = preload("res://scripts/remote_player.gd")
 const MeshKit = preload("res://scripts/mesh_kit.gd")
+const PhoneCallsScript = preload("res://scripts/phone_calls.gd")
+const VoiceRelayScript = preload("res://scripts/voice_relay.gd")
 
 const BUY_SECONDS: float = 30.0
 const LIVE_SECONDS: float = 600.0
@@ -32,6 +34,9 @@ const HOST_CAR_RATE: float = 0.1
 const PHONE_BASE: int = 2
 const TRADE_ITEMS: Array[int] = [LEDGER, CASH]
 const PHONE_REACH: float = 2.4
+## The dial strip closes by itself after this long; a ringing phone rings every RING_INTERVAL seconds.
+const DIAL_STRIP_SECONDS: float = 4.0
+const RING_INTERVAL: float = 2.0
 ## The Week (docs/LEAD_DESIGN_DECISIONS.md §1): a match is a Week of Days, Friday is always the Dead Drop.
 const WEEKDAYS: PackedStringArray = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
 ## Contract value by weekday: honesty is cheap on Monday, betrayal is expensive on Thursday.
@@ -85,6 +90,16 @@ var items: Dictionary = {}
 var remotes: Dictionary = {}
 var chat_ui: Control
 var lobby: Control
+## Phone calls as the host last replicated them: {a, b, state (PhoneCallsScript.State), t, since_ms} per call.
+var phone_view: Array[Dictionary] = []
+## Host: the real call state machine (scripts/phone_calls.gd).
+var _calls: RefCounted = PhoneCallsScript.new()
+## The dial strip: phones I could ring, which one is picked, and when it closes by itself (0 = closed).
+var _dial_targets: Array[int] = []
+var _dial_index: int = 0
+var _dial_until: float = 0.0
+var _ring_timer: float = 0.0
+var _phone_label: Label
 
 var _item_nodes: Dictionary = {}
 var _remote_root: Node3D
@@ -123,6 +138,20 @@ func setup(owner_game: Node, owner_net: FastNet) -> void:
 	net.max_items = PHONE_BASE + Factions.ORDER.size()
 	# Only whoever holds a crew phone may call another crew (docs/LEAD_DESIGN_DECISIONS.md §2).
 	net.call_gate = _host_may_call
+	net.voice_phones = _host_live_lines
+	net.host_phone_request.connect(_host_phone_request)
+	net.phone_calls.connect(_on_phone_calls)
+	net.phone_notice.connect(_on_phone_notice)
+	_phone_label = Label.new()
+	_phone_label.position = Vector2(0, 150)
+	_phone_label.size.x = 1280
+	_phone_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_phone_label.add_theme_font_size_override("font_size", 18)
+	_phone_label.add_theme_color_override("font_color", Color("edb965"))
+	_phone_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	_phone_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_phone_label.visible = false
+	game.hud.add_child(_phone_label)
 	net.seat_owner = func(car: int) -> int: return net.seat_holder(car, 0)
 	net.match_started.connect(_on_match_started)
 	net.peer_joined.connect(_on_peer_joined)
@@ -289,6 +318,11 @@ func leave_match() -> void:
 	for item: int in _item_nodes.keys():
 		(_item_nodes[item] as Node3D).visible = false
 	items.clear()
+	_calls.clear("left")
+	phone_view = []
+	_close_dial()
+	if is_instance_valid(_phone_label):
+		_phone_label.visible = false
 	if is_instance_valid(chat_ui):
 		chat_ui.visible = false
 	net.leave()
@@ -326,6 +360,7 @@ func _on_peer_joined(id: int) -> void:
 			var data: Dictionary = (items[item] as Dictionary).duplicate()
 			data["msg"] = ""
 			net.broadcast_item(item, data)
+		_host_broadcast_calls()
 		for car: int in range(game.cars.size()):
 			for seat: int in range((game.cars[car] as FastCar).seat_count()):
 				var holder: int = net.seat_holder(car, seat)
@@ -346,6 +381,11 @@ func _on_peer_left(id: int) -> void:
 			for seat_index: int in range((game.cars[ride_index] as FastCar).seat_count()):
 				if net.seat_holder(ride_index, seat_index) == id:
 					net.broadcast_seat(ride_index, seat_index, 0)
+		for item: int in items.keys():
+			if is_phone(item) and _holder(item) == id:
+				var ended: Dictionary = _calls.hang_up(item)
+				if not ended.is_empty():
+					_host_call_ended(ended, "left")
 		_host_drop_all(id, net.latest_pos(id))
 
 
@@ -389,6 +429,7 @@ func tick(delta: float) -> void:
 			_respawn()
 	_set_sidearm_only(_my_trade_item() >= 0)
 	_update_item_visuals()
+	_phone_tick(delta)
 	var voice: Node = game.get("voice")
 	if voice != null and voice.has_method("is_speaking"):
 		for id: int in remotes.keys():
@@ -787,7 +828,7 @@ func _on_item_update(item: int, data: Dictionary) -> void:
 		if is_phone(item):
 			var owner_crew: String = phone_crew(item)
 			var whose: String = "your crew's phone" if owner_crew == game.crew else "the %s phone. Your calls will come from them" % Factions.get_crew(owner_crew)["name"]
-			game._message("You have %s. Open chat, TAB to a crew and call. %s drops it." % [whose, game._glyph("drop_phone")], 7.0)
+			game._message("You have %s. %s dials another crew, then just talk near the phone. %s drops it." % [whose, game._glyph("phone_call"), game._glyph("drop_phone")], 7.0)
 		else:
 			game._message("You have %s: sidearm only while you carry it. Bank it at your HQ (teal), trade it, or hide it. %s drops it." % [_item_name(item), game._glyph("drop")], 6.0)
 	if is_phone(item):
@@ -1141,7 +1182,7 @@ func briefing() -> String:
 	else:
 		lines.append("Ledger banked by the buyer: +$%s to them. Cash banked by anyone but the buyer: +$%s to that crew." % [game._money(contract_value(LEDGER)), game._money(contract_value(CASH))])
 		lines.append("Clean deal (both banked, no kills between you): +$%s each. Contracts grow every Day; Friday is the Dead Drop." % game._money(contract_value(-1)))
-	lines.append("Your crew phone sits at the HQ spawn: whoever holds it calls other crews (ENTER, then TAB). One case at a time; sidearm only while carrying.")
+	lines.append("Your crew phone sits at the HQ spawn: whoever holds it calls other crews (%s to dial, then talk near the phone; ENTER types a text call). One case at a time; sidearm only while carrying." % game._glyph("phone_call"))
 	lines.append_array(morning_paper())
 	return "\n".join(lines)
 
@@ -1157,7 +1198,7 @@ func update_hud() -> void:
 		g.top_center.text = "BUY  0:%02d" % seconds
 		g.top_center.add_theme_color_override("font_color", g.GOLD)
 		g.objective_label.text = "BUY PHASE  ·  " + role_line()
-		g.marker_label.text = "%s  BUY MENU     ENTER  CHAT / CALL     DOORS OPEN IN %ds     %s" % [g._glyph("buy"), seconds, slots]
+		g.marker_label.text = "%s  BUY MENU     ENTER  CHAT     %s  PHONE     DOORS OPEN IN %ds     %s" % [g._glyph("buy"), g._glyph("phone_call"), seconds, slots]
 	else:
 		g.top_center.text = "%02d:%02d" % [seconds / 60, seconds % 60]
 		g.top_center.add_theme_color_override("font_color", g.RED if seconds <= 30 else g.INK)
@@ -1238,6 +1279,347 @@ func _on_grant(amount: int, reason: String) -> void:
 	game._message("%s%s$%s  /  %s" % ["+" if amount >= 0 else "-", "", game._money(absi(amount)), reason], 5.0)
 
 
+# --------------------------------------------------------------------- phone calls (docs/VOICE_CHAT.md)
+#
+# A call joins two crew PHONES (scripts/phone_calls.gd). P (D-pad left) with a phone in hand opens a dial strip
+# on the HUD; dialling rings the other phone for 20 s at wherever it is. Answering (P on the ringing phone, or
+# picking it up) makes the call LIVE: the host then relays open-mic voice from whoever is right at one phone to
+# whoever is near the other (net.gd `_h_voice`, Mode.PHONE). The text call channel stays as the no-mic fallback.
+
+## The phone item a peer carries, or -1.
+func _phone_item_of(peer: int) -> int:
+	for item: int in items.keys():
+		if is_phone(item) and _holder(item) == peer:
+			return item
+	return -1
+
+
+## The phone I carry, or -1.
+func my_phone_item() -> int:
+	return _phone_item_of(net.my_id()) if net != null else -1
+
+
+## "MORRIS PHONE": who a call is with (a stolen phone still names its owners).
+func _phone_name(item: int) -> String:
+	return "%s PHONE" % Factions.get_crew(phone_crew(item))["short"]
+
+
+## The replicated call a phone is in (either end), or an empty Dictionary.
+func _view_call_of(item: int) -> Dictionary:
+	for entry: Dictionary in phone_view:
+		if int(entry["a"]) == item or int(entry["b"]) == item:
+			return entry
+	return {}
+
+
+## Other crews' phones I could dial from `mine` (phones of crews that are not in this match are hidden).
+func _dial_list(mine: int) -> Array[int]:
+	var out: Array[int] = []
+	for crew_id: String in Factions.ORDER:
+		var item: int = phone_item(crew_id)
+		if item == mine or not items.has(item):
+			continue
+		var data: Dictionary = items[item]
+		if bool(data.get("hidden", false)) or not str(data.get("banked", "")).is_empty():
+			continue
+		out.append(item)
+	return out
+
+
+func _phone_hint() -> String:
+	return "No phone in hand. Your crew's phone sits at your HQ spawn; whoever holds it makes the calls."
+
+
+## The phone key (P, or D-pad left) and the dial strip. True when the event was used. Called from main.gd's
+## input handler only while the match is in the buy or street phase.
+func phone_input(event: InputEvent) -> bool:
+	if not active or game.player.is_dead():
+		return false
+	var mine: int = my_phone_item()
+	if _dial_until > 0.0:
+		if mine < 0 or not _view_call_of(mine).is_empty():
+			_close_dial()
+		elif _dial_input(event, mine):
+			return true
+	if not event.is_action_pressed("phone_call"):
+		return false
+	var from_pad: bool = event is InputEventJoypadButton
+	var entry: Dictionary = _view_call_of(mine) if mine >= 0 else {}
+	# D-pad left is also the shop: the pad only takes it when a phone is at stake.
+	if from_pad and entry.is_empty() and (mine < 0 or phase != "live" or game._at_buy_station()):
+		return false
+	if mine < 0:
+		game._message(_phone_hint(), 4.0)
+		return true
+	if not entry.is_empty():
+		if int(entry["state"]) == PhoneCallsScript.State.RINGING and int(entry["b"]) == mine:
+			net.send_phone_request("answer", mine)
+		else:
+			net.send_phone_request("hangup", mine)
+		return true
+	_dial_targets = _dial_list(mine)
+	if _dial_targets.is_empty():
+		game._message("No other crew has a phone on the line today.", 3.0)
+		return true
+	_dial_index = 0
+	_dial_until = _now() + DIAL_STRIP_SECONDS
+	return true
+
+
+## Keys while the dial strip is open: 1-4 or D-pad left/right pick, P or A dial, ESC or B close.
+func _dial_input(event: InputEvent, mine: int) -> bool:
+	if event.is_action_pressed("escape") or event.is_action_pressed("ui_cancel"):
+		_close_dial()
+		return true
+	if event is InputEventJoypadButton and (event as InputEventJoypadButton).pressed:
+		var button: int = (event as InputEventJoypadButton).button_index
+		if button == JOY_BUTTON_DPAD_LEFT or button == JOY_BUTTON_DPAD_RIGHT:
+			_dial_index = (_dial_index + (1 if button == JOY_BUTTON_DPAD_RIGHT else _dial_targets.size() - 1)) % _dial_targets.size()
+			_dial_until = _now() + DIAL_STRIP_SECONDS
+			return true
+		if button == JOY_BUTTON_A:
+			_dial_selected(mine)
+			return true
+	elif event is InputEventKey:
+		for index: int in range(_dial_targets.size()):
+			if event.is_action_pressed("weapon_%d" % (index + 1)):
+				_dial_index = index
+				_dial_until = _now() + DIAL_STRIP_SECONDS
+				return true
+		if event.is_action_pressed("phone_call"):
+			_dial_selected(mine)
+			return true
+	return false
+
+
+func _dial_selected(mine: int) -> void:
+	if _dial_index >= 0 and _dial_index < _dial_targets.size():
+		net.send_phone_request("dial", _dial_targets[_dial_index])
+	_close_dial()
+
+
+func _close_dial() -> void:
+	_dial_until = 0.0
+	_dial_targets = []
+
+
+## Replicated calls from the host. Keeps when each one changed state, for the "0:42" on the HUD.
+func _on_phone_calls(calls: Array) -> void:
+	var next: Array[Dictionary] = []
+	for entry: Dictionary in calls:
+		var known: Dictionary = {}
+		for old: Dictionary in phone_view:
+			if int(old["a"]) == int(entry["a"]) and int(old["b"]) == int(entry["b"]) and int(old["state"]) == int(entry["state"]):
+				known = old
+		var row: Dictionary = entry.duplicate()
+		row["since_ms"] = int(known["since_ms"]) if not known.is_empty() else Time.get_ticks_msec() - int(float(entry["t"]) * 1000.0)
+		next.append(row)
+	phone_view = next
+
+
+func _on_phone_notice(text: String) -> void:
+	game._message(text, 4.0)
+	_system(text)
+
+
+## Where a peer is standing (feet), for phone audio: me, a remote player, or Vector3.INF.
+func _peer_feet(peer: int) -> Vector3:
+	if peer == net.my_id():
+		return game.player.global_position
+	if remotes.has(peer):
+		return (remotes[peer] as Node3D).global_position
+	return Vector3.INF
+
+
+## Where a phone is (feet level for a carried one), or Vector3.INF when it is not in play.
+func _phone_feet(item: int) -> Vector3:
+	var data: Dictionary = items.get(item, {})
+	if data.is_empty() or bool(data.get("hidden", false)):
+		return Vector3.INF
+	var holder: int = int(data.get("holder", 0))
+	if holder != 0:
+		return _peer_feet(holder)
+	return data.get("pos", Vector3.INF)
+
+
+## Where the sound of a phone comes from: its holder's head height, or the spot it lies.
+func _phone_audio_pos(item: int) -> Vector3:
+	var feet: Vector3 = _phone_feet(item)
+	if not feet.is_finite():
+		return feet
+	return feet + (Vector3(0, 1.3, 0) if _holder(item) != 0 else Vector3(0, 0.1, 0))
+
+
+## voice.gd's phone_locator: where a phone frame from `talker` comes out, which is the phone at the OTHER end
+## of the live call from the one the talker stands at. Vector3.INF when the talker is at no phone in a call.
+func phone_voice_position(talker: int) -> Vector3:
+	var at: Vector3 = _peer_feet(talker)
+	if not at.is_finite():
+		return Vector3.INF
+	var best: float = INF
+	var out: Vector3 = Vector3.INF
+	for entry: Dictionary in phone_view:
+		if int(entry["state"]) != PhoneCallsScript.State.LIVE:
+			continue
+		for side: int in range(2):
+			var near: Vector3 = _phone_feet(int(entry["a"]) if side == 0 else int(entry["b"]))
+			var far: Vector3 = _phone_audio_pos(int(entry["b"]) if side == 0 else int(entry["a"]))
+			# A little slack over the host's pickup radius: remote players are drawn slightly behind.
+			var dist: float = at.distance_to(near) if near.is_finite() else INF
+			if dist < best and dist <= VoiceRelayScript.PHONE_PICKUP + 1.5 and far.is_finite():
+				best = dist
+				out = far
+	return out
+
+
+## Every frame: ring the ringing phones where they are, and keep the call line and dial strip on the HUD.
+func _phone_tick(delta: float) -> void:
+	_ring_timer -= delta
+	if _ring_timer <= 0.0:
+		_ring_timer = RING_INTERVAL
+		for entry: Dictionary in phone_view:
+			if int(entry["state"]) == PhoneCallsScript.State.RINGING:
+				var at: Vector3 = _phone_audio_pos(int(entry["b"]))
+				if at.is_finite():
+					game.sfx.play_at("ring", at, 1.0, -3.0)
+	if _dial_until > 0.0 and _now() >= _dial_until:
+		_close_dial()
+	_update_phone_label()
+
+
+func _update_phone_label() -> void:
+	if not is_instance_valid(_phone_label):
+		return
+	var text: String = ""
+	var mine: int = my_phone_item()
+	var entry: Dictionary = _view_call_of(mine) if mine >= 0 else {}
+	var key: String = game._glyph("phone_call")
+	if not entry.is_empty():
+		var other: int = int(entry["b"]) if int(entry["a"]) == mine else int(entry["a"])
+		if int(entry["state"]) == PhoneCallsScript.State.RINGING:
+			if int(entry["b"]) == mine:
+				text = "%s CALLING  -  %s to answer" % [_phone_name(other), key]
+			else:
+				text = "CALLING %s ...  -  %s to hang up" % [_phone_name(other), key]
+		else:
+			var seconds: int = maxi(0, int((Time.get_ticks_msec() - int(entry["since_ms"])) / 1000))
+			text = "ON CALL: %s %d:%02d  -  %s to hang up" % [_phone_name(other), seconds / 60, seconds % 60, key]
+	elif _dial_until > 0.0:
+		var parts: PackedStringArray = PackedStringArray()
+		for index: int in range(_dial_targets.size()):
+			var label: String = "%d %s" % [index + 1, Factions.get_crew(phone_crew(_dial_targets[index]))["short"]]
+			parts.append(">%s<" % label if index == _dial_index else " %s " % label)
+		var controls: String = "D-PAD L/R pick  -  A call  -  B cancel" if game.using_pad else "1-%d pick  -  %s call  -  ESC cancel" % [_dial_targets.size(), key]
+		text = "DIAL   %s     %s" % ["  ".join(parts), controls]
+	_phone_label.text = text
+	_phone_label.visible = not text.is_empty() and (phase == "live" or phase == "buy")
+
+
+# --------------------------------------------------------------------- host: phone calls
+
+## net.voice_phones: the two phone positions of every LIVE call (a carried phone is at its holder).
+func _host_live_lines() -> Array:
+	var lines: Array = []
+	for entry: Dictionary in _calls.calls:
+		if int(entry["state"]) != PhoneCallsScript.State.LIVE:
+			continue
+		var a: Vector3 = _host_phone_pos(int(entry["a"]))
+		var b: Vector3 = _host_phone_pos(int(entry["b"]))
+		if a.is_finite() and b.is_finite():
+			lines.append({"a": a, "b": b})
+	return lines
+
+
+func _host_phone_pos(item: int) -> Vector3:
+	var data: Dictionary = items.get(item, {})
+	if data.is_empty() or bool(data.get("hidden", false)):
+		return Vector3.INF
+	var holder: int = int(data.get("holder", 0))
+	return _host_pos(holder) if holder != 0 else data.get("pos", Vector3.INF)
+
+
+func _host_broadcast_calls() -> void:
+	net.broadcast_phone_calls(_calls.to_wire())
+
+
+## A private line to whoever carries `item` (nobody if it lies on the ground).
+func _notify_phone(item: int, text: String) -> void:
+	var holder: int = _holder(item)
+	if holder > 0:
+		net.send_phone_notice(holder, text)
+
+
+## net.host_phone_request: dial / answer / hang up. The phone in play is always the one the sender CARRIES
+## (a stolen phone dials and answers as its owners); the call gate and the Day's phase are checked here.
+func _host_phone_request(from_id: int, action: String, item: int) -> void:
+	if not active or (phase != "live" and phase != "buy"):
+		return
+	if net.is_dead(from_id):
+		net.send_phone_notice(from_id, "You can't use a phone while you're down.")
+		return
+	var mine: int = _phone_item_of(from_id)
+	if mine < 0:
+		net.send_phone_notice(from_id, _phone_hint())
+		return
+	match action:
+		"dial":
+			if not _host_may_call(from_id):
+				return
+			var target: Dictionary = items.get(item, {})
+			if not is_phone(item) or target.is_empty() or bool(target.get("hidden", false)) or not str(target.get("banked", "")).is_empty():
+				net.send_phone_notice(from_id, "Wrong number.")
+				return
+			var problem: String = _calls.dial(mine, item)
+			if not problem.is_empty():
+				net.send_phone_notice(from_id, problem)
+				return
+			_host_broadcast_calls()
+		"answer":
+			if _calls.answer(mine):
+				_tally("voice_calls")
+				_host_broadcast_calls()
+		"hangup":
+			var ended: Dictionary = _calls.hang_up(mine)
+			if not ended.is_empty():
+				_host_call_ended(ended, "hangup", mine)
+
+
+## Bookkeeping and private notices once a call is gone. `by_item` is the phone that hung up (or -1).
+func _host_call_ended(entry: Dictionary, reason: String, by_item: int = -1) -> void:
+	var seconds: int = int(float(entry.get("live_seconds", 0.0)))
+	if seconds > 0:
+		_tally("voice_call_seconds", seconds)
+	var a: int = int(entry["a"])
+	var b: int = int(entry["b"])
+	match reason:
+		"noanswer":
+			_notify_phone(a, "No answer.")
+		"hangup":
+			var other: int = b if by_item == a else a
+			_notify_phone(other, "%s hung up." % _phone_name(by_item))
+		"timeout":
+			_notify_phone(a, "The call dropped after 3 minutes.")
+			_notify_phone(b, "The call dropped after 3 minutes.")
+		"left":
+			_notify_phone(a, "The line went dead.")
+			_notify_phone(b, "The line went dead.")
+		_:
+			_notify_phone(a, "The call ended.")
+			_notify_phone(b, "The call ended.")
+	_host_broadcast_calls()
+
+
+func _host_end_all_calls(reason: String) -> void:
+	var ended: Array[Dictionary] = _calls.clear(reason)
+	for entry: Dictionary in ended:
+		_host_call_ended(entry, reason)
+
+
+func _host_tick_calls(delta: float) -> void:
+	for entry: Dictionary in _calls.tick(delta):
+		_host_call_ended(entry, str(entry["reason"]))
+
+
 # --------------------------------------------------------------------- chat
 
 func _ensure_chat() -> void:
@@ -1260,7 +1642,7 @@ func _ensure_chat() -> void:
 ## Calls to another crew need a phone in hand (the host checks too, via net.call_gate).
 func _send_chat(channel: String, text: String) -> void:
 	if channel.begins_with("call:") and _phone_of(net.my_id()).is_empty():
-		_system("No phone in hand. Your crew's phone sits at your HQ spawn; whoever holds it makes the calls.")
+		_system(_phone_hint())
 		return
 	net.send_chat(channel, text)
 
@@ -1307,6 +1689,7 @@ func _system(text: String) -> void:
 func _host_tick(delta: float) -> void:
 	if phase.is_empty():
 		return
+	_host_tick_calls(delta)
 	time_left -= delta
 	_broadcast_timer -= delta
 	var ended: bool = time_left <= 0.0
@@ -1366,6 +1749,8 @@ func _host_broadcast() -> void:
 
 
 func _host_set_phase(new_phase: String, seconds: float) -> void:
+	if new_phase != "buy" and new_phase != "live":
+		_host_end_all_calls("day")
 	phase = new_phase
 	time_left = seconds
 	net.accept_hits = new_phase == "live"
@@ -1462,6 +1847,7 @@ func _host_place(item: int, crew_id: String, message: String) -> void:
 
 ## Each morning every crew's phone is back where the crew spawns (whoever stole it yesterday lost it overnight).
 func _host_place_phones(crews: Array[String]) -> void:
+	_host_end_all_calls("day")
 	for crew_id: String in Factions.ORDER:
 		var item: int = phone_item(crew_id)
 		if not crews.has(crew_id):
@@ -1586,6 +1972,10 @@ func _host_item_request(from_id: int, action: String, item: int, pos: Vector3) -
 		_:
 			return
 	net.broadcast_item(item, data)
+	# Picking up a ringing phone answers it.
+	if action == "pickup" and phone and _calls.answer(item):
+		_tally("voice_calls")
+		_host_broadcast_calls()
 
 
 func _host_payout(item: int, crew_id: String) -> void:
