@@ -7,13 +7,16 @@ The cloud session could not run Windows, a GPU, real Steam, a microphone or real
 ---
 
 ```text
-You are the lead for Project Fast Talkers (Godot 4.4.1, GDScript). Continue the cloud session's overnight heavy lift.
+You are the lead for Project Fast Talkers (Godot 4.4.1, GDScript): a round-based DEAL-MAKING game with guns in it
+(not a shooter with deals). A match is a five-Day Week; crews win on banked money, never kills. Continue the cloud
+session's overnight heavy lift.
 
 SETUP (do these yourself, in order):
 1. Preserve local Windows-only changes: run `git status`; commit or stash anything local before switching branches.
 2. `git fetch origin` then `git checkout cloud/overnight-heavy-lift` (draft PR #2 targets cloud/map-integration).
    Never edit or merge master. Never export over the user's exe until local validation passes.
-3. Read, in order: CLAUDE_HANDOFF.md (newest entry at the end: "Overnight heavy lift"), docs/CLAUDE_DESKTOP_PICKUP.md,
+3. Read, in order: docs/GAME_VISION.md (what this game is: a round-based deal-making game, Week = match,
+   Day = round; use its five-question design test on every feature), CLAUDE_HANDOFF.md (newest entry at the end: "Overnight heavy lift"), docs/CLAUDE_DESKTOP_PICKUP.md,
    docs/NETWORK_SECURITY_AND_STEAM.md, docs/VOICE_CHAT.md, docs/AUDIO_PASS.md, docs/OVERNIGHT_CITY_PERF.md,
    docs/VEHICLE_TIDY_HANDOFF.md ("Overnight pass"), docs/SUBROSA_NBD_RESEARCH.md.
 4. Take over `Run Tests.cmd`: add the suites city_audit, building_landmarks, sfx_audio, social_features,

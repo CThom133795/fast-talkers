@@ -1,5 +1,7 @@
 # Project Fast Talkers — shared handoff
 
+**Start with `docs/GAME_VISION.md`, a one-page picture of the game: a round-based deal-making game where a match is a Week and each round is a Day.**
+
 **Newest pickup (2026-09-30 overnight): branch `cloud/overnight-heavy-lift`. Read the "Overnight heavy lift" entry at the end of this file first. The paste-ready Claude Desktop command, which recreates the sub-agent split, is in `docs/CLAUDE_DESKTOP_PICKUP.md`.**
 
 **Earlier pickup: Codex's city-detail pass is complete. Read `docs/CITY_DETAIL_HANDOFF.md` and the newest entry below. Historical ownership notes do not block the next coordinated pass.**
