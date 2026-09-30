@@ -244,7 +244,7 @@ func _cell(at: Vector2, decor: bool = false) -> Node3D:
 
 func _clutter_claim(at: Vector2, radius: float, kind: String, roof: bool = false) -> bool:
 	if not roof:
-		if not can_place(at, radius):
+		if not can_place(at, radius) or w.solid_near(at, radius):
 			return false
 		w._occupied.append(at)
 	w.city_clutter.append({"kind": kind, "at": at, "radius": radius, "roof": roof})

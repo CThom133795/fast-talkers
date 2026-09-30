@@ -291,3 +291,81 @@ The software-GL column is this doc's "Final" draw calls.
 - POTATO MODE saves only 0–30 draw calls, because most of the cost is buildings and collision-bearing geometry,
   which it must keep. To help minimum-spec PCs it would need a shorter draw distance and fewer shadows as well,
   not only hidden decor.
+
+## Map 0.8: fill, alleys, chicanes, enterable ratio (branch lead/city-fill)
+
+User ask: "tighten and polish the map while adding new buildings to fill out all the huge gaps", 50-75% of
+buildings enterable, big empty sightlines broken, life outside Midtown. Metrics come from `tests/city_fill.gd`
+(headless; prints `CITY FILL RESULT`), which also writes `work/captures/city_fill_map.png` (land-use map).
+Screenshots: `docs/captures/map08/` (640x360 JPEG; `land_use_map.jpg` is the audit map: yellow = enterable
+building, slate = solid, grey = road, green = park, red = empty land).
+
+### Before and after
+
+| Metric | Before (dev) | After |
+|---|---:|---:|
+| Buildings (one record per building, `world.buildings`) | 136 | 293 |
+| Enterable (12 shops + 8 plots + prefabs) | 20 (14.7%) | **242 (82.6%)** |
+| Largest empty land square (4 m grid, 1.5 m off roads/buildings/props) | 92 m | **44 m** |
+| Land cells empty | 43% (footprint-only test) | 24% (dressed ground counted) |
+| Road sightlines over 120 m (of ~2,600 rays at 1.3 m) | 873 | 610 |
+| ...over 150 m / 200 m / 300 m | not measured | 444 / 258 / 93 |
+| Footprint overlaps | 0 | 0 |
+
+Enterable per district after the pass: Midtown 89%, Nightlife 100%, West End 100%, Old Town 100%, Motor Mile
+100%, East Shore 100%, South Docks 90%, Old Wharf 86%, Slip Side 71%, Canal Market 67%, Strip 54%; the four
+crew kits keep their hand-authored towers (Lantern Row, Kingsway 0%; Solana and Morris have the few shops
+converted below), so they are the next place to convert.
+
+### What changed
+
+- `world.buildings` registry (enterable or solid), `_blockers`/`solid_near` (hand-placed dressing), `eye_blockers`.
+- `scripts/city_fill.gd` (new, seeded, own RNG): frontage lots along every street and the quay (8 m
+  promenade), aprons (raised 0.16 m plinths), a 5 m ALLEY every 3-5 lots (dumpsters, bags), warehouse/bar/auto
+  lots keep 3.4 m side gaps, rear zones and doorway strips stay clear (audited by `building_landmarks`/`city_audit`),
+  three dead-end streets cut into big empty blocks (Alder Row, Birch Lane, Cedar Court).
+- `_fill_block` towers become prefabs (brick/flats -> walkup/row_shop, neon -> bar, midrise -> office,
+  warehouse -> warehouse) with a 5 m alley between the two rows; hand-placed Cantina, Taller, Kwik Stop, Spin
+  City, Harbor Office, Fish Hall, Canal Lofts, Produce hall are enterable prefabs too (`_tower(..., enter)`).
+- Sightlines: 2D planner places CHICANES (two solid kerb islands 20 m apart, each reaching 1 m past the
+  centre line: hedge and trees / kiosk / billboard on a planter, 5 m gap) where street views run past ~110 m, and
+  construction hoardings where a view runs off a street's end across open ground. `route()` and the GPS weave
+  round them (`route_length` stays the raw graph distance, so the HQ fairness checks are unchanged).
+  Midtown's ring keeps its open boulevards (no room between the crossings, and the practice wheelman loops there).
+  Not met: "no sightline over 150 m". The central grid (Meridian, Halcyon, the rings, Nightlife North/Bayside)
+  still has 400+ m views; `city_fill` guards a regression floor (over 300 m <= 130, unbroken <= 8).
+- Life: 27 parked cars (appended at the END of `parked_vehicles`), sidewalk newspaper boxes/planters/hydrants,
+  14 washing lines across alleys (`potato_optional`), lit windows from the prefabs; brand names renamed
+  (CASINO ORIOLE, AMBER STAR CLUB).
+- Draw calls: far massing stand-ins (one vertex-coloured mesh per 96 m cell; prefabs and shells cull at 110 m),
+  interiors keep their own short ranges.
+- **Radar fix (found while measuring):** `draw_map` drew every footprint, road and door every frame (each a canvas
+  draw call, 600+ once the city filled). It now culls off-canvas shapes; this alone took the baseline harbor view
+  from 655 to 437 calls.
+- Tests: new `tests/city_fill.gd`, `tests/capture_fill.gd`; `capture_perf.gd` gets `hide=<node prefix>`;
+  `city_audit` skips upper-floor doors (covered by stair_walk/prefabs) and exempts the deliberate islands;
+  `map_interiors` audits only the 12 original shops; `pocket_park` trees keep the crossing paths open.
+
+### Performance (RTX 3080, windowed 1280x720, vsync off, dusk, `capture_perf.gd` settle 30 sample 60)
+
+| View | Draw calls | Frame time (fps) | Baseline calls / fps |
+|---|---:|---:|---:|
+| midtown | 1,193 | 11.7 ms (85) | 1,324 / 83 |
+| midtown_north_long | 1,478 | 14.0 ms (71) | 1,589 / 74 |
+| harbor | 486 | 8.5 ms (117) | 655 / 96 |
+| strip_beach | 865 | 11.2 ms (89) | 845 / 93 |
+| lantern_row | 574 | 9.1 ms (110) | 662 / 97 |
+| uptown | 641 | 9.5 ms (105) | 762 / 97 |
+| motor_mile | 1,338 | 12.8 ms (78) | 1,297 / 78 |
+| nightlife | 993 | 12.5 ms (79) | 932 / 89 |
+| gunstore | 1,106 | 10.6 ms (94) | 1,116 / 94 |
+| exchange_interior | 1,031 | 11.7 ms (85) | 1,118 / 83 |
+| aerial | 1,538 | 14.7 ms (68) | 1,574 / 72 |
+
+Every view is at most 1,538 calls and at least 68 fps.
+
+### Known issues
+
+- Long central sightlines (above); Lantern Row and Kingsway crews' towers are still solid.
+- About a quarter of the land is still open ground (mostly 15-40 m rims behind the quay promenade).
+- A prefab costs ~25-30 calls when seen from the street; the far LOD keeps that to the 110 m circle.

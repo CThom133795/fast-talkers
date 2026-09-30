@@ -174,6 +174,13 @@ func _run() -> void:
 					on_bridge = on_bridge or (bridge["rect"] as Rect2).grow(4.0).has_point(at)
 				if on_bridge:
 					continue
+				# Deliberate traffic-calming kerb islands (city_fill.gd) stand on the carriageway.
+				var on_island: bool = false
+				for island: PackedVector2Array in world.calming_islands:
+					for grown: PackedVector2Array in Geometry2D.offset_polygon(island, 2.5):
+						on_island = on_island or Geometry2D.is_point_in_polygon(at, grown)
+				if on_island:
+					continue
 				var ground: float = _ground(at, 3.0)
 				if ground > 0.12 or ground < -0.1:
 					steps.append("%s at %s: %.2f (%s)" % [road.get("name", "road"), at.snapped(Vector2(0.1, 0.1)), ground, _top_hit(at)])
@@ -206,9 +213,15 @@ func _run() -> void:
 			continue
 		world.set_door_open(index, true, true)
 	await _frames(40)
+	var upstairs_skipped: int = 0
 	for index: int in range(world.interactable_doors.size()):
 		var door: Dictionary = world.interactable_doors[index]
 		if door["kind"] == "lift" or not door.has("inside") or not door.has("outside") or world.is_door_locked(index):
+			continue
+		# Ground-level doorways only (as documented above): flat doors on upper floors of the 0.8 prefabs are
+		# walked by tests/stair_walk.gd and tests/prefabs.gd with the real player.
+		if (door["position"] as Vector3).y > 1.0:
+			upstairs_skipped += 1
 			continue
 		var exclude: Array[RID] = []
 		for leaf: Node in world._door_nodes[index]:
@@ -223,6 +236,7 @@ func _run() -> void:
 			print("  DOOR %d %s blocked by %s" % [index, door["label"], blocked])
 		_check(blocked.is_empty(), "Doorway %d (%s) walkable inside to outside" % [index, door["label"]])
 
+	print("  REPORT %d upper-floor doors are covered by stair_walk / prefabs, not by this sweep" % upstairs_skipped)
 	# 4. Shop signs and neon are not copy-pasted around the city.
 	var texts: Dictionary = {}
 	var stack: Array[Node] = [world]

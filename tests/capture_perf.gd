@@ -38,17 +38,31 @@ func _run() -> void:
 	game.settings_path = "user://perf_settings.cfg"
 	root.add_child(game)
 	var only: PackedStringArray = PackedStringArray()
+	var hide_prefix: String = ""
 	var settle_frames: int = 30
 	var sample: int = 60
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("views="):
 			only = arg.trim_prefix("views=").split(",", false)
+		elif arg.begins_with("hide="):
+			hide_prefix = arg.trim_prefix("hide=")
 		elif arg.begins_with("settle="):
 			settle_frames = maxi(2, int(arg.trim_prefix("settle=")))
 		elif arg.begins_with("sample="):
 			sample = maxi(1, int(arg.trim_prefix("sample=")))
 	await _frames(30)
 	game._start_free_roam()
+	if not hide_prefix.is_empty():
+		# Diagnostic: hide the top-level nodes of the world whose name starts with the prefix.
+		var hidden: int = 0
+		for child: Node in game.world.get_children():
+			var match_any: bool = false
+			for prefix: String in hide_prefix.split(","):
+				match_any = match_any or str(child.name).begins_with(prefix)
+			if match_any and child is Node3D:
+				(child as Node3D).visible = false
+				hidden += 1
+		print("HIDDEN ", hidden, " nodes starting with ", hide_prefix)
 	game.player.invulnerable = true
 	for view: Array in VIEWS:
 		if not only.is_empty() and not only.has(view[0]):
