@@ -162,3 +162,27 @@ A single developer should be able to launch a test week without another human an
 - Reach a Friday/week result and clean reset.
 - Re-enter the Armory separately for unconstrained free-roam systems testing.
 
+
+
+### Explicit test ladder — three required paths
+
+The user wants three distinct but compatible ways to test the same core game loop:
+
+1. **Solo contract test**
+   - One developer/player can run the Monday–Friday game loop alone.
+   - Bots and/or debug controls fill missing crews.
+   - Purpose: validate contract logic, economy, ownership, round transitions, fail/success states, and pacing without waiting for other people.
+   - Bots should remain simple and deterministic.
+
+2. **Human + bot mixed test**
+   - One or more real players can join while bots fill remaining crew slots.
+   - Purpose: test real movement/combat/driving/social decisions while still guaranteeing enough actors exist to exercise the contract loop.
+   - Human players should use the same systems and rules as a future full match; bots are just seat-fillers.
+   - Avoid building a separate ruleset for this mode.
+
+3. **Full human multiplayer match**
+   - Multiple real players fill the crews with bots disabled or optional.
+   - Purpose: validate the actual social game: negotiation, betrayal, exclusion, ambushes, team coordination, pacing, economy, and week-long grudges/consequences.
+   - This is the highest-value test for the core design thesis and should ultimately be the source of truth for balance decisions.
+
+Architect these as different population configurations of the **same match/round/contract state machine**, not three separate game modes with duplicated logic. The ideal flow is that the developer changes only the player/bot population and debug affordances, while Monday–Friday progression, objectives, economy, scoring, round resolution and week reset remain identical.
