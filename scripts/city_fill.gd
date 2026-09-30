@@ -91,8 +91,7 @@ var _sign_index: int = 0
 func _init(world: Node3D) -> void:
 	w = world
 	rng.seed = SEED
-	if ResourceLoader.exists(PREFABS_PATH):
-		prefabs = load(PREFABS_PATH)
+	prefabs = w._prefab_library()
 
 
 func build() -> void:
@@ -101,13 +100,14 @@ func build() -> void:
 	for road_index: int in range(w.roads.size()):
 		_frontage(road_index)
 	_coast_frontage()
+	_far_massing()
 	for key: Vector3i in _cells:
 		var node: Node3D = _cells[key]
 		w._finish(node)
 		for child: Node in node.get_children():
 			if child is GeometryInstance3D and not child is Label3D:
-				(child as GeometryInstance3D).visibility_range_end = 220.0
-				(child as GeometryInstance3D).visibility_range_end_margin = 12.0
+				(child as GeometryInstance3D).visibility_range_end = w.NEAR_RANGE
+				(child as GeometryInstance3D).visibility_range_end_margin = 6.0
 				w._detail_ranges.append(child)
 	w._blockers_off = false
 	w._xf = Transform3D.IDENTITY
@@ -517,7 +517,7 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 	# Apron: a raised paved plinth under the lot and the sidewalk in front of it (skipped where the
 	# lot already stands on a block plinth).
 	var ground: float = _height_at(center)
-	if ground < 0.05:
+	if ground < 0.05 and OS.get_environment("FT_NOAPRON") != "1":
 		var apron_depth: float = dp + _setback - _apron_front + 1.0
 		var apron_center: Vector2 = center - back * ((_setback - _apron_front) * 0.5 - 0.5)
 		var yaw: float = atan2(-u.y, u.x)
@@ -534,7 +534,7 @@ func _build_lot(kind: String, district: String, center: Vector2, u: Vector2, bac
 	var built: bool = false
 	if prefabs != null and prefabs.kinds().has(kind):
 		built = _prefab(kind, center, front, fw, dp, floors, color, sign_text, district)
-	if not built:
+	if not built and OS.get_environment("FT_NOSHELL") != "1":
 		_solid_shell(kind, center, front, fw, dp, floors, color, sign_text)
 	_add_obb(center, u, back, fw * 0.5, dp * 0.5)
 	placed.append({"kind": kind, "center": center, "front": front, "size": Vector2(fw, dp), "district": district, "prefab": built, "floors": floors})
@@ -560,6 +560,8 @@ func _prefab(kind: String, center: Vector2, front: Vector2, fw: float, dp: float
 	if not bool((node as Node3D).get_meta("enterable", true)):
 		record["enterable"] = false
 	w._finish(node as Node3D)
+	w.limit_range(node as Node3D, w.NEAR_RANGE)
+	w.lod_lots.append({"center": center, "size": Vector3(fw, 3.4 * floors + 1.2, dp), "yaw": atan2(front.x, front.y), "color": color})
 	return true
 
 
@@ -611,6 +613,59 @@ func _solid_shell(kind: String, center: Vector2, front: Vector2, fw: float, dp: 
 	var sign_at: Vector3 = Vector3(center.x + front.x * (dp * 0.5 + 0.3), ground + 4.3, center.y + front.y * (dp * 0.5 + 0.3))
 	w._neon(sign_text, sign_at, yaw, SIGN_COLORS[rng.randi() % SIGN_COLORS.size()], clampi(int(fw * 4.2), 40, 80))
 	w._roofs.append({"center": center, "size": Vector3(fw, height, dp), "yaw": yaw, "top": ground + height + 0.32, "front": Vector3(front.x, 0, front.y), "business": true})
+	w.lod_lots.append({"center": center, "size": Vector3(fw, height + 0.3, dp), "yaw": yaw, "color": color})
+
+
+# --- Far stand-ins ------------------------------------------------------------------------------
+
+## One vertex-coloured mesh per 96 m cell holding every fill building's massing box (five faces, flat
+## colour, no windows): beyond NEAR_RANGE the detailed shells and prefabs are culled and this single
+## draw per cell takes over, so a long street costs a handful of calls instead of hundreds.
+func _far_massing() -> void:
+	var by_cell: Dictionary = {}
+	for lot: Dictionary in w.lod_lots:
+		var at: Vector2 = lot["center"]
+		var key: Vector2i = Vector2i(floori(at.x / 96.0), floori(at.y / 96.0))
+		if not by_cell.has(key):
+			by_cell[key] = []
+		(by_cell[key] as Array).append(lot)
+	var material: StandardMaterial3D = w._material(Color.WHITE, 0.95)
+	material = material.duplicate() as StandardMaterial3D
+	material.vertex_color_use_as_albedo = true
+	var keys: Array = by_cell.keys()
+	keys.sort()
+	for key: Vector2i in keys:
+		var tool: SurfaceTool = SurfaceTool.new()
+		tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for lot: Dictionary in by_cell[key]:
+			_massing_box(tool, lot["center"], lot["size"], float(lot["yaw"]), lot["color"])
+		var instance: MeshInstance3D = MeshInstance3D.new()
+		instance.mesh = tool.commit()
+		instance.material_override = material
+		instance.name = "FarMassing %d %d" % [key.x, key.y]
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.visibility_range_begin = w.NEAR_RANGE
+		w.add_child(instance)
+
+
+func _massing_box(tool: SurfaceTool, center: Vector2, size: Vector3, yaw: float, color: Color) -> void:
+	var basis: Basis = Basis(Vector3.UP, yaw)
+	var hx: float = size.x * 0.5
+	var hz: float = size.z * 0.5
+	var corners: Array[Vector3] = []
+	for y: float in [0.0, size.y]:
+		for corner: Vector2 in [Vector2(-hx, -hz), Vector2(hx, -hz), Vector2(hx, hz), Vector2(-hx, hz)]:
+			corners.append(Vector3(center.x, 0, center.y) + basis * Vector3(corner.x, y, corner.y))
+	# Godot's front faces wind clockwise; the sides are shaded a little darker than the roof.
+	var faces: Array = [[4, 7, 6, 5, 1.0], [0, 4, 5, 1, 0.8], [1, 5, 6, 2, 0.7], [2, 6, 7, 3, 0.8], [3, 7, 4, 0, 0.7]]
+	for face: Array in faces:
+		var shade: Color = color * float(face[4])
+		shade.a = 1.0
+		var normal: Vector3 = (corners[face[1]] - corners[face[0]]).cross(corners[face[2]] - corners[face[0]]).normalized()
+		for index: int in [0, 2, 1, 0, 3, 2]:
+			tool.set_color(shade)
+			tool.set_normal(normal)
+			tool.add_vertex(corners[face[index]])
 
 
 # --- Alleys ----------------------------------------------------------------------------------------
@@ -619,6 +674,8 @@ func _solid_shell(kind: String, center: Vector2, front: Vector2, fw: float, dp: 
 ## street end. The middle 2.4 m stays clear. `at` is on the sidewalk line of the alley's mouth.
 func _alley(at: Vector2, u: Vector2, back: Vector2, depth: float) -> void:
 	alleys.append({"at": at, "dir": back, "width": ALLEY, "depth": depth})
+	if OS.get_environment("FT_NOALLEY") == "1":
+		return
 	var node: Node3D = _cell_node(at)
 	w._target = node
 	w._xf = Transform3D.IDENTITY

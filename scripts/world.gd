@@ -77,7 +77,13 @@ var _blockers: Array[Rect2] = []
 ## The 0.8 fill pass (scripts/city_fill.gd): its `placed` lots and `alleys` are for the tests.
 var city_fill: RefCounted
 var _blockers_off: bool = false
+var _road_boxes: Array[Rect2] = []
 var _solid_grid: Dictionary = {}
+## Buildings the fill passes made, for the far-distance stand-ins (city_fill.gd builds one merged, vertex-coloured
+## massing mesh per 96 m cell from these): {center (x/z), size (frontage, height, depth), yaw, color}.
+var lod_lots: Array[Dictionary] = []
+## Beyond this distance a fill building is drawn as its massing box only.
+const NEAR_RANGE: float = 110.0
 ## Districts for the map: {name, rect, color, crew, polys, label_at}.
 var districts: Array[Dictionary] = []
 ## Named places for the map and mission sites: {name, at, neutral}.
@@ -180,7 +186,8 @@ func _ready() -> void:
 		Interiors.new(self, shop).build_interior()
 	# Map 0.8: street-frontage infill (prefab buildings, aprons, alleys) before the clutter pass.
 	city_fill = CityFill.new(self)
-	city_fill.build()
+	if OS.get_environment("FT_FILL") != "off":
+		city_fill.build()
 	CityDetail.new(self).build()
 	_xf = Transform3D.IDENTITY
 	_xf_yaw = 0.0
@@ -390,14 +397,39 @@ func draw_map(canvas: Control, to_screen: Callable, scale: float) -> void:
 	for bridge: Dictionary in bridges:
 		var rect: Rect2 = bridge["rect"]
 		canvas.draw_rect(Rect2(to_screen.call(Vector3(rect.position.x, 0, rect.position.y)), rect.size * scale), Color(0.52, 0.36, 0.26))
-	for road: Dictionary in roads:
+	if _road_boxes.size() != roads.size():
+		_road_boxes.clear()
+		for road: Dictionary in roads:
+			var points: PackedVector2Array = road["points"]
+			var box: Rect2 = Rect2(points[0], Vector2.ZERO)
+			for point: Vector2 in points:
+				box = box.expand(point)
+			_road_boxes.append(box.grow(float(road["width"])))
+	var canvas_rect: Rect2 = Rect2(Vector2.ZERO, canvas.size)
+	for index: int in range(roads.size()):
+		var road: Dictionary = roads[index]
+		var box: Rect2 = _road_boxes[index]
+		var corner_a: Vector2 = to_screen.call(Vector3(box.position.x, 0, box.position.y))
+		var corner_b: Vector2 = to_screen.call(Vector3(box.end.x, 0, box.end.y))
+		if not canvas_rect.intersects(Rect2(corner_a, Vector2.ZERO).expand(corner_b)):
+			continue
 		var line: PackedVector2Array = _screen_poly(road["points"], to_screen)
 		canvas.draw_polyline(line, road_color, maxf(float(road["width"]) * scale, 1.5))
-	for outline: PackedVector2Array in footprint_polys:
-		canvas.draw_colored_polygon(_screen_poly(outline, to_screen), Color(0.27, 0.29, 0.31))
+	# Only the buildings that can show on this canvas are drawn: the radar is redrawn every frame and the
+	# city has hundreds of footprints, each of them a canvas draw call.
+	var view: Rect2 = Rect2(Vector2.ZERO, canvas.size)
+	for index: int in range(footprint_polys.size()):
+		var bounds: Rect2 = footprints[index]
+		var at: Vector2 = to_screen.call(Vector3(bounds.get_center().x, 0, bounds.get_center().y))
+		var reach: float = bounds.size.length() * scale
+		if not view.grow(reach).has_point(at):
+			continue
+		canvas.draw_colored_polygon(_screen_poly(footprint_polys[index], to_screen), Color(0.27, 0.29, 0.31))
 	if scale > 0.9:
 		for door: Dictionary in interactable_doors:
-			canvas.draw_circle(to_screen.call(door["position"]), maxf(scale * 1.2, 2.0), Color(0.45, 0.95, 0.6, 0.9))
+			var dot: Vector2 = to_screen.call(door["position"])
+			if view.grow(4.0).has_point(dot):
+				canvas.draw_circle(dot, maxf(scale * 1.2, 2.0), Color(0.45, 0.95, 0.6, 0.9))
 
 ## Swings a walk-in door open or shut (the garage's shutter rolls). Doors are physical: a
 ## shut door blocks bodies and bullets, an open one leaves the doorway clear.
@@ -2636,7 +2668,7 @@ var _prefab_checked: bool = false
 func _prefab_library() -> Variant:
 	if not _prefab_checked:
 		_prefab_checked = true
-		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd"):
+		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd") and OS.get_environment("FT_PREFABS") != "off":
 			_prefab_lib = load("res://scripts/buildings/prefabs.gd")
 	return _prefab_lib
 
@@ -2671,8 +2703,19 @@ func _fill_prefab(style: String, center: Vector2, lot: Vector2, front: Vector3, 
 			(record["footprints"] as Array).append(footprint_polys.size() - 1)
 			buildings.pop_back()
 		_finish(node as Node3D)
+		limit_range(node as Node3D, NEAR_RANGE)
+		lod_lots.append({"center": center, "size": Vector3(lot.x, height, lot.y), "yaw": 0.0, "color": color})
 		return true
 	return false
+
+## Draws every mesh under `node` only within `metres` (interiors keep their own shorter range).
+func limit_range(node: Node3D, metres: float) -> void:
+	for child: Node in node.find_children("*", "GeometryInstance3D", true, false):
+		var geometry: GeometryInstance3D = child as GeometryInstance3D
+		if geometry.visibility_range_end <= 0.0:
+			geometry.visibility_range_end = metres
+			geometry.visibility_range_end_margin = 6.0
+		_detail_ranges.append(geometry)
 
 ## A water tank and a vent stack on a roof (breaks up the skyline; nothing solid).
 func _rooftop(center: Vector2, size: Vector2, height: float) -> void:
