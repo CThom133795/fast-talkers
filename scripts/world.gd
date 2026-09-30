@@ -192,8 +192,7 @@ func _ready() -> void:
 		Interiors.new(self, shop).build_interior()
 	# Map 0.8: street-frontage infill (prefab buildings, aprons, alleys) before the clutter pass.
 	city_fill = CityFill.new(self)
-	if OS.get_environment("FT_FILL") != "off":
-		city_fill.build()
+	city_fill.build()
 	CityDetail.new(self).build()
 	_xf = Transform3D.IDENTITY
 	_xf_yaw = 0.0
@@ -2734,7 +2733,7 @@ var _prefab_checked: bool = false
 func _prefab_library() -> Variant:
 	if not _prefab_checked:
 		_prefab_checked = true
-		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd") and OS.get_environment("FT_PREFABS") != "off":
+		if ResourceLoader.exists("res://scripts/buildings/prefabs.gd"):
 			_prefab_lib = load("res://scripts/buildings/prefabs.gd")
 	return _prefab_lib
 
