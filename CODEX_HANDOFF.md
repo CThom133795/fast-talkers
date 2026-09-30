@@ -760,3 +760,15 @@ The user delegated design choices on improving the No Big Deal / Sub Rosa system
    - Phone calls are text chat. Voice calls over the phone are future work.
    - Movement and health are still client-side.
 4. City and perf (draw calls): sign text into a texture, a shared prop palette, and a POTATO draw distance.
+
+## 2026-09-30 night — Claude Desktop (lead): IN PROGRESS — Map 0.8 overnight pass
+The brief is `docs/TASKS/MAP_0_8_BRIEF.md` (the user's asks). Codex: don't edit on these branches; suggestions go in CLAUDE_HANDOFF.md.
+Worktrees next to the project, one branch each; the lead merges into `dev`:
+- `../ft-stairs` on `lead/stairs` (Sonnet): walkable stairs everywhere (sloped colliders in BuildingKit), the Halcyon Trust
+  stairwell to nowhere, and `tests/stair_walk.gd`.
+- `../ft-prefabs` on `lead/prefabs` (Sonnet): `scripts/buildings/prefabs.gd`, enterable seeded prefabs (walkup, row_shop,
+  warehouse, corner_store, office, bar, auto_shop), plus `tests/prefabs.gd`.
+- `../ft-city` on `lead/city-fill` (Sonnet): fill the gaps, alleys, break sightlines, 50–75% enterable, plus `tests/city_fill.gd`.
+- `../ft-lead` on `lead/controller` (lead): DONE. Steam signs in only when the online lobby opens, because Steam Input for
+  the Spacewar test app can take the pad. There is a warning with the fix, and the walkthrough is updated.
+Then: merge all into dev, run the full regression plus GPU perf, bump to 0.8, build the zip, update the local build, push.
