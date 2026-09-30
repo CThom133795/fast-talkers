@@ -4,8 +4,8 @@ extends SceneTree
 ## has one), keep every doorway clear, be walkable along its published routes (every stair lands on a floor), be
 ## deterministic for a seed, and stay inside a mesh budget. Prints "PREFABS RESULT: N checks, M failures".
 ## Run: godot --headless --path . --script res://tests/prefabs.gd
-const World = preload("res://scripts/world.gd")
 const Prefabs = preload("res://scripts/buildings/prefabs.gd")
+const StairWalk = preload("res://tests/stair_walk.gd")
 
 ## Where the test buildings go: far from the map (each building carries its own floors).
 const ORIGIN: Vector2 = Vector2(6000, 6000)
@@ -16,6 +16,9 @@ const NEEDS_ESCAPE: Array[String] = ["walkup", "warehouse", "corner_store", "row
 var checks: int = 0
 var failures: int = 0
 var world: Node3D
+var game: Variant
+var walker: Node3D
+var walk_nodes: Array[Node3D] = []
 var slot: int = 0
 
 
@@ -175,16 +178,89 @@ func _test_one(kind: String, size: Vector2, floors: int, seed_value: int) -> voi
 	_check(int(counts["meshes"]) <= 40, tag + " stays under 40 mesh instances (%d)" % counts["meshes"])
 	_check(int(counts["surfaces"]) <= 90, tag + " stays under 90 surfaces (%d)" % counts["surfaces"])
 	# Determinism: the same seed builds the same building.
+	if seed_value == 2:
+		walk_nodes.append(node)
 	var again: Node3D = _build(kind, size, floors, seed_value)
 	await _frames(1)
 	_check(_signature(node) == _signature(again), tag + " is deterministic")
 
 
+## The real FastPlayer (physics only, no jumps) up every rising route of the larger builds; headless Godot cannot capture
+## the mouse, so, like tests/stair_walk.gd, use a copy of player.gd with only the capture gate removed.
+func _make_walker() -> Node3D:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		return game.player
+	var source: String = FileAccess.get_file_as_string("res://scripts/player.gd")
+	source = source.replace("class_name FastPlayer" + char(10), "")
+	var gate: String = "var controls_active: bool = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and input_grace <= 0.0"
+	source = source.replace(gate, "var controls_active: bool = input_grace <= 0.0")
+	var script: GDScript = GDScript.new()
+	script.source_code = source
+	script.reload()
+	var node: CharacterBody3D = CharacterBody3D.new()
+	node.set_script(script)
+	game.add_child(node)
+	return node
+
+
+func _rises(route: Array) -> bool:
+	var low: float = 1000.0
+	var high: float = -1000.0
+	for point: Vector3 in route:
+		low = minf(low, point.y)
+		high = maxf(high, point.y)
+	return high - low > 0.5
+
+
+func _walk_case(label: String, node: Node3D, route: Array) -> void:
+	var points: Array[Vector3] = []
+	for point: Vector3 in route:
+		points.append(node.global_transform * point)
+	walker.reset_player(points[0] + Vector3(0, 0.08, 0))
+	walker.rotation.y = StairWalk.yaw_toward(points[1].x - points[0].x, points[1].z - points[0].z)
+	await _frames(8)
+	var stats: Dictionary = {}
+	var reached: bool = await StairWalk.walk_route(self, walker, points, 30.0, stats)
+	var want: float = points[points.size() - 1].y
+	var got: float = walker.global_position.y
+	var landed: bool = absf(got - want) < 0.4 and walker.is_on_floor()
+	_check(reached and landed, "%s walked by the real player: reached %s, feet y %.2f (want %.2f)" % [label, str(reached), got, want])
+
+
+func _walk_phase() -> void:
+	Engine.time_scale = 4.0
+	walker = _make_walker()
+	for node: Node3D in walk_nodes:
+		var routes: Dictionary = node.get_meta("routes")
+		var names: Array = routes.keys()
+		names.sort()
+		for route_name: String in names:
+			var route: Array = routes[route_name]
+			if not _rises(route):
+				continue
+			var tag: String = "%s %s" % [node.get_meta("kind"), route_name]
+			await _walk_case(tag + " UP", node, route)
+			var back: Array = route.duplicate()
+			back.reverse()
+			await _walk_case(tag + " DOWN", node, back)
+	Input.action_release("move_forward")
+	Engine.time_scale = 1.0
+
+
 func _run() -> void:
-	create_timer(160).timeout.connect(func() -> void: quit(2))
-	world = World.new()
-	root.add_child(world)
+	create_timer(165).timeout.connect(func() -> void:
+		push_error("Prefabs suite timed out")
+		quit(2))
+	game = (load("res://main.tscn") as PackedScene).instantiate()
+	game.settings_path = "res://.godot/test_settings.cfg"
+	root.add_child(game)
 	await _frames(3)
+	game._start_free_roam()
+	await _frames(5)
+	world = game.world
+	for guard: Variant in game._all_guards():
+		guard.set_present(false)
 	var only: String = ""
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("only="):
@@ -199,6 +275,8 @@ func _run() -> void:
 		await _test_one(kind, least + Vector2(6, 5), most, 2)
 		await _test_one(kind, least + Vector2(2, 9), mini(most, least_floors + 1), 3)
 		await _test_one(kind, least + Vector2(11, 3), least_floors, 4)
+	if not OS.get_cmdline_user_args().has("nowalk"):
+		await _walk_phase()
 	_check(Prefabs.build(world, "no_such_kind", ORIGIN, Vector2(10, 10), 0.0, 1, 1) == null, "an unknown kind is refused")
 	print("PREFABS RESULT: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures > 0 else 0)

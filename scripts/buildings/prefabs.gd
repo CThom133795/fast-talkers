@@ -483,7 +483,7 @@ class Ctx extends RefCounted:
 		kit.box(pos + normal * 0.03, Vector3(w + 0.26, h + 0.26, 0.06), m_trim, false, angle)
 		kit.box(pos + normal * 0.05, Vector3(w, h, 0.04), glass, false, angle)
 		kit.box(pos + normal * 0.09 - Vector3(0, h * 0.5 + 0.17, 0), Vector3(w + 0.4, 0.07, 0.24), m_trim, false, angle)
-		kit.box(pos - normal * (WALL_T + 0.01), Vector3(w, h, 0.04), m_pane_in, false, angle)
+		kit.box(pos - normal * (WALL_T + 0.01), Vector3(w, h, 0.04), tint if tint != null else m_pane_in, false, angle)
 		if with_ac:
 			kit.box(pos + normal * 0.3 - Vector3(0, h * 0.5 + 0.35, 0), Vector3(0.72, 0.44, 0.5), m_ac, false, angle)
 
@@ -1729,8 +1729,8 @@ static func _bar(c: Ctx) -> void:
 	c.door(Vector3(0, c.f0, hz - WALL_T * 0.5), 1.6, DOOR_H, Vector3.BACK, c.sign_text + " entrance")
 	c.door(Vector3(0, c.f0, -hz + WALL_T * 0.5), 1.4, DOOR_H, Vector3.FORWARD, c.sign_text + " alley door")
 	c.fascia(0.0, c.f0 + 3.3, minf(W_of(c), 7.0), 0.9, 40)
-	c.kit.box(Vector3(hx * 0.5, c.f0 + 2.0, hz + 0.1), Vector3(1.4, 0.5, 0.1), c.glow(Color(1.0, 0.25, 0.2), 1.4))
-	c.kit.box(Vector3(-hx * 0.5, c.f0 + 3.0, hz + 0.12), Vector3(1.0, 0.4, 0.08), c.glow(Color(0.3, 0.6, 1.0), 1.4))
+	c.kit.box(Vector3(hx * 0.5, c.f0 + 1.9, hz + 0.06), Vector3(1.5, 0.7, 0.08), c.m_dark)
+	c.kit.box(Vector3(hx * 0.5, c.f0 + 1.9, hz + 0.11), Vector3(1.3, 0.5, 0.04), c.glow(Color(1.0, 0.25, 0.2), 1.4))
 	c.awning(0.0, c.f0 + 2.8, 2.4, 1.0)
 	c.to_interior()
 	c.m_floor = c.mat(Color(0.5, 0.42, 0.34), "planks", 0.85)
