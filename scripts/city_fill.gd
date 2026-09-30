@@ -858,6 +858,7 @@ var _hot: Array = []
 func _street_props() -> void:
 	_junction_corners()
 	_sightline_clusters()
+	_open_ground_sites()
 
 
 # --- Junction corners ---
@@ -1365,6 +1366,291 @@ func _hoarding(at: Vector2, across: Vector2, dir: Vector2) -> void:
 		var label: Label3D = w._label(text, poster_at + facing * way * 0.02, 36, Color(0.5, 0.12, 0.1), atan2(facing.x * way, facing.z * way), 0.0135)
 		label.outline_size = 0
 		label.visibility_range_end = 60.0
+	w._blockers_off = true
+
+
+# --- Yard and lot dressing across the long views over open ground -------------------------------------
+
+## Where a long view still runs out over open gray ground after the hoardings (a ray that leaves the carriageway and
+## goes on for OPEN_VIEW+ metres), a solid piece of 1999 city clutter stands across it, in the district's own character:
+## shipping containers, pallet stacks, a fenced trailer yard, box vans, skip bins with tyre stacks, a brick wall with a
+## bus shelter or a billboard on legs. Same rules as the corner clusters: flat ground, 1.5 m clear of every building,
+## lot and solid prop, 1.5 m off every carriageway, clear of doors, alleys, phones, crew cars, parks and Midtown's ring.
+const OPEN_VIEW: float = 110.0
+const SITE_MAX: int = 90
+const CONTAINERS: int = 10
+const PALLETS: int = 11
+const YARD: int = 12
+const VANS: int = 13
+const SKIPS: int = 14
+const WALL: int = 15
+## Half sizes (across, deep) per site kind (CONTAINERS .. WALL).
+const SITE_HALF: Array[Vector2] = [Vector2(6.3, 1.5), Vector2(4.9, 1.3), Vector2(6.1, 3.0), Vector2(5.9, 1.7), Vector2(6.4, 2.0), Vector2(6.2, 1.5)]
+## The compact form of each (one container, two pallet rows of two, a trailer alone, one van, two skips, a short wall).
+const SITE_COMPACT: Array[Vector2] = [Vector2(3.2, 1.4), Vector2(2.6, 1.3), Vector2(5.4, 1.6), Vector2(3.0, 1.2), Vector2(4.4, 2.0), Vector2(3.4, 1.5)]
+const SITE_MARGIN: float = 0.8
+const INDUSTRIAL: PackedStringArray = ["THE HARBOR", "SLIP SIDE", "OLD WHARF", "SOUTH DOCKS", "PORT HALCYON", "MOTOR MILE", "CANAL MARKET"]
+const COMMERCIAL: PackedStringArray = ["THE STRIP", "NIGHTLIFE", "UPTOWN", "EASTGATE", "UNION STATION", "MIDTOWN"]
+const PAINT: Array[Color] = [Color(0.62, 0.2, 0.16), Color(0.16, 0.32, 0.5), Color(0.2, 0.42, 0.3), Color(0.72, 0.6, 0.22), Color(0.5, 0.52, 0.54), Color(0.78, 0.44, 0.16)]
+var sites: int = 0
+var _site_misses: Dictionary = {}
+var _site_index: int = 0
+var _sc: Vector2 = Vector2.ZERO
+var _su: Vector2 = Vector2.RIGHT
+var _sv: Vector2 = Vector2.DOWN
+var _syaw: float = 0.0
+var _sg: float = 0.0
+
+
+func _open_ground_sites() -> void:
+	for pass_index: int in range(4):
+		var hot: Array = _open_views()
+		if hot.is_empty():
+			return
+		hot.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) > float(q[0]))
+		var spots: Array[Vector2] = []
+		for entry: Array in hot:
+			if sites >= SITE_MAX:
+				return
+			var origin: Vector2 = entry[1]
+			var dir: Vector2 = entry[4]
+			var total: float = entry[2]
+			var leave: float = entry[3]
+			# A site placed earlier this pass on this same line already cuts it.
+			var cut: bool = false
+			for other: Vector2 in spots:
+				var along: float = (other - origin).dot(dir)
+				if along > leave and along < total and absf((other - origin).cross(dir)) < 5.0:
+					cut = true
+					break
+			if cut:
+				continue
+			# A line that took every candidate once and fitted nothing is not tried again.
+			var line: Vector3i = Vector3i(roundi(dir.x * 50.0), roundi(dir.y * 50.0), roundi(origin.cross(dir) / 3.0))
+			if _site_misses.has(line):
+				continue
+			var spot: Variant = _try_site(origin, dir, leave, total)
+			if spot != null:
+				spots.append(spot)
+			else:
+				_site_misses[line] = true
+		if spots.is_empty():
+			return
+
+
+## Every street sample's long views {open metres, start, total length, metres to leave the carriageway, direction}.
+func _open_views() -> Array:
+	var found: Array = []
+	for road: Dictionary in w.roads:
+		if str(road["name"]).begins_with("FOUNTAIN"):
+			continue
+		var points: PackedVector2Array = road["points"]
+		for index: int in range(points.size() - 1):
+			var a: Vector2 = points[index]
+			var b: Vector2 = points[index + 1]
+			var length: float = a.distance_to(b)
+			if length < 20.0:
+				continue
+			var u: Vector2 = (b - a) / length
+			var across: Vector2 = Vector2(-u.y, u.x)
+			var steps: int = maxi(1, int(length / 30.0))
+			for step: int in range(steps + 1):
+				var p: Vector2 = a + u * (length * step / steps)
+				for dir: Vector2 in [u, -u]:
+					for lateral: float in [-1.5, 0.0, 1.5]:
+						var q: Vector2 = p + across * lateral
+						var seen: Array = _march(q, dir)
+						var total: float = seen[0]
+						if bool(seen[1]) or total <= OPEN_VIEW:
+							continue
+						var leave: float = 6.0
+						while leave < total and _on_road(q + dir * leave, 1.0):
+							leave += 6.0
+						if total - leave > OPEN_VIEW:
+							found.append([total - leave, q, total, leave, dir])
+	return found
+
+
+## One site across the line from `origin` along `dir`, somewhere past where it leaves the road. Returns where it stood.
+func _try_site(origin: Vector2, dir: Vector2, leave: float, total: float) -> Variant:
+	var across: Vector2 = Vector2(-dir.y, dir.x)
+	# Nearest first (within 104 m of the road, the view is closed for good); a view that cannot be closed but runs
+	# on for 200+ m gets a prop further out instead, which at least halves it.
+	for step: int in range(0, 70):
+		var distance: float = leave + 6.0 + 4.0 * step if step < 25 else leave + 106.0 + 10.0 * (step - 25)
+		if distance > total - 12.0 or (step >= 25 and total - leave < 200.0):
+			break
+		for shift: float in [0.0, 2.0, -2.0, 4.0, -4.0, 6.0, -6.0]:
+			var spot: Vector2 = origin + dir * distance + across * shift
+			if _on_road(spot, 3.0):
+				continue
+			var list: Array[int] = _site_list(w.district_at(Vector3(spot.x, 0.0, spot.y)))
+			for attempt: int in range(list.size() * 2):
+				var compact: bool = attempt >= list.size()
+				var kind: int = list[(_site_index + attempt) % list.size()]
+				var half: Vector2 = (SITE_COMPACT if compact else SITE_HALF)[kind - CONTAINERS]
+				if half.x < absf(shift) + 1.8:
+					continue
+				var padded: Vector2 = half + Vector2(SITE_MARGIN, SITE_MARGIN)
+				if not _outline_off_roads(spot, across, dir, padded) or not _rect_clear(spot, across, dir, half.x + 0.3, half.y + 0.3):
+					continue
+				if not _corner_ok(spot, across, dir, half + Vector2(0.5, 0.5), false):
+					continue
+				_register_cluster(kind, spot, across, dir, half, false)
+				_build_site(kind, spot, across, dir, compact)
+				_site_index += 1
+				sites += 1
+				return spot
+	return null
+
+
+func _site_list(district: String) -> Array[int]:
+	if INDUSTRIAL.has(district):
+		return [CONTAINERS, YARD, PALLETS, SKIPS, VANS, CONTAINERS]
+	if COMMERCIAL.has(district):
+		return [WALL, VANS, SKIPS, WALL, PALLETS]
+	return [WALL, VANS, SKIPS, WALL]
+
+
+## No lot, footprint or porch within the box (with margin already in hw/hd).
+func _rect_clear(center: Vector2, u: Vector2, v: Vector2, hw: float, hd: float) -> bool:
+	var box: Rect2 = _bounds(_corners(center, u, v, hw, hd)).grow(1.0)
+	for cx: int in range(_key(box.position).x, _key(box.end).x + 1):
+		for cy: int in range(_key(box.position).y, _key(box.end).y + 1):
+			var key: Vector2i = Vector2i(cx, cy)
+			for source: Dictionary in [_rects, _eye]:
+				if source.has(key):
+					for rect: Rect2 in source[key]:
+						if box.intersects(rect) and _obb_hits(center, u, v, hw, hd, rect):
+							_why("p-site")
+							return false
+	return true
+
+
+## One box in the site's own frame: `a` across, `b` deep (toward the far end of the view), `y` the centre height.
+func _sb(a: float, b: float, y: float, size: Vector3, material: Material, solid: bool = true) -> void:
+	var at: Vector2 = _sc + _su * a + _sv * b
+	w._box_with(Vector3(at.x, _sg + y, at.y), size, material, solid, _syaw)
+
+
+func _build_site(kind: int, center: Vector2, u: Vector2, v: Vector2, compact: bool) -> void:
+	w._target = _prop_node(center)
+	w._xf = Transform3D.IDENTITY
+	w._xf_yaw = 0.0
+	w._blockers_off = false
+	_sc = center
+	_su = u
+	_sv = v
+	_syaw = atan2(-u.y, u.x)
+	_sg = maxf(_height_at(center), 0.0)
+	var i: int = _site_index
+	var dark: StandardMaterial3D = w._material(Color(0.1, 0.1, 0.11), 0.9)
+	match kind:
+		CONTAINERS:
+			# Two containers end to end (staggered so no line runs through the joint); a third on one of them.
+			var first: StandardMaterial3D = w._material(PAINT[i % PAINT.size()], 0.7, "metal")
+			var second: StandardMaterial3D = w._material(PAINT[(i + 2) % PAINT.size()], 0.7, "metal")
+			var top: StandardMaterial3D = w._material(PAINT[(i + 4) % PAINT.size()], 0.7, "metal")
+			if compact:
+				_sb(0.0, 0.0, 1.3, Vector3(6.1, 2.6, 2.44), first)
+				_sb(0.0, 0.0, 3.9, Vector3(6.1, 2.6, 2.44), top)
+			else:
+				_sb(-2.9, -0.35, 1.3, Vector3(6.1, 2.6, 2.44), first)
+				_sb(2.9, 0.35, 1.3, Vector3(6.1, 2.6, 2.44), second)
+				var side: float = -2.9 if i % 2 == 0 else 2.9
+				_sb(side, -0.35 if i % 2 == 0 else 0.35, 3.9, Vector3(6.1, 2.6, 2.44), top)
+		PALLETS:
+			# Shrink-wrapped pallet stacks in two staggered rows.
+			var wood: StandardMaterial3D = w._material(Color(0.6, 0.47, 0.3), 0.95, "planks")
+			var wrap: StandardMaterial3D = w._material(Color(0.78, 0.8, 0.82), 0.4)
+			var back_row: Array[float] = [-3.6, -1.2, 1.2, 3.6]
+			if compact:
+				back_row = [-1.2, 1.2]
+			for n: int in range(back_row.size()):
+				var tall: float = 1.5 + 0.12 * float((n + i) % 4)
+				_sb(back_row[n], -0.6, tall * 0.5, Vector3(2.3, tall, 1.0), wood)
+				_sb(back_row[n], -0.6, tall * 0.6, Vector3(2.34, tall * 0.5, 1.04), wrap, false)
+			var front_row: Array[float] = [-2.4, 0.0, 2.4]
+			if compact:
+				front_row = [0.0]
+			for n: int in range(front_row.size()):
+				var tall: float = 1.6 + 0.14 * float((n + i + 1) % 4)
+				_sb(front_row[n], 0.6, tall * 0.5, Vector3(2.3, tall, 1.0), wood)
+				_sb(front_row[n], 0.6, tall * 0.6, Vector3(2.34, tall * 0.5, 1.04), wrap, false)
+		YARD:
+			# A chain-link run with a gap to walk through, and a parked box trailer behind it.
+			var fence_b: float = -2.3
+			var ends: Array[float] = [-6.0, -0.9, 0.9, 6.0]
+			for n: int in range(0, 0 if compact else 4, 2):
+				var from: Vector2 = _sc + _su * ends[n] + _sv * fence_b
+				var to: Vector2 = _sc + _su * ends[n + 1] + _sv * fence_b
+				w._fence(Vector3(from.x, _sg + 0.16, from.y), Vector3(to.x, _sg + 0.16, to.y), 2.4)
+			var body: StandardMaterial3D = w._material(Color(0.82, 0.82, 0.8) if i % 2 == 0 else Color(0.2, 0.3, 0.46), 0.6, "panel")
+			_sb(0.0, 0.6, 1.95, Vector3(10.4, 2.8, 2.5), body)
+			_sb(0.6, 0.6, 0.45, Vector3(8.4, 0.3, 2.2), dark, false)
+			for wheel: float in [3.0, 4.2]:
+				_sb(wheel, 0.6, 0.45, Vector3(1.0, 0.9, 2.56), dark, false)
+			for leg: float in [-3.6, -2.6]:
+				_sb(leg, 0.6, 0.3, Vector3(0.12, 0.6, 2.2), dark, false)
+		VANS:
+			# Two box vans, nose out, staggered so their bodies overlap.
+			for n: int in range(1 if compact else 2):
+				var sign: float = -1.0 if n == 0 else 1.0
+				var paint: StandardMaterial3D = w._material([Color(0.86, 0.85, 0.8), Color(0.28, 0.4, 0.3), Color(0.25, 0.3, 0.48), Color(0.7, 0.66, 0.5)][(i + n * 2) % 4], 0.6, "panel")
+				var b: float = -0.6 if n == 0 else 0.6
+				if compact:
+					b = 0.0
+				_sb(sign * 2.3, b, 1.75, Vector3(4.2, 2.4, 2.1), paint)
+				_sb(sign * 5.0, b, 1.25, Vector3(1.6, 1.5, 2.0), paint)
+				_sb(sign * 5.4, b, 1.6, Vector3(0.5, 0.6, 1.9), w._material(Color(0.25, 0.32, 0.36), 0.3), false)
+				for axle: float in [1.3, 4.4]:
+					_sb(sign * axle, b, 0.45, Vector3(0.9, 0.9, 2.3), dark, false)
+		SKIPS:
+			# Three skip bins (staggered, overlapping) and two tyre stacks in front of them.
+			var spots: Array[Vector2] = [Vector2(-4.0, -0.6), Vector2(0.0, 0.6), Vector2(4.0, -0.6)]
+			if compact:
+				spots = [Vector2(-2.0, -0.6), Vector2(2.0, 0.6)]
+			for n: int in range(spots.size()):
+				var bin: StandardMaterial3D = w._material([Color(0.85, 0.65, 0.12), Color(0.18, 0.38, 0.24), Color(0.6, 0.2, 0.15), Color(0.2, 0.3, 0.5)][(i + n) % 4], 0.6, "metal")
+				_sb(spots[n].x, spots[n].y, 0.75, Vector3(4.4, 1.5, 1.9), bin)
+				_sb(spots[n].x, spots[n].y, 1.5, Vector3(4.5, 0.1, 2.0), dark, false)
+			for stack: float in [-1.0, 1.3]:
+				var at: Vector2 = _sc + _su * stack - _sv * 1.45
+				w._cylinder(Vector3(at.x, _sg + 0.75, at.y), 0.42, 1.5, Color(0.08, 0.08, 0.09), 10)
+				w._collider(Vector3(at.x, _sg + 0.75, at.y), Vector3(0.84, 1.5, 0.84), 0.0)
+		WALL:
+			var brick: StandardMaterial3D = w._material(Color(0.52, 0.28, 0.22), 0.95, "brick")
+			var coping: StandardMaterial3D = w._material(Color(0.66, 0.64, 0.58), 0.85)
+			var commercial: bool = COMMERCIAL.has(w.district_at(Vector3(center.x, 0.0, center.y)))
+			if commercial:
+				# A long low brick wall carrying a billboard on two steel legs.
+				var run: float = 6.4 if compact else 11.6
+				_sb(0.0, 0.0, 0.8, Vector3(run, 1.6, 0.45), brick)
+				_sb(0.0, 0.0, 1.66, Vector3(run + 0.2, 0.12, 0.6), coping, false)
+				var steel: StandardMaterial3D = w._material(Color(0.3, 0.3, 0.32), 0.6, "metal")
+				var board: float = 5.4 if compact else 9.0
+				for leg: float in [-board * 0.4, board * 0.4]:
+					_sb(leg, 0.5, 3.6, Vector3(0.3, 4.0, 0.3), steel)
+				_sb(0.0, 0.5, 6.4, Vector3(board, 3.0, 0.25), w._material(Color(0.14, 0.14, 0.18), 0.8), false)
+				_sb(0.0, 0.5, 7.98, Vector3(board + 0.2, 0.14, 0.4), steel, false)
+				var text: String = str(BOARDS[i % BOARDS.size()])
+				for way: float in [1.0, -1.0]:
+					var board_at: Vector2 = _sc + _su * 0.0 + _sv * (0.5 + way * 0.17)
+					var label: Label3D = w._label(text, Vector3(board_at.x, _sg + 6.4, board_at.y), 36, Color(1.0, 0.85, 0.4), atan2(v.x * way, v.y * way), _fit(text, board * 0.84))
+					label.visibility_range_end = 90.0
+			else:
+				# Garden wall either side of a bus shelter (its back panel is solid), open toward the street behind.
+				var wing: float = 1.4 if compact else 4.2
+				_sb(-1.8 - wing * 0.5, 0.0, 0.8, Vector3(wing, 1.6, 0.45), brick)
+				_sb(1.8 + wing * 0.5, 0.0, 0.8, Vector3(wing, 1.6, 0.45), brick)
+				_sb(-1.8 - wing * 0.5, 0.0, 1.66, Vector3(wing + 0.2, 0.12, 0.6), coping, false)
+				_sb(1.8 + wing * 0.5, 0.0, 1.66, Vector3(wing + 0.2, 0.12, 0.6), coping, false)
+				_sb(0.0, 0.0, 1.15, Vector3(3.6, 2.3, 0.12), w._material(Color(0.4, 0.56, 0.58), 0.3))
+				var frame: StandardMaterial3D = w._material(Color(0.2, 0.3, 0.26), 0.6, "metal")
+				_sb(0.0, -0.65, 2.42, Vector3(3.9, 0.1, 1.5), frame, false)
+				for post: float in [-1.8, 1.8]:
+					_sb(post, -1.3, 1.2, Vector3(0.08, 2.4, 0.08), frame, false)
+				_sb(0.0, -0.35, 0.45, Vector3(2.4, 0.08, 0.42), w._material(Color(0.5, 0.36, 0.22), 0.9, "planks"))
 	w._blockers_off = true
 
 

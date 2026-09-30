@@ -26,7 +26,9 @@ const EYE: float = 1.3
 const MAX_RAY: float = 500.0
 const CELL: float = 4.0
 ## The most sightlines (see _sightlines) that may run over 110 m across open ground, off every carriageway.
-const OPEN_VIEW_LIMIT: int = 380
+const OPEN_VIEW_LIMIT: int = 285
+## ... and the longest of them (477 m before the yard and lot dressing of scripts/city_fill.gd, 356 rays before it).
+const LONGEST_OPEN_LIMIT: float = 360.0
 
 var world: Variant
 var space: PhysicsDirectSpaceState3D
@@ -137,6 +139,7 @@ func _sightlines() -> Dictionary:
 	var over: int = 0
 	var open_views: int = 0
 	var open_ends: Dictionary = {}
+	var open_list: Array = []
 	var samples: int = 0
 	var longest: Array = []
 	for road: Dictionary in world.roads:
@@ -190,6 +193,7 @@ func _sightlines() -> Dictionary:
 							probe += 6.0
 						if length_ray - first_off > 110.0:
 							open_views += 1
+							open_list.append([length_ray - first_off, str(road["name"]), best_from + dir * first_off, dir, world.district_at(Vector3(best_from.x, 0, best_from.y))])
 							open_ends[str(road["name"])] = int(open_ends.get(str(road["name"]), 0)) + 1
 						if float(best[0]) > 150.0:
 							var end_at: Vector2 = at + dir * float(best[0])
@@ -231,7 +235,13 @@ func _sightlines() -> Dictionary:
 		# Street-long views along a carriageway cannot be broken any more (nothing solid stands on a road now);
 		# what the off-road corner and sightline props guard is the view that leaves the street and runs over
 		# open gray ground. (Before this pass: 0.8's in-road chicanes broke the street views instead.)
+		open_list.sort_custom(func(p: Array, q: Array) -> bool: return float(p[0]) > float(q[0]))
+		for entry: Array in open_list.slice(0, 12):
+			print("  OPEN VIEW %.0f m of open ground from %s along %s (%s, %s)" % [entry[0], (entry[2] as Vector2).snapped(Vector2(1, 1)), (entry[3] as Vector2).snapped(Vector2(0.1, 0.1)), entry[1], entry[4]])
+		print("LONGEST OPEN VIEW: %.0f m; over 200 m: %d" % [float(open_list[0][0]) if not open_list.is_empty() else 0.0, open_list.filter(func(e: Array) -> bool: return float(e[0]) > 200.0).size()])
 		print("OPEN-GROUND VIEWS: %d rays run more than 110 m over open ground; by street: %s" % [open_views, open_ends])
+		var longest_open: float = float(open_list[0][0]) if not open_list.is_empty() else 0.0
+		_check(longest_open <= LONGEST_OPEN_LIMIT, "No view runs more than %.0f m over open ground (longest %.0f m)" % [LONGEST_OPEN_LIMIT, longest_open])
 		_check(open_views <= OPEN_VIEW_LIMIT, "Views over open ground are broken up by off-road props (%d rays over 110 m, limit %d)" % [open_views, OPEN_VIEW_LIMIT])
 	return per_district
 
@@ -435,6 +445,18 @@ func _cluster_checks() -> void:
 	for cluster: Dictionary in clusters:
 		corners += 1 if bool(cluster["corner"]) else 0
 		kinds[int(cluster["kind"])] = int(kinds.get(int(cluster["kind"]), 0)) + 1
+	var site_list: Array[String] = []
+	var site_districts: Dictionary = {}
+	for cluster: Dictionary in clusters:
+		if int(cluster["kind"]) >= 10:
+			var at: Vector2 = cluster["center"]
+			var district: String = world.district_at(Vector3(at.x, 0.0, at.y))
+			site_districts[district] = int(site_districts.get(district, 0)) + 1
+			site_list.append("%s %d at (%.0f, %.0f)" % [district, int(cluster["kind"]), at.x, at.y])
+	print("SITES: %d yard and lot sites by district %s" % [fill.sites, site_districts])
+	for line: String in site_list:
+		print("  SITE " + line)
+	_check(fill.sites >= 12 and site_districts.size() >= 5, "Yard and lot dressing stands across long open views (%d sites in %d districts)" % [fill.sites, site_districts.size()])
 	print("PLACEMENT FAILS: %s" % [fill.fail_reasons])
 	print("PROPS: %d clusters (%d at junction corners), kinds %s" % [clusters.size(), corners, kinds])
 	_check(corners >= 40 and corners == fill.corners_dressed, "Junction corners are dressed with solid props (%d corners, %d clusters in all)" % [corners, clusters.size()])

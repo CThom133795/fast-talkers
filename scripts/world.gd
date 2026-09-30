@@ -2600,6 +2600,8 @@ func _build_plazas() -> void:
 		_box_with((wall[0] as Vector3) + Vector3(0, 0.45, 0), Vector3(float(wall[1]), 0.9, 0.5), _material(stone, 0.9, "stucco"), true, float(wall[2]))
 	for at: Vector3 in [Vector3(120, 0, -73), Vector3(186, 0, -68.5), Vector3(140, 0, -30)]:
 		_bench(at, 0.0)
+	# A clipped hedge across the lawn between Meridian Street's end and Park Road, closing the 480 m view down the avenue.
+	_box_with(Vector3(150, 0.85, -56), Vector3(0.9, 1.7, 10.0), _material(Color(0.2, 0.36, 0.2), 0.95, "grass"), true)
 	_landmark("EASTSIDE PARK", Vector3(190, 0, -58))
 	# Eastgate: a hotel and a bank tower face the park from the north-east.
 	for at: Vector2 in [Vector2(196, -73), Vector2(206, -70), Vector2(214, -84)]:
