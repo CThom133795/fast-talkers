@@ -1,7 +1,7 @@
 # Cloud sessions (Claude Code on the web)
 
 Cloud sessions clone the GitHub repo into a Linux sandbox. Use them for **parallel work on disjoint files**
-(a new test suite, a doc, an isolated feature file). Every result comes back as a **PR against `master`**,
+(a new test suite, a doc, an isolated feature file). Every result comes back as a **PR against `dev`** (see `docs/WORKFLOW.md`),
 reviewed and merged by the local lead session. Cloud sessions never export the game and never merge.
 
 ## Setup (once per sandbox)
@@ -31,7 +31,7 @@ Shutdown noise (`Unreferenced static string`, `RID allocations leaked`, `Thread 
 - Do not edit `CODEX_HANDOFF.md` or `CLAUDE_HANDOFF.md`; put status in the PR description instead.
 - No exports, no downloaded art/audio (the game ships no imported assets), no bots or AI in networked code paths.
 - Read `docs/AGENT_BRIEF.md` first (file map, conventions, gotchas).
-- Work on a branch named `cloud/<task>` (e.g. `cloud/chat-tests`); commit small; never push to `master`.
-- Open a PR against `master`. The body must contain: what changed, the files touched, and the pasted
+- Branch from `origin/dev` as `cloud/<task>` (e.g. `cloud/chat-tests`); commit small; never push to `master` or `dev`.
+- Open a PR against `dev`. The body must contain: what changed, the files touched, and the pasted
   summary table from `tests/run_all.sh` (or the suites you ran and why a subset is enough).
 - If a suite fails and you can't fix it within 3 tries, stop and say so in the PR instead of loosening the test.
