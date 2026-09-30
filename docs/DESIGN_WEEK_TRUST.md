@@ -44,6 +44,16 @@ We don't have their telemetry, so these are design inferences, ordered by how mu
    nothing that a secret deal would have kept hidden.
 6. **Friction and norms.** No voice (or bad voice), newcomers who don't know the etiquette, and griefers.
 
+## 2b. Phones: two kinds, and no Boss
+
+- **The crew phone** sits in each crew's HQ spawn. **There is no Boss role.** Whoever grabs the phone makes the calls
+  to the other crews, and the crew sorts out who talks. It is a physical object: it can be carried, dropped, stolen
+  or handed over. It rings with the day's contract, sit-down offers and other crews' calls.
+- **Street payphones are distractions,** not a reliable lead system. They ring around the city to stir unrest: a
+  voice promising a stash, a rumour, a lure. Their job is to **pull crews across each other's paths** and create
+  encounters, bait and paranoia. Answering one is a gamble; ignoring one is a choice. They must never become the
+  dependable way to win or catch up.
+
 ## 3. Pillars (what any fix must keep)
 
 - **Betrayal stays legal, possible and sometimes smart.** Without the possibility of a double-cross there is no tension.
@@ -86,22 +96,21 @@ voluntary, so bluffing players can decline, and declining is itself a tell.
 value.
 
 ### C. Noise is news: gunfire becomes information (violence has weight)
-Sustained gunfire in a district raises that district's **Heat**. At the next payphone ring, every crew hears what the
-street knows, for example "shooting at Motor Mile, a case was seen leaving north".
+Sustained gunfire in a district raises that district's **Heat**. Payphones near loud districts start ringing with the
+rumour, for example "shooting at Motor Mile, a case was seen leaving north". Whoever answers is pulled toward the fight.
 - Quiet deals keep their secrets. Loud fights advertise the loot to the third crew.
-- Uses our existing phones-ringing loop. No NPC police are needed.
+- Fits the payphones' job as distractions that pull crews together. No NPC police are needed.
 
 *Why:* it doesn't forbid violence; it makes violence expensive to the shooter by inviting vultures.
 *Abuse:* baiting fake fights to pull crews somewhere. That's fine. It's deception, which is on theme.
 
-### D. The street favours the hungry (comebacks through opportunity, not cash)
-Payphone tips go preferentially to the crew with the **lowest bank**. Mid-week, the last-place crew also gets a
-**Loan Shark call**: cash now, repaid with interest on Friday. If it isn't repaid, the shark takes a cut of Friday's
-payout.
+### D. A lifeline for the hungry (comebacks through risk, not free cash)
+Mid-week, the last-place crew's **crew phone** gets a **Loan Shark call**: cash now, repaid with interest on Friday.
+If it isn't repaid, the shark takes a cut of Friday's payout. Payphones are **not** a catch-up channel. They stay
+distractions for everyone.
 
-*Why:* a trailing crew always has a lead to chase or sell, so it isn't reduced to spoiling. The loan is a risk, not a
-gift.
-*Abuse:* sandbagging to get tips. Counter: tips pay less than contracts; the bank decides the week.
+*Why:* a trailing crew can re-arm and stay in the Week instead of spoiling it. The loan is a risk, not a gift.
+*Abuse:* sandbagging for a loan. Counter: interest makes the loan a bad deal unless you actually come back.
 
 ### E. The audit call (soft cap on runaway leaders)
 On Wednesday morning the leading crew's phone rings: **"The Board raised your quota."** The leader's Friday target rises
@@ -119,7 +128,7 @@ district hint 30 s early; three honoured deals give the exact site 30 s early.
 Chaos on Wednesday costs you Friday.
 
 ### G. The Broker's joint job (a reason to trust a rival)
-Some days the payphone rings with a **two-crew job**: a vault that needs two keys held by different crews, or a heavy
+Some days two crews' **crew phones** ring with the same **two-crew job**: a vault that needs two keys held by different crews, or a heavy
 crate that needs two carriers and a car. The payout is split, and only paid if both halves are banked.
 
 *Why:* cooperation is the only way to get this money, so one betrayal doesn't cost just a deal. It costs the job.
@@ -179,7 +188,7 @@ Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. S
   - Collateral releases and interest pay "at 9:00 next morning".
   - Reputation marks and settlements last the whole Week and reset for the next Week.
   - Nothing persists past the Week except cosmetics and stats.
-- **Everyone plays to Friday.** Opportunity-based catch-up (tips favour the hungry, loans), a quota raise for the
+- **Everyone plays to Friday.** Risk-based catch-up (the loan shark), a quota raise for the
   leader, and no elimination before Friday. At most, a crew that misses its quota is "restructured" (NBD-style
   replacement) at the Week's end.
 - **Tests should speak Week.** Add a `week_flow` headless suite: run 5 days quickly (short timers), assert that money
@@ -196,7 +205,7 @@ Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. S
 | T0 | **Telemetry per day:** deals proposed, honoured and broken; shots fired before the first deal; kills per crew pair; phone calls placed and answered | Can't tune what we can't see | S |
 | T1 | **Deals Board, plus caller ID with marks (H), plus a server-side definition of "broken deal"** | Every other proposal needs this record | M |
 | T2 | **Sit-Down call (A), plus collateral held overnight (B)** | Directly attack grievance and the slide; both use phones and escrow | M |
-| T3 | **Noise is news (C), plus the street favours the hungry (D)** | Cheap, reuse payphone tips | S–M |
+| T3 | **Noise is news (C), plus the lifeline (D)** | Cheap; reuse the payphone ring and crew phone | S–M |
 | T4 | **Honour pays on Friday (F), plus the audit call (E)** | Shape the week's arc | S |
 | T5 | **Broker joint jobs (G)** | Biggest content cost; do after the loop is proven | L |
 

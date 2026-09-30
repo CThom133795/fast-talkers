@@ -31,6 +31,8 @@ USER DIRECTION (binding):
   push-to-talk for local is optional; the squad/crew key mutes the talker in proximity so only crew hear them.
   People inside a building can hear each other; passers-by outside cannot.
 - Steam play with friends must be as simple as possible for the end user (host -> invite -> accept).
+- No Boss: one crew phone sits in each HQ spawn and whoever grabs it makes the calls. Street payphones are
+  DISTRACTIONS that stir unrest and pull crews across each other's paths, not a reliable tip or catch-up system.
 - A match is a WEEK and a round is a DAY (Monday-Friday; Friday is always the Dead Drop). The Week structure does
   not exist in code yet: read the "Week and Day mindset" section of CLAUDE_HANDOFF.md and docs/DESIGN_WEEK_TRUST.md.
   Use Week/Day vocabulary in UI, code and tests.

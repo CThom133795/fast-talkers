@@ -19,13 +19,16 @@ Battlefield/BattleBit (responsive gunplay), CS (round buying). Nothing is copied
 ## A Day, from a player's seat
 
 1. **Morning at HQ (lineup and buy, about 1 min).** The HQ phone rings. Today's contract: "You're selling the Ledger.
-   Sol Negro wants it, Kingsway might too." You buy a pistol and armour and argue with your crew about the price. Your
-   Boss calls Sol Negro on the phone. They offer $4,000 and want to meet "behind the burger place on Motor Mile".
+   Sol Negro wants it, Kingsway might too." You buy a pistol and armour and argue with your crew about the price. The
+   crew phone sits on the table in the spawn; there's no Boss, so your crewmate grabs it first and calls Sol Negro.
+   They offer $4,000 and want to meet "behind the burger place on Motor Mile".
 2. **The street (about 9 min).** Doors open.
    - You drive the case across town while a crewmate scouts the meeting spot from the parking garage roof with
      binoculars.
-   - A payphone rings on the way. Someone tells you Kingsway is watching Motor Mile.
-   - You call Sol Negro back and move the meet to the motel walkway.
+   - A payphone rings on a corner: a voice promises cash stashed in the garage. Maybe real, maybe nothing. Kingsway
+     heard a payphone too, and now two crews are drifting toward the same block, each suspicious of the other.
+   - You don't take the bait. Your crewmate with the phone calls Sol Negro back and moves the meet to the motel
+     walkway.
    - Face to face, hands up, proximity voice: "Open the bag." They count the cash. You check it isn't counterfeit.
      Handshake.
    - Or someone draws, and the chase starts: cars, alleys, the club's back door.
@@ -35,11 +38,22 @@ Battlefield/BattleBit (responsive gunplay), CS (round buying). Nothing is copied
 
 Meetings can happen **anywhere**. There are no official deal zones. "Meet me behind the diner" should be natural talk.
 
+## Phones: two kinds, and no Boss
+
+- **The crew phone** sits in each crew's HQ spawn. **There is no Boss role.** Whoever grabs the phone makes the calls
+  to the other crews, and the crew sorts out who talks. It is a physical object: it can be carried, dropped, stolen
+  or handed over. It rings with the day's contract, sit-down offers and other crews' calls.
+- **Street payphones are distractions,** not a reliable lead system. They ring around the city to stir unrest: a
+  voice promising a stash, a rumour, a lure. Their job is to **pull crews across each other's paths** and create
+  encounters, bait and paranoia. Answering one is a gamble; ignoring one is a choice. They must never become the
+  dependable way to win or catch up.
+
 ## The core loop
 
 **Contract, then call, then choose a place, then travel, then meet, then inspect, then trade (or betray), then escape,
 then bank.** Every system should serve one of those verbs:
-- **phones:** call a crew, answer a tip, get the sit-down;
+- **phones:** the crew phone at HQ (anyone can grab it) for calls between crews and the sit-down; street payphones
+  as distractions that stir unrest and pull crews across each other's paths;
 - **physical items:** cases, cash, counterfeit, the Ledger;
 - **readable intent:** hands up, holstered weapons, voice;
 - **places with approaches and exits:** interiors, garages, alleys, parks with railings;
@@ -48,7 +62,7 @@ then bank.** Every system should serve one of those verbs:
 ## What keeps it a deal-making game (the design test)
 
 Before building a feature, ask:
-1. **Does it make a conversation more interesting, or more necessary?** Phones, tips, inspection and collateral do.
+1. **Does it make a conversation more interesting, or more necessary?** Crew phones, inspection and collateral do; payphones create encounters.
    A kill streak does not.
 2. **Does it keep betrayal possible, but give honesty a reason?** Never block a shot or force peace. Make keeping your
    word pay more as the Week goes on.
@@ -60,7 +74,7 @@ Before building a feature, ask:
 
 The known failure mode of the genre: **by mid-week, grudges and hopeless standings turn Days into sandbox deathmatch.**
 `docs/DESIGN_WEEK_TRUST.md` is the plan against it: the Sit-Down call, collateral held overnight, gunfire that becomes
-street news, tips for the hungry crew, the audit call, and honour paying on Friday.
+street news, a risky lifeline for the last-place crew, the audit call, and honour paying on Friday.
 
 ## Not this game
 
@@ -82,7 +96,7 @@ street news, tips for the hungry crew, the audit call, and honour paying on Frid
 - **Built:**
   - the city and its landmark interiors;
   - vehicles and gunplay, and the buy phase;
-  - one contract case, with the payphone street tip;
+  - one contract case, and a street payphone that rings with a stash lure;
   - the listen-server multiplayer (hardened), with an optional Steam path that is untested;
   - proximity voice with a crew radio;
   - the hands-up gesture.

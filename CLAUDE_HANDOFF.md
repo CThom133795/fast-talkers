@@ -287,7 +287,7 @@ Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. S
   - Collateral releases and interest pay "at 9:00 next morning".
   - Reputation marks and settlements last the whole Week and reset for the next Week.
   - Nothing persists past the Week except cosmetics and stats.
-- **Everyone plays to Friday.** Opportunity-based catch-up (tips favour the hungry, loans), a quota raise for the
+- **Everyone plays to Friday.** Risk-based catch-up (the loan shark), a quota raise for the
   leader, and no elimination before Friday. At most, a crew that misses its quota is "restructured" (NBD-style
   replacement) at the Week's end.
 - **Tests should speak Week.** Add a `week_flow` headless suite: run 5 days quickly (short timers), assert that money
@@ -296,10 +296,16 @@ Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. S
 - **Settings and lobby.** The host picks the Week length (5 days default; 3 for a quick session) and day length (9:00
   street default). Store both in the week state so every peer agrees.
 
+### Phones and roles (the user's correction, 2026-09-30)
+There is **no Boss**. One crew phone sits in each HQ spawn, and whoever grabs it makes the calls. **Street payphones are
+distractions** that stir unrest and pull crews across each other's paths; they are not a reliable information or catch-up
+system. `docs/MULTIPLAYER_DESIGN.md` §4 (the optional Boss role, and tips as tradeable information) is superseded on
+these points. See `docs/GAME_VISION.md`.
+
 ### Interim-lead design proposal: trust and the Week
 `docs/DESIGN_WEEK_TRUST.md` diagnoses why Sub Rosa and No Big Deal weeks collapse mid-week, and proposes phone-driven
-tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire tips,
-hungry-crew tips, the audit call, and honour paying on Friday. It also gives an order of work (T0–T5) and playtest
+tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire rumours on payphones,
+a loan-shark lifeline, the audit call, and honour paying on Friday. It also gives an order of work (T0–T5) and playtest
 metrics. **Design only; the user decides before any code.**
 
 ### Claude Desktop: next steps
