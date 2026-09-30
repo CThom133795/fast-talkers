@@ -38,6 +38,7 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_shop_interior(kit)
 	_range_interior(kit)
 	kit.end_interior()
+	kit.finish_props()
 	kit.finish()
 
 
@@ -168,16 +169,6 @@ static func _shop_interior(kit: BuildingKit) -> void:
 	var board: StandardMaterial3D = kit.mat(Color(0.18, 0.14, 0.11), "planks", 0.8)
 	for span: Vector2 in [Vector2(-10.9, RANGE_DOOR_X - 1.1), Vector2(RANGE_DOOR_X + 1.1, 10.9)]:
 		kit.box(Vector3((span.x + span.y) * 0.5, 2.1, z0 + 0.26), Vector3(span.y - span.x, 2.2, 0.06), board)
-	var stock_mat: StandardMaterial3D = kit.mat(Color(0.34, 0.2, 0.1), "planks", 0.6)
-	var barrel_mat: StandardMaterial3D = kit.mat(Color(0.07, 0.07, 0.08), "", 0.4)
-	for row: int in range(3):
-		for column: int in range(8):
-			var gx: float = -9.0 + column * 2.4 + (0.6 if row == 1 else 0.0)
-			if absf(gx - RANGE_DOOR_X) < 1.8:
-				continue
-			var gy: float = 2.9 - row * 0.65
-			kit.box(Vector3(gx, gy, z0 + 0.34), Vector3(1.05 if row == 0 else 0.85, 0.06, 0.06), barrel_mat)
-			kit.box(Vector3(gx - (0.7 if row == 0 else 0.55), gy - 0.02, z0 + 0.34), Vector3(0.42, 0.13, 0.07), stock_mat)
 	kit.sign_label("NO  LOITERING  -  ALL  SALES  FINAL", Vector3(-3.5, 3.9, z0 + 0.24), 26, Color(0.9, 0.85, 0.7), 0.0)
 	# The counter: a long glass-topped display case with a return, cash register and a clerk's gap.
 	var glass_top: StandardMaterial3D = kit.glass_material()
@@ -188,9 +179,6 @@ static func _shop_interior(kit: BuildingKit) -> void:
 		kit.box(Vector3(cx, 0.55, counter_z), Vector3(length, 1.1, 1.0), wood, true)
 		kit.box(Vector3(cx, 1.13, counter_z), Vector3(length + 0.06, 0.05, 1.06), kit.mat(Color(0.1, 0.1, 0.11), "", 0.4))
 		kit.box(Vector3(cx, 1.42, counter_z + 0.02), Vector3(length - 0.2, 0.5, 0.86), glass_top)
-		# Handguns laid out under the glass.
-		for gun: int in range(int(length / 1.0)):
-			kit.box(Vector3(span.x + 0.6 + gun * 1.0, 1.2, counter_z), Vector3(0.24, 0.09, 0.07), barrel_mat)
 	kit.box(Vector3(-12.3 + 0.9, 0.55, counter_z - 1.5), Vector3(1.0, 1.1, 3.0), wood, true)
 	kit.box(Vector3(5.5, 1.3, counter_z - 0.05), Vector3(0.55, 0.32, 0.45), kit.mat(Color(0.75, 0.73, 0.66), "", 0.6))
 	kit.box(Vector3(5.5, 1.36, counter_z + 0.2), Vector3(0.36, 0.2, 0.02), kit.glow(Color(0.5, 1.0, 0.6), 0.9))
@@ -211,6 +199,7 @@ static func _shop_interior(kit: BuildingKit) -> void:
 		for z: float in [mid_z + 1.5, mid_z + 6.5]:
 			kit.box(Vector3(x, HEIGHT - 0.14, z), Vector3(1.4, 0.05, 0.35), kit.glow(Color(1.0, 0.95, 0.85), 1.4))
 	kit.interior_light(Vector3(0, HEIGHT - 0.7, mid_z), Color(1.0, 0.92, 0.75), 2.4, 15.0)
+	_shop_props(kit)
 
 
 # --- The indoor range -----------------------------------------------------------------------------
@@ -264,3 +253,100 @@ static func _range_interior(kit: BuildingKit) -> void:
 		for z: float in [mid_z + 6.0, mid_z - 4.0]:
 			kit.box(Vector3(x, HEIGHT - 0.14, z), Vector3(1.6, 0.05, 0.35), kit.glow(Color(0.85, 0.95, 1.0), 1.3))
 	kit.interior_light(Vector3(0, HEIGHT - 0.8, mid_z), Color(0.9, 0.95, 1.0), 2.2, 20.0)
+
+
+## Shop dressing (docs/INTERIOR_PROPS.md): the gun wall, price tags, ammunition cartons, pistols in the
+## cases, holsters, cleaning kits, targets and posters. All collision-free, none of it usable, and
+## hidden in potato mode (kit.finish_props). The counter and cases keep their own collision.
+static func _shop_props(kit: BuildingKit) -> void:
+	kit.begin_props()
+	var z0: float = SHOP_BACK
+	# The shop's stucco lining face is at z0 + 0.35 (it hides the old pegboard), so the display
+	# pegboard and everything on it hang just in front of it.
+	var wall_z: float = z0 + 0.39
+	var pegboard: StandardMaterial3D = kit.mat(Color(0.55, 0.42, 0.28), "", 0.9)
+	for span: Vector2 in [Vector2(-10.9, RANGE_DOOR_X - 1.1), Vector2(RANGE_DOOR_X + 1.1, 10.9)]:
+		kit.prop(Vector3((span.x + span.y) * 0.5, 2.1, z0 + 0.365), Vector3(span.y - span.x, 2.3, 0.02), pegboard)
+	var tag: StandardMaterial3D = kit.mat(Color(0.96, 0.95, 0.88), "", 0.8)
+	var tag_red: StandardMaterial3D = kit.mat(Color(0.85, 0.18, 0.14), "", 0.8)
+	var hook: StandardMaterial3D = kit.mat(Color(0.6, 0.6, 0.62), "", 0.3)
+	var kinds: Array[String] = ["rifle", "shotgun", "lever", "carbine", "rifle", "shotgun", "carbine", "lever"]
+	var guns: int = 0
+	# Three rows of long guns on the pegboard, muzzles right, each on two hooks with a price tag.
+	for row: int in range(3):
+		var gy: float = 2.95 - row * 0.52
+		var x: float = -10.75 + (0.3 if row == 1 else 0.0)
+		var index: int = row * 3
+		while x < 10.9 - 1.25:
+			var inside_left: bool = x > -10.9 and x + 1.25 < RANGE_DOOR_X - 1.1
+			var inside_right: bool = x > RANGE_DOOR_X + 1.1
+			if not (inside_left or inside_right):
+				x += 0.35
+				continue
+			var kind: String = kinds[index % kinds.size()]
+			var length: float = kit.display_gun(Vector3(x, gy, wall_z), kind, (index * 7 + row) % 3)
+			for peg: float in [0.3, length - 0.35]:
+				kit.prop(Vector3(x + peg, gy - 0.06, wall_z + 0.02), Vector3(0.02, 0.02, 0.08), hook)
+			kit.prop(Vector3(x + 0.45, gy - 0.13, wall_z + 0.01), Vector3(0.12, 0.07, 0.01), tag_red if index % 5 == 0 else tag)
+			guns += 1
+			index += 1
+			x += length + 0.16
+	# A row of handguns lower down, each on a peg with a tag.
+	var x2: float = RANGE_DOOR_X + 1.4
+	var hand: int = 0
+	while x2 < 10.5:
+		kit.display_gun(Vector3(x2, 1.4, wall_z), "revolver" if hand % 3 == 1 else "pistol", hand % 3)
+		kit.prop(Vector3(x2, 1.28, wall_z + 0.01), Vector3(0.1, 0.06, 0.01), tag)
+		guns += 1
+		hand += 1
+		x2 += 0.5
+	kit.props.set_meta("display_guns", guns)
+	# Glass cases: pistols laid flat on red felt, each with a tag.
+	var counter_z: float = z0 + 4.2
+	var felt: StandardMaterial3D = kit.mat(Color(0.42, 0.06, 0.07), "", 0.95)
+	var blued: StandardMaterial3D = kit.mat(Color(0.08, 0.09, 0.12), "", 0.32)
+	var grip: StandardMaterial3D = kit.mat(Color(0.3, 0.17, 0.08), "planks", 0.6)
+	for span: Vector2 in [Vector2(-11.6, -1.2), Vector2(1.2, 11.6)]:
+		kit.prop(Vector3((span.x + span.y) * 0.5, 1.165, counter_z), Vector3(span.y - span.x - 0.3, 0.012, 0.8), felt)
+		var gx: float = span.x + 0.5
+		while gx < span.y - 0.5:
+			kit.prop(Vector3(gx, 1.185, counter_z + 0.05), Vector3(0.21, 0.03, 0.05), blued)
+			kit.prop(Vector3(gx - 0.07, 1.185, counter_z - 0.02), Vector3(0.05, 0.03, 0.1), grip)
+			kit.prop(Vector3(gx + 0.12, 1.18, counter_z - 0.2), Vector3(0.08, 0.01, 0.05), tag)
+			gx += 0.55
+	# Ammunition cartons on the side shelves (on top of the existing boxes' shelves) and a stack on the counter.
+	var carton_colors: Array[Color] = [Color(0.75, 0.12, 0.1), Color(0.12, 0.25, 0.55), Color(0.9, 0.62, 0.12), Color(0.18, 0.35, 0.2), Color(0.85, 0.83, 0.78)]
+	var mid_z: float = (SHOP_BACK + HALF_D - 0.3) * 0.5
+	for side: float in [-1.0, 1.0]:
+		var wall_x: float = side * (HALF_W - 0.62)
+		for shelf: int in range(4):
+			for slot: int in range(10):
+				var sz: float = mid_z - 0.2 + slot * 0.55
+				kit.prop_carton(Vector3(wall_x + side * 0.02, 0.83 + shelf * 0.55, sz + 0.1), Vector3(0.18, 0.1, 0.13), carton_colors[(slot + shelf * 3 + (1 if side > 0 else 0)) % carton_colors.size()])
+	for stack: int in range(4):
+		kit.prop_carton(Vector3(-3.0 + stack * 0.2, 1.2 + (stack % 2) * 0.0, counter_z + 0.05), Vector3(0.16, 0.09, 0.11), carton_colors[stack])
+	# Holsters, belts and cleaning kits on a slatwall by the range door.
+	var leather: StandardMaterial3D = kit.mat(Color(0.25, 0.14, 0.07), "", 0.75)
+	var nylon: StandardMaterial3D = kit.mat(Color(0.06, 0.06, 0.07), "", 0.9)
+	for i: int in range(6):
+		var hx: float = -10.6 + (i % 3) * 0.55
+		var hy: float = 1.55 - float(i / 3) * 0.45
+		kit.prop(Vector3(hx, hy, wall_z + 0.03), Vector3(0.14, 0.28, 0.06), leather if i % 2 == 0 else nylon)
+	for i: int in range(4):
+		kit.prop_carton(Vector3(-11.9 + 0.0, 1.13 + 0.06, counter_z - 1.9 + i * 0.35), Vector3(0.3, 0.07, 0.22), [Color(0.2, 0.3, 0.2), Color(0.55, 0.1, 0.1)][i % 2], Color(0.9, 0.8, 0.3))
+	# Targets and posters on the side walls.
+	var paper: StandardMaterial3D = kit.mat(Color(0.93, 0.92, 0.86), "", 0.9)
+	var ink: StandardMaterial3D = kit.mat(Color(0.1, 0.1, 0.1), "", 0.9)
+	var bull: StandardMaterial3D = kit.mat(Color(0.75, 0.1, 0.08), "", 0.9)
+	for i: int in range(3):
+		var tz: float = SHOP_BACK + 2.0 + i * 1.3
+		var tx: float = HALF_W - 0.36
+		kit.prop(Vector3(tx, 3.1, tz), Vector3(0.01, 0.9, 0.6), paper)
+		kit.prop(Vector3(tx - 0.006, 3.15, tz), Vector3(0.01, 0.5, 0.36), ink)
+		kit.prop(Vector3(tx - 0.012, 3.2, tz), Vector3(0.01, 0.12, 0.12), bull)
+	kit.prop(Vector3(-HALF_W + 0.36, 3.0, SHOP_BACK + 12.2), Vector3(0.01, 1.1, 0.8), kit.mat(Color(0.2, 0.3, 0.22), "", 0.9))
+	kit.prop(Vector3(-HALF_W + 0.355, 3.2, SHOP_BACK + 12.2), Vector3(0.01, 0.4, 0.6), kit.mat(Color(0.85, 0.6, 0.2), "", 0.9))
+	kit.sign_label("NO  LOADED  FIREARMS  BEYOND  THIS  POINT", Vector3(2.0, 3.55, z0 + 0.37), 30, Color(0.95, 0.2, 0.15), 0.0)
+	kit.sign_label("HUNTER SAFETY  -  CLASSES SAT 9AM", Vector3(-HALF_W + 0.37, 2.3, SHOP_BACK + 12.2), 18, Color(0.95, 0.92, 0.8), PI * 0.5)
+	kit.sign_label("LAYAWAY  AVAILABLE", Vector3(-9.1, 3.55, z0 + 0.37), 26, Color(0.95, 0.9, 0.7), 0.0)
+	kit.end_props()

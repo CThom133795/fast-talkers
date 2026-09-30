@@ -250,7 +250,83 @@ func _run() -> void:
 		car.occupied = false
 		car.queue_free()
 		await _frames(2)
+	_check_props()
 	world.queue_free()
 	await _frames(3)
 	print("BUILDING LANDMARKS RESULT: %d checks, %d failures" % [checks, failures])
 	quit(0 if failures == 0 else 1)
+
+
+
+## Trade dressing (docs/INTERIOR_PROPS.md): collision-free, never interactable, potato_optional.
+func _check_props() -> void:
+	var props: Array[Node3D] = []
+	for node: Node in world.find_children("Props", "Node3D", true, false):
+		if node.has_meta("prop_node"):
+			props.append(node as Node3D)
+	var owners: Dictionary = {}
+	var solid: int = 0
+	var far: int = 0
+	var grouped: int = 0
+	for prop_node: Node3D in props:
+		var top: Node = prop_node
+		while top.get_parent() != world:
+			top = top.get_parent()
+		owners[str(top.name)] = true
+		if prop_node.is_in_group("potato_optional"):
+			grouped += 1
+		for child: Node in prop_node.find_children("*", "", true, false):
+			if child is CollisionObject3D or child is CollisionShape3D:
+				solid += 1
+			if child is GeometryInstance3D:
+				var range_end: float = (child as GeometryInstance3D).visibility_range_end
+				if range_end <= 0.0 or range_end > 40.0:
+					far += 1
+	print("  prop nodes: ", props.size(), " in ", owners.keys())
+	for owner: String in ["GunStore", "Burger", "Nightclub", "StripClub", "Hotel", "Highrise", "Garage", "Motel"]:
+		var found: bool = false
+		for key: String in owners:
+			if key.to_lower().begins_with(owner.to_lower()) or key.to_lower() == owner.to_lower():
+				found = true
+		_check(found, "%s has a trade-dressing Props node" % owner)
+	var midtown: int = 0
+	for key: String in owners:
+		if key.begins_with("Interior"):
+			midtown += 1
+	_check(midtown >= 12, "every Midtown shop interior has trade dressing (%d)" % midtown)
+	_check(grouped == props.size() and props.size() >= 20, "every Props node is potato_optional (%d/%d)" % [grouped, props.size()])
+	_check(solid == 0, "trade dressing has no collision (%d collision nodes)" % solid)
+	_check(far == 0, "trade dressing draws within 40 m (%d unbounded pieces)" % far)
+	var gun_props: Node3D = null
+	for prop_node: Node3D in props:
+		if prop_node.has_meta("display_guns"):
+			gun_props = prop_node
+	var guns: int = int(gun_props.get_meta("display_guns")) if gun_props != null else 0
+	_check(guns >= 20, "gun store wall shows >= 20 display guns (%d)" % guns)
+	var door_in_props: bool = false
+	for nodes: Variant in world._door_nodes:
+		if nodes is Array:
+			for door_node: Variant in nodes:
+				for prop_node: Node3D in props:
+					if door_node is Node and is_instance_valid(door_node) and prop_node.is_ancestor_of(door_node as Node):
+						door_in_props = true
+	_check(not door_in_props, "no interactable door or lift lives in the trade dressing")
+	var near_gun_wall: int = 0
+	if gun_props != null:
+		var shop: Node3D = world.plot_nodes["gunstore"]
+		for entry: Dictionary in world.interactable_doors:
+			var local: Vector3 = shop.global_transform.affine_inverse() * (entry["position"] as Vector3)
+			if absf(local.x) < 11.0 and local.z > 7.1 and local.z < 10.5 and local.y < 4.0:
+				near_gun_wall += 1
+	_check(near_gun_wall == 0, "display guns are not interactable (no door/pickup entry on the gun wall)")
+	world.set_potato_mode(true)
+	var hidden: int = 0
+	for prop_node: Node3D in props:
+		if not prop_node.visible:
+			hidden += 1
+	world.set_potato_mode(false)
+	var shown: int = 0
+	for prop_node: Node3D in props:
+		if prop_node.visible:
+			shown += 1
+	_check(hidden == props.size() and shown == props.size(), "potato mode hides the trade dressing and restores it (%d hidden, %d shown)" % [hidden, shown])

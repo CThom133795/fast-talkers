@@ -72,9 +72,14 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	for index: int in range(4):
 		_room(kit, -10.5 + index * 7.0, carpet, index)
 	kit.interior_light(Vector3(0, DECK_Y + 2.6, -6.0), Color(1.0, 0.86, 0.62), 2.0, 16.0)
+	kit.begin_props()
+	for index: int in range(4):
+		_room_props(kit, -10.5 + index * 7.0, index)
+	kit.end_props()
 	kit.end_interior()
 	kit.node.set_meta("routes", {"east_stair": EAST_ROUTE, "west_stair": WEST_ROUTE})
 	kit.node.set_meta("upper_rooms", 4)
+	kit.finish_props()
 	kit.finish()
 
 
@@ -123,3 +128,22 @@ static func _room(kit: Kit, cx: float, carpet: Material, index: int) -> void:
 	kit.box(Vector3(cx + 2.8, y + 0.22, -10.1), Vector3(0.45, 0.44, 0.6), kit.mat(Color(0.92, 0.92, 0.9)), true)
 	kit.box(Vector3(cx + 1.6, y + 0.8, -10.5), Vector3(0.7, 0.12, 0.45), kit.mat(Color(0.92, 0.92, 0.9)), true)
 	kit.box(Vector3(cx + 1.6, y + 1.5, -10.8), Vector3(0.6, 0.7, 0.02), kit.mat(Color(0.6, 0.66, 0.7), "", 0.05))
+
+
+## Room dressing (docs/INTERIOR_PROPS.md): phone and Bible on the nightstand, ice bucket and a
+## brochure fan on the dresser, folded towels, a DO NOT DISTURB hanger by the door. No collision.
+static func _room_props(kit: Kit, cx: float, index: int) -> void:
+	var y: float = DECK_Y
+	var white: Material = kit.mat(Color(0.94, 0.93, 0.9), "", 0.9)
+	kit.prop(Vector3(cx - 3.12, y + 0.64, -7.08), Vector3(0.2, 0.08, 0.16), kit.mat(Color(0.8, 0.76, 0.66), "", 0.6))
+	kit.prop(Vector3(cx - 3.12, y + 0.7, -7.1), Vector3(0.2, 0.04, 0.06), kit.mat(Color(0.8, 0.76, 0.66), "", 0.6))
+	kit.prop(Vector3(cx - 2.86, y + 0.63, -7.5), Vector3(0.14, 0.05, 0.2), kit.mat(Color(0.12, 0.1, 0.1), "", 0.8))
+	kit.prop(Vector3(cx + 2.7, y + 1.02, -2.5), Vector3(0.22, 0.22, 0.22), kit.mat(Color(0.8, 0.62, 0.3), "", 0.3))
+	kit.prop(Vector3(cx + 2.7, y + 1.14, -2.5), Vector3(0.24, 0.02, 0.24), kit.mat(Color(0.8, 0.62, 0.3), "", 0.3))
+	for b: int in range(3):
+		kit.prop(Vector3(cx + 2.72, y + 0.91 + b * 0.004, -3.9 + b * 0.09), Vector3(0.12, 0.008, 0.2), kit.mat([Color(0.2, 0.55, 0.75), Color(0.95, 0.7, 0.2), Color(0.8, 0.25, 0.2)][b], "", 0.8), 0.2 * b)
+	for t: int in range(2):
+		kit.prop(Vector3(cx - 1.9 + t * 0.7, y + 0.74, -5.5), Vector3(0.45, 0.06 + t * 0.03, 0.3), white)
+	kit.prop(Vector3(cx + 0.7, y + 1.2, -1.18), Vector3(0.1, 0.25, 0.012), kit.mat(Color(0.85, 0.2, 0.15) if index % 2 == 0 else Color(0.95, 0.85, 0.3), "", 0.8))
+	kit.prop(Vector3(cx + 2.9, y + 1.3, -10.8), Vector3(0.5, 0.08, 0.1), kit.mat(Color(0.6, 0.62, 0.64), "", 0.3))
+	kit.prop(Vector3(cx + 2.9, y + 1.1, -10.79), Vector3(0.36, 0.4, 0.06), white)

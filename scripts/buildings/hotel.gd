@@ -61,11 +61,13 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_ceiling(kit)
 	kit.interior_light(Vector3(0, 3.9, 4.0), Color(1.0, 0.88, 0.66), 2.6, 22.0)
 	kit.interior_light(Vector3(0, 3.6, -10.0), Color(0.95, 0.95, 0.9), 1.5, 13.0)
+	_lobby_props(kit)
 	kit.end_interior()
 	kit.world._landmark("HOTEL MERIDIAN", Vector3(0, 0, HALF.y + 5.0))
 	kit.node.set_meta("walk_in", true)
 	kit.node.set_meta("interior_half", HALF)
 	kit.node.set_meta("routes", {"front_to_service": ROUTE, "bar_door_to_front": BAR_ROUTE})
+	kit.finish_props()
 	kit.finish()
 
 
@@ -257,3 +259,28 @@ static func _ceiling(kit: BuildingKit) -> void:
 	kit.box(Vector3(HALF.x - 0.16, FLOOR_Y + 0.5, lobby_center), Vector3(0.02, 1.0, lobby_depth), trim)
 	for span: Vector2 in [Vector2(BACK_Z + 0.15, 1.1), Vector2(2.9, HALF.y - 0.15)]:
 		kit.box(Vector3(-HALF.x + 0.16, FLOOR_Y + 0.5, (span.x + span.y) * 0.5), Vector3(0.02, 1.0, span.y - span.x), trim)
+
+
+## Lobby dressing (docs/INTERIOR_PROPS.md): a brochure stand, key cards and a fruit bowl on the desk,
+## a "PLEASE RING" card by the bell, bags on the luggage cart. Collision-free, hidden in potato mode.
+static func _lobby_props(kit: BuildingKit) -> void:
+	kit.begin_props()
+	var top: float = FLOOR_Y + 1.16
+	var acrylic: Material = kit.mat(Color(0.85, 0.88, 0.9), "", 0.1)
+	kit.prop(Vector3(8.75, top + 0.18, 7.3), Vector3(0.12, 0.36, 0.7), acrylic)
+	var brochure: Array[Color] = [Color(0.2, 0.55, 0.75), Color(0.95, 0.75, 0.2), Color(0.85, 0.3, 0.2), Color(0.3, 0.6, 0.35), Color(0.9, 0.9, 0.85), Color(0.55, 0.3, 0.6)]
+	for index: int in range(6):
+		kit.prop(Vector3(8.68, top + 0.1 + float(index / 3) * 0.16, 7.07 + (index % 3) * 0.23), Vector3(0.01, 0.14, 0.1), kit.mat(brochure[index], "", 0.8))
+	for index: int in range(5):
+		kit.prop(Vector3(8.85 + index * 0.012, top + 0.004 + index * 0.003, 3.0 + index * 0.02), Vector3(0.054, 0.003, 0.086), kit.mat(Color(0.85, 0.8, 0.6) if index % 2 == 0 else Color(0.9, 0.9, 0.92), "", 0.4))
+	kit.prop(Vector3(8.85, top + 0.04, 4.0), Vector3(0.34, 0.08, 0.34), kit.mat(Color(0.75, 0.7, 0.6), "", 0.3))
+	var fruit: Array[Color] = [Color(0.85, 0.15, 0.1), Color(0.95, 0.8, 0.15), Color(0.95, 0.55, 0.1), Color(0.4, 0.65, 0.2), Color(0.85, 0.15, 0.1)]
+	for index: int in range(5):
+		kit.prop(Vector3(8.78 + (index % 3) * 0.08, top + 0.1 + float(index / 3) * 0.05, 3.94 + (index % 2) * 0.1), Vector3(0.08, 0.08, 0.08), kit.mat(fruit[index], "", 0.5))
+	kit.prop(Vector3(8.7, top + 0.05, 2.25), Vector3(0.01, 0.1, 0.16), kit.mat(Color(0.95, 0.93, 0.86), "", 0.8))
+	kit.prop(Vector3(8.9, top + 0.01, 5.3), Vector3(0.14, 0.01, 0.02), kit.mat(Color(0.1, 0.1, 0.12), "", 0.4), 0.5)
+	# Bags on the luggage cart.
+	kit.prop(Vector3(6.2, FLOOR_Y + 1.02, 10.5), Vector3(0.55, 0.45, 0.22), kit.mat(Color(0.4, 0.12, 0.1), "", 0.7))
+	kit.prop(Vector3(6.2, FLOOR_Y + 1.55, 10.9), Vector3(0.1, 0.7, 0.45), kit.mat(Color(0.12, 0.12, 0.14), "", 0.8))
+	kit.prop(Vector3(6.2, FLOOR_Y + 0.4, 10.55), Vector3(0.4, 0.28, 0.2), kit.mat(Color(0.35, 0.3, 0.22), "", 0.7))
+	kit.end_props()

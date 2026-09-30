@@ -74,11 +74,13 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_back_of_house(kit)
 	kit.interior_light(Vector3(0, 6.2, 0), Color(0.8, 0.45, 1.0), 2.6, 22.0)
 	kit.interior_light(Vector3(-4, 3.0, -14), Color(1.0, 0.92, 0.78), 1.6, 12.0)
+	_club_props(kit)
 	kit.end_interior()
 	kit.world._landmark("CLUB VOLTAGE", Vector3(-4, 0, HALF.y + 5.0))
 	kit.node.set_meta("walk_in", true)
 	kit.node.set_meta("interior_half", HALF)
 	kit.node.set_meta("routes", {"front_to_alley": ROUTE, "fire_exit": FIRE_ROUTE, "mezzanine": MEZZ_ROUTE})
+	kit.finish_props()
 	kit.finish()
 
 
@@ -246,3 +248,42 @@ static func _back_of_house(kit: BuildingKit) -> void:
 	kit.sign_label("DEC 1999", Vector3(10.5, FLOOR_Y + 2.38, -17.78), 14, Color(0.6, 0.1, 0.1))
 	kit.box(Vector3(8.0, FLOOR_Y + 1.9, -17.55), Vector3(0.6, 0.45, 0.4), kit.mat(Color(0.2, 0.2, 0.2), "metal"))
 	kit.box(Vector3(8.0, FLOOR_Y + 1.9, -17.34), Vector3(0.46, 0.33, 0.02), kit.glow(Color(0.5, 0.75, 0.6), 0.6))
+
+
+## Club dressing (docs/INTERIOR_PROPS.md): glasses, bottles, ashtrays and cash on the bar and tables,
+## coats on hangers at the coat check. Collision-free, merged, hidden in potato mode.
+static func _club_props(kit: BuildingKit) -> void:
+	kit.begin_props()
+	var glass: Material = kit.mat(Color(0.75, 0.85, 0.9), "", 0.05)
+	var beer: Material = kit.mat(Color(0.85, 0.55, 0.12), "", 0.2)
+	var ash: Material = kit.mat(Color(0.2, 0.2, 0.22), "", 0.6)
+	var cash: Material = kit.mat(Color(0.45, 0.6, 0.4), "", 0.9)
+	var napkin: Material = kit.mat(Color(0.95, 0.95, 0.92), "", 0.9)
+	var top: float = FLOOR_Y + 1.165
+	for index: int in range(12):
+		var z: float = -5.0 + index * 1.05
+		kit.prop(Vector3(-12.3, top + 0.005, z), Vector3(0.12, 0.01, 0.12), napkin)
+		kit.prop(Vector3(-12.3, top + 0.07, z), Vector3(0.07, 0.13, 0.07), beer if index % 3 == 0 else glass)
+		if index % 2 == 0:
+			kit.prop_bottle(Vector3(-12.55, top, z + 0.3), [Color(0.1, 0.35, 0.12), Color(0.45, 0.25, 0.08), Color(0.12, 0.12, 0.3)][index % 3], 0.3)
+		if index % 4 == 1:
+			kit.prop(Vector3(-12.75, top + 0.02, z), Vector3(0.14, 0.04, 0.14), ash)
+			kit.prop(Vector3(-12.45, top + 0.004, z - 0.3), Vector3(0.15, 0.008, 0.07), cash, 0.4)
+	for z: float in [-7.0, -2.0]:
+		var t: float = FLOOR_Y + 0.56
+		kit.prop(Vector3(12.9, t + 0.02, z + 0.3), Vector3(0.14, 0.04, 0.14), ash)
+		kit.prop_bottle(Vector3(12.8, t, z - 0.4), Color(0.1, 0.3, 0.1), 0.34)
+		for g: int in range(3):
+			kit.prop(Vector3(12.7 + g * 0.2, t + 0.06, z - 0.05 + g * 0.18), Vector3(0.07, 0.12, 0.07), glass)
+	for at: Vector2 in [Vector2(6.5, 8.0), Vector2(9.5, 8.5), Vector2(6.5, -8.0)]:
+		var t2: float = FLOOR_Y + 1.125
+		kit.prop(Vector3(at.x - 0.15, t2 + 0.06, at.y), Vector3(0.07, 0.12, 0.07), beer)
+		kit.prop(Vector3(at.x + 0.15, t2 + 0.02, at.y + 0.1), Vector3(0.13, 0.04, 0.13), ash)
+	# Coat check: coats and empty hangers on the rail.
+	var coats: Array[Material] = [kit.mat(Color(0.08, 0.08, 0.09), "", 0.9), kit.mat(Color(0.3, 0.22, 0.14), "", 0.9), kit.mat(Color(0.25, 0.1, 0.1), "", 0.9)]
+	for index: int in range(14):
+		var x: float = 10.4 + index * 0.31
+		kit.prop(Vector3(x, FLOOR_Y + 1.82, LOBBY_Z + 1.0), Vector3(0.02, 0.06, 0.36), kit.mat(Color(0.6, 0.6, 0.62), "", 0.3))
+		if index % 4 != 3:
+			kit.prop(Vector3(x, FLOOR_Y + 1.35, LOBBY_Z + 1.0), Vector3(0.14, 0.9, 0.5), coats[index % 3])
+	kit.end_props()

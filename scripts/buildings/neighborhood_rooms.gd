@@ -79,7 +79,9 @@ static func diner(world: Node3D, plot: Dictionary) -> void:
 	kit.box(Vector3(9.9, 2, -4.3), Vector3(2.4, 3.5, 1.0), kit.mat(CREAM), true)
 	kit.sign_label("ORDER HERE", Vector3(-6, 2.2, -5.82), 28, RED)
 	kit.interior_light(Vector3(0, 3.6, 0), Color(1, 0.86, 0.65), 2.1, 18)
+	_diner_props(kit)
 	kit.end_interior()
+	kit.finish_props()
 	kit.finish()
 
 static func motel(world: Node3D, plot: Dictionary) -> void:
@@ -109,3 +111,58 @@ static func motel(world: Node3D, plot: Dictionary) -> void:
 	kit.interior_light(Vector3(0, 3.5, 3), Color(1, 0.86, 0.65), 2, 21)
 	kit.end_interior()
 	kit.finish()
+
+
+## Diner dressing (docs/INTERIOR_PROPS.md): table caddies, mugs and plates on every booth; pie case,
+## coffee pots, milkshake mixer, straws and a lit menu board at the counter. Collision-free, merged,
+## hidden in potato mode.
+static func _diner_props(kit: Kit) -> void:
+	kit.begin_props()
+	var chrome: Material = kit.mat(Color(0.75, 0.76, 0.78), "", 0.2)
+	var white: Material = kit.mat(Color(0.95, 0.94, 0.9), "", 0.6)
+	var ketchup: Material = kit.mat(Color(0.75, 0.06, 0.04), "", 0.4)
+	var mustard: Material = kit.mat(Color(0.95, 0.75, 0.1), "", 0.4)
+	var coffee: Material = kit.mat(Color(0.12, 0.06, 0.03), "", 0.2)
+	var menu: Material = kit.mat(Color(0.55, 0.08, 0.06), "", 0.7)
+	for x: float in [-7.0, 7.0]:
+		for z: float in [0.0, 5.0]:
+			var top: float = 0.12 + 1.05
+			kit.prop(Vector3(x - 1.0, top + 0.07, z), Vector3(0.1, 0.14, 0.12), chrome)
+			kit.prop(Vector3(x - 1.0, top + 0.07, z), Vector3(0.11, 0.1, 0.08), white)
+			kit.prop(Vector3(x - 0.82, top + 0.1, z - 0.06), Vector3(0.06, 0.2, 0.06), ketchup)
+			kit.prop(Vector3(x - 0.82, top + 0.1, z + 0.06), Vector3(0.06, 0.2, 0.06), mustard)
+			kit.prop(Vector3(x - 1.16, top + 0.04, z - 0.05), Vector3(0.035, 0.08, 0.035), white)
+			kit.prop(Vector3(x - 1.16, top + 0.04, z + 0.05), Vector3(0.035, 0.08, 0.035), kit.mat(Color(0.2, 0.2, 0.2), "", 0.4))
+			for side: float in [-1.0, 1.0]:
+				kit.prop(Vector3(x - 0.2, top + 0.008, z + side * 0.38), Vector3(0.28, 0.016, 0.28), white)
+				kit.prop(Vector3(x + 0.35, top + 0.05, z + side * 0.42), Vector3(0.08, 0.1, 0.08), white)
+				kit.prop(Vector3(x + 0.35, top + 0.098, z + side * 0.42), Vector3(0.065, 0.006, 0.065), coffee)
+			kit.prop(Vector3(x - 0.1, top + 0.012, z - 0.05), Vector3(0.24, 0.02, 0.34), menu, 0.3)
+	# Counter: pie case, coffee station, milkshake mixer, straw and napkin dispensers.
+	var ctop: float = 1.44
+	kit.prop(Vector3(-8.4, ctop + 0.25, -4.3), Vector3(0.9, 0.5, 0.6), kit.glass_material())
+	kit.prop(Vector3(-8.4, ctop + 0.01, -4.3), Vector3(0.92, 0.02, 0.62), chrome)
+	kit.prop(Vector3(-8.4, ctop + 0.25, -4.3), Vector3(0.88, 0.02, 0.58), chrome)
+	for i: int in range(4):
+		var pie: Material = kit.mat([Color(0.85, 0.6, 0.3), Color(0.55, 0.1, 0.15), Color(0.95, 0.9, 0.6), Color(0.35, 0.2, 0.1)][i], "", 0.7)
+		kit.prop(Vector3(-8.7 + (i % 2) * 0.55, ctop + 0.05 + float(i / 2) * 0.24, -4.3), Vector3(0.3, 0.05, 0.3), pie)
+	for i: int in range(3):
+		var px: float = -3.8 + i * 0.3
+		kit.prop(Vector3(px, ctop + 0.02, -4.55), Vector3(0.2, 0.04, 0.2), kit.mat(Color(0.1, 0.1, 0.1), "", 0.5))
+		kit.prop(Vector3(px, ctop + 0.12, -4.55), Vector3(0.15, 0.16, 0.15), kit.glass_material())
+		kit.prop(Vector3(px, ctop + 0.09, -4.55), Vector3(0.13, 0.1, 0.13), coffee if i < 2 else kit.mat(Color(0.8, 0.45, 0.1), "", 0.3))
+	kit.prop(Vector3(-3.5, ctop + 0.35, -4.72), Vector3(0.95, 0.7, 0.14), chrome)
+	kit.prop(Vector3(-6.6, ctop + 0.2, -4.5), Vector3(0.22, 0.4, 0.22), kit.mat(Color(0.35, 0.75, 0.7), "", 0.35))
+	kit.prop(Vector3(-6.6, ctop + 0.46, -4.5), Vector3(0.16, 0.12, 0.25), kit.mat(Color(0.35, 0.75, 0.7), "", 0.35))
+	kit.prop(Vector3(-6.6, ctop + 0.1, -4.38), Vector3(0.09, 0.2, 0.09), chrome)
+	kit.prop(Vector3(-7.2, ctop + 0.1, -4.1), Vector3(0.08, 0.2, 0.08), kit.glass_material())
+	kit.prop(Vector3(-5.5, ctop + 0.07, -4.1), Vector3(0.1, 0.14, 0.12), chrome)
+	for i: int in range(5):
+		kit.prop(Vector3(-9.2 + i * 0.35, 1.1, -3.25), Vector3(0.34, 0.03, 0.34), kit.mat(Color(0.75, 0.76, 0.78), "", 0.2))
+	# Menu boards over the counter.
+	for bx: float in [-8.3, -3.7]:
+		kit.prop(Vector3(bx, 3.1, -5.8), Vector3(2.1, 0.9, 0.04), kit.mat(Color(0.08, 0.08, 0.08), "", 0.8))
+		kit.prop(Vector3(bx, 3.1, -5.775), Vector3(1.96, 0.78, 0.01), kit.glow(Color(1.0, 0.93, 0.78), 0.55))
+	kit.sign_label("BIG BOY  2.49    DOUBLE  3.29\nCHILI DOG  1.79    FRIES  .99\nPATTY MELT  2.99", Vector3(-8.3, 3.1, -5.76), 15, RED)
+	kit.sign_label("MALTS & SHAKES  1.59\nPIE BY THE SLICE  1.25\nBOTTOMLESS COFFEE  .75", Vector3(-3.7, 3.1, -5.76), 15, RED)
+	kit.end_props()

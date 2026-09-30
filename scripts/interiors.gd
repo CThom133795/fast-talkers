@@ -345,6 +345,7 @@ func build_interior() -> void:
 		for z: float in [lerpf(z_back, z_front, 0.3), lerpf(z_back, z_front, 0.72)]:
 			_box(Vector3(x, GROUND - 0.12, z), Vector3(1.4, 0.05, 0.35), fixture)
 	call("_furnish_" + kind)
+	var props: Node3D = _dress(node)
 	var lamp: OmniLight3D = OmniLight3D.new()
 	lamp.light_color = style["lamp"]
 	lamp.light_energy = 2.3
@@ -363,6 +364,7 @@ func build_interior() -> void:
 			# Furnished rooms only draw up close; from further out the lit shop window reads.
 			geometry.visibility_range_end = 45.0
 			geometry.visibility_range_end_margin = 5.0
+	_finish_props(props)
 
 
 func _looks() -> Dictionary:
@@ -781,3 +783,202 @@ func _furnish_laundry() -> void:
 	var vend: Vector3 = Vector3(hw - 0.6, 0, z_back + 1.0)
 	_box(vend + Vector3(0, 0.95, 0), Vector3(0.9, 1.9, 0.8), _mat(Color(0.75, 0.12, 0.1), "", 0.5), true)
 	_box(vend + Vector3(-0.46, 1.2, 0), Vector3(0.02, 1.0, 0.6), world._glow(Color(1.0, 0.9, 0.8), 0.9))
+
+
+
+# --- Trade dressing (docs/INTERIOR_PROPS.md) ------------------------------------------------------
+## Small collision-free props that say what the business is. They go into a "Props" child node
+## that is merged per material, drawn within PROP_RANGE on the interior layer, shadowless, and in the
+## "potato_optional" group (world.set_potato_mode hides it). No RNG: the city's seeded generation
+## is unchanged. Nothing here collides, so routes and cover are the same with or without it.
+const PROP_RANGE: float = 34.0
+
+
+func _dress(node: Node3D) -> Node3D:
+	var props: Node3D = Node3D.new()
+	props.name = "Props"
+	node.add_child(props)
+	world._target = props
+	_wall_dressing()
+	var method: String = "_props_" + kind
+	if has_method(method):
+		call(method)
+	world._target = node
+	return props
+
+
+func _finish_props(props: Node3D) -> void:
+	world._batch_static_meshes(props)
+	world.MeshMerge.merge_children(props)
+	for child: Node in props.get_children():
+		if child is GeometryInstance3D:
+			var geometry: GeometryInstance3D = child as GeometryInstance3D
+			geometry.layers = 1 << (world.INTERIOR_LAYER - 1)
+			geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			geometry.visibility_range_end = PROP_RANGE
+			geometry.visibility_range_end_margin = 3.0
+	props.add_to_group("potato_optional")
+	props.set_meta("prop_node", true)
+
+
+## Every room: a wall clock and a 1999 calendar on the left wall, a notice board on the right.
+func _wall_dressing() -> void:
+	var mid_z: float = (z_front + z_back) * 0.5
+	var paper: StandardMaterial3D = _mat(Color(0.95, 0.94, 0.9), "", 0.9)
+	_box(Vector3(-hw + 0.05, 2.9, mid_z - 1.0), Vector3(0.04, 0.38, 0.38), _mat(Color(0.1, 0.1, 0.1), "", 0.4))
+	_box(Vector3(-hw + 0.075, 2.9, mid_z - 1.0), Vector3(0.02, 0.32, 0.32), paper)
+	_box(Vector3(-hw + 0.05, 1.85, mid_z + 1.4), Vector3(0.02, 0.5, 0.36), paper)
+	_box(Vector3(-hw + 0.06, 2.02, mid_z + 1.4), Vector3(0.02, 0.18, 0.34), _mat(Color(0.3, 0.5, 0.7), "", 0.8))
+	_box(Vector3(hw - 0.05, 1.8, mid_z + 2.2), Vector3(0.04, 0.8, 1.2), _mat(Color(0.6, 0.45, 0.3), "", 0.9))
+	for index: int in range(5):
+		var colors: Array = [Color(0.95, 0.94, 0.9), Color(0.95, 0.85, 0.4), Color(0.6, 0.8, 0.95), Color(0.95, 0.94, 0.9), Color(0.95, 0.6, 0.6)]
+		_box(Vector3(hw - 0.075, 1.65 + (index % 2) * 0.3, mid_z + 1.8 + index * 0.2), Vector3(0.01, 0.22, 0.17), _mat(colors[index], "", 0.9))
+
+
+func _binders(centre: Vector3, count: int, along_x: bool) -> void:
+	var colors: Array = [Color(0.12, 0.2, 0.45), Color(0.1, 0.1, 0.1), Color(0.55, 0.1, 0.1), Color(0.85, 0.85, 0.8), Color(0.2, 0.4, 0.25)]
+	for index: int in range(count):
+		var offset: float = (index - count * 0.5) * 0.07
+		_box(centre + (Vector3(offset, 0, 0) if along_x else Vector3(0, 0, offset)), Vector3(0.06, 0.3, 0.26) if along_x else Vector3(0.26, 0.3, 0.06), _mat(colors[index % colors.size()], "", 0.7))
+
+
+## Offices (exchange, imports, logistics, authority, freight): a wall shelf of binders and archive
+## boxes on the right wall, a fax and phone on a side table by it.
+func _office_wall() -> void:
+	var mid_z: float = (z_front + z_back) * 0.5
+	var x: float = hw - 0.2
+	_box(Vector3(x, 1.95, mid_z - 1.6), Vector3(0.3, 0.03, 2.0), _wood())
+	_binders(Vector3(x, 2.12, mid_z - 2.0), 9, false)
+	for index: int in range(2):
+		_box(Vector3(x, 2.1, mid_z - 1.0 + index * 0.38), Vector3(0.28, 0.26, 0.34), _mat(Color(0.8, 0.72, 0.55), "", 0.9))
+
+
+func _props_exchange() -> void:
+	_office_wall()
+
+
+func _props_imports() -> void:
+	_office_wall()
+
+
+func _props_logistics() -> void:
+	_office_wall()
+
+
+func _props_authority() -> void:
+	_office_wall()
+
+
+func _props_freight() -> void:
+	_office_wall()
+
+
+func _props_bar() -> void:
+	var bar_z: float = z_back + 3.2
+	var bar_length: float = hw * 2.0 - 7.0
+	var bar_x: float = hw - bar_length * 0.5 - 1.0
+	var top: float = 1.1 + 0.06
+	var glass: StandardMaterial3D = _mat(Color(0.75, 0.85, 0.9), "", 0.05)
+	var beer: StandardMaterial3D = _mat(Color(0.85, 0.55, 0.12), "", 0.2)
+	var ash: StandardMaterial3D = _mat(Color(0.2, 0.2, 0.22), "", 0.6)
+	for index: int in range(int(bar_length / 1.1)):
+		var x: float = bar_x - bar_length * 0.5 + 0.6 + index * 1.1
+		_box(Vector3(x, top + 0.07, bar_z + 0.15), Vector3(0.08, 0.14, 0.08), beer if index % 2 == 0 else glass)
+		if index % 3 == 0:
+			_box(Vector3(x + 0.35, top + 0.02, bar_z + 0.1), Vector3(0.14, 0.04, 0.14), ash)
+	for index: int in range(3):
+		var booth: Vector3 = Vector3(-hw + 1.0, 0, z_back + 4.5 + index * 3.4)
+		_box(booth + Vector3(0.4, 0.83, -0.2), Vector3(0.08, 0.12, 0.08), beer)
+		_box(booth + Vector3(0.5, 0.79, 0.25), Vector3(0.14, 0.04, 0.14), ash)
+	var pool: Vector3 = Vector3(hw * 0.2, 0, lerpf(z_back, z_front, 0.62))
+	var balls: Array = [Color(0.95, 0.95, 0.9), Color(0.9, 0.75, 0.1), Color(0.1, 0.2, 0.7), Color(0.8, 0.1, 0.1), Color(0.4, 0.1, 0.5), Color(0.9, 0.45, 0.1), Color(0.1, 0.1, 0.1)]
+	for index: int in range(7):
+		_box(pool + Vector3(-0.3 + (index % 3) * 0.25, 0.87, -0.5 + float(index / 3) * 0.45), Vector3(0.06, 0.06, 0.06), _mat(balls[index], "", 0.2))
+	_box(pool + Vector3(0.45, 0.87, 0.2), Vector3(0.03, 0.03, 1.4), _wood())
+
+
+func _props_hotel() -> void:
+	var top: float = 1.1 + 0.07
+	_box(Vector3(1.5, top + 0.04, z_back + 4.0), Vector3(0.12, 0.08, 0.12), _mat(Color(0.82, 0.66, 0.32), "", 0.3))
+	for index: int in range(6):
+		var colors: Array = [Color(0.2, 0.55, 0.75), Color(0.95, 0.75, 0.2), Color(0.85, 0.3, 0.2), Color(0.3, 0.6, 0.35), Color(0.9, 0.9, 0.85), Color(0.55, 0.3, 0.6)]
+		_box(Vector3(2.6 + (index % 3) * 0.14, top + 0.08 + float(index / 3) * 0.1, z_back + 4.2), Vector3(0.1, 0.16, 0.01), _mat(colors[index], "", 0.8))
+	_box(Vector3(0.5, top + 0.01, z_back + 4.0), Vector3(0.5, 0.02, 0.35), _mat(Color(0.2, 0.25, 0.4), "", 0.7))
+	var cart: Vector3 = Vector3(hw * 0.5, 0, z_front - 3.0)
+	_box(cart + Vector3(0, 1.05, -0.2), Vector3(0.5, 0.35, 0.25), _mat(Color(0.12, 0.12, 0.14), "", 0.8))
+
+
+func _props_pawn() -> void:
+	var case_z: float = z_back + 3.5
+	var gold: StandardMaterial3D = _mat(Color(0.9, 0.72, 0.3), "", 0.2)
+	var silver: StandardMaterial3D = _mat(Color(0.78, 0.8, 0.82), "", 0.2)
+	var black: StandardMaterial3D = _mat(Color(0.08, 0.08, 0.09), "", 0.5)
+	var tag: StandardMaterial3D = _mat(Color(0.96, 0.95, 0.88), "", 0.8)
+	var length: float = hw * 1.4
+	for index: int in range(int(length / 0.45)):
+		var x: float = -length * 0.5 + 0.3 + index * 0.45
+		var item: StandardMaterial3D = [gold, silver, black][index % 3]
+		_box(Vector3(x, 0.88, case_z), Vector3(0.12, 0.03 if index % 3 != 2 else 0.1, 0.12 if index % 3 != 2 else 0.16), item)
+		_box(Vector3(x + 0.1, 0.87, case_z + 0.15), Vector3(0.06, 0.005, 0.035), tag)
+	for index: int in range(4):
+		_box(Vector3(-hw * 0.5 + index * 0.9, 2.9, z_back + 0.08), Vector3(0.5, 0.35, 0.04), [black, silver, gold, black][index])
+
+
+func _props_cafe() -> void:
+	var counter_z: float = z_back + 2.2
+	var top: float = 1.05 + 0.06
+	var cup: StandardMaterial3D = _mat(Color(0.95, 0.94, 0.9), "", 0.5)
+	var coffee: StandardMaterial3D = _mat(Color(0.12, 0.06, 0.03), "", 0.2)
+	for index: int in range(6):
+		_box(Vector3(hw * 0.5 + 0.5 + (index % 3) * 0.12, top + 0.04 + float(index / 3) * 0.08, counter_z + 0.05), Vector3(0.09, 0.08, 0.09), cup)
+	var pastries: Array = [Color(0.85, 0.6, 0.3), Color(0.95, 0.9, 0.7), Color(0.6, 0.35, 0.15)]
+	for index: int in range(8):
+		_box(Vector3(-hw * 0.15 - 0.6 + index * 0.17, 1.12, counter_z + 0.1), Vector3(0.12, 0.05, 0.1), _mat(pastries[index % 3], "", 0.7))
+	for spot: Vector2 in [Vector2(-hw * 0.6, 0.45), Vector2(-hw * 0.15, 0.55), Vector2(hw * 0.35, 0.5), Vector2(-hw * 0.6, 0.75), Vector2(hw * 0.5, 0.78)]:
+		var table: Vector3 = Vector3(spot.x, 0, lerpf(z_back, z_front, spot.y))
+		_box(table + Vector3(0.1, 0.8, -0.1), Vector3(0.09, 0.08, 0.09), cup)
+		_box(table + Vector3(0.1, 0.835, -0.1), Vector3(0.07, 0.006, 0.07), coffee)
+		_box(table + Vector3(-0.12, 0.79, 0.1), Vector3(0.05, 0.06, 0.05), _mat(Color(0.95, 0.95, 0.95), "", 0.4))
+		_box(table + Vector3(-0.2, 0.765, -0.15), Vector3(0.2, 0.01, 0.2), cup)
+
+
+func _props_store() -> void:
+	# Cigarette rack over the till, candy on the counter front, newspapers by the door.
+	var cx: float = door_x - 2.4
+	var cz: float = z_front - 2.4
+	var packs: Array = [Color(0.85, 0.1, 0.1), Color(0.95, 0.95, 0.9), Color(0.2, 0.4, 0.2), Color(0.2, 0.3, 0.7), Color(0.9, 0.75, 0.2)]
+	_box(Vector3(cx - 0.9, 2.2, cz), Vector3(0.2, 0.9, 1.6), _mat(Color(0.2, 0.2, 0.22), "", 0.6))
+	for row: int in range(4):
+		for column: int in range(8):
+			_box(Vector3(cx - 0.79, 1.85 + row * 0.2, cz - 0.7 + column * 0.2), Vector3(0.02, 0.12, 0.08), _mat(packs[(row + column) % packs.size()], "", 0.7))
+	for index: int in range(10):
+		_box(Vector3(cx + 0.1, 1.12, cz - 0.9 + index * 0.18), Vector3(0.12, 0.04, 0.15), _mat(packs[index % packs.size()], "", 0.6))
+	for index: int in range(3):
+		_box(Vector3(cx + 0.6, 0.32 + index * 0.03, cz + 1.6), Vector3(0.4, 0.03, 0.32), _mat(Color(0.88, 0.87, 0.82), "", 0.9))
+
+
+func _props_garage() -> void:
+	# Tools on the pegboard over the benches, oil cans and a parts box on the bench tops.
+	var steel: StandardMaterial3D = _mat(Color(0.6, 0.62, 0.64), "", 0.3)
+	var red: StandardMaterial3D = _mat(Color(0.75, 0.12, 0.1), "", 0.5)
+	for index: int in range(12):
+		var z: float = z_back + 2.0 + index * 0.35
+		_box(Vector3(hw - 0.12, 1.9 + (index % 3) * 0.3, z), Vector3(0.03, 0.28 - (index % 2) * 0.1, 0.05), steel if index % 4 != 0 else red)
+	for index: int in range(3):
+		var bench: Vector3 = Vector3(hw - 0.6, 0, z_back + 1.5 + index * 2.4)
+		_box(bench + Vector3(0, 1.06, -0.5), Vector3(0.12, 0.2, 0.12), _mat(Color(0.9, 0.75, 0.15), "", 0.5))
+		_box(bench + Vector3(0, 1.06, -0.3), Vector3(0.12, 0.2, 0.12), _mat(Color(0.2, 0.3, 0.6), "", 0.5))
+		_box(bench + Vector3(0, 1.02, 0.4), Vector3(0.4, 0.12, 0.3), red)
+
+
+func _props_laundry() -> void:
+	# Detergent boxes on the washers, a basket and folded laundry on the folding table.
+	var washers: int = int((hw * 2.0 - 3.0) / 0.8)
+	var soap: Array = [Color(0.95, 0.5, 0.1), Color(0.2, 0.45, 0.85), Color(0.95, 0.95, 0.9)]
+	for index: int in range(0, washers, 3):
+		var x: float = -washers * 0.4 + 0.4 + index * 0.8
+		_box(Vector3(x, 1.12, z_back + 0.4), Vector3(0.22, 0.24, 0.12), _mat(soap[index % 3], "", 0.7))
+	var table: Vector3 = Vector3(hw * 0.2, 0, lerpf(z_back, z_front, 0.5))
+	_box(table + Vector3(-0.8, 1.05, 0), Vector3(0.6, 0.3, 0.45), _mat(Color(0.3, 0.55, 0.8), "", 0.7))
+	for index: int in range(4):
+		_box(table + Vector3(0.2 + index * 0.35, 0.94 + (index % 2) * 0.03, 0.1), Vector3(0.3, 0.06 + (index % 2) * 0.03, 0.3), _mat([Color(0.95, 0.94, 0.9), Color(0.6, 0.2, 0.2), Color(0.3, 0.35, 0.5), Color(0.9, 0.85, 0.6)][index], "", 0.9))

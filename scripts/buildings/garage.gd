@@ -82,6 +82,8 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	kit.node.set_meta("walk_in", true)
 	kit.node.set_meta("interior_half", HALF)
 	kit.node.set_meta("routes", {"street_to_roof": ROUTE})
+	_props(kit)
+	kit.finish_props()
 	kit.finish()
 
 
@@ -158,3 +160,29 @@ static func _deck_dressing(kit: BuildingKit, level: int) -> void:
 		kit.box(Vector3(bay.x, y + 0.55, bay.y), Vector3(1.8, 0.8, 4.3), cover, true)
 		kit.box(Vector3(bay.x, y + 1.2, bay.y + 0.3), Vector3(1.6, 0.5, 2.2), cover, true)
 		kit.box(Vector3(bay.x, y + 0.16, bay.y), Vector3(1.9, 0.3, 4.4), cover)
+
+
+## Garage dressing (docs/INTERIOR_PROPS.md): a ticket dispenser at the entry, a lost-and-found box
+## on the booth island, oil drums and a pail of absorbent in the front-east corner. Collision-free,
+## hidden in potato mode.
+static func _props(kit: BuildingKit) -> void:
+	kit.begin_props()
+	var booth: Vector3 = Vector3(0.0, LEVELS[0], 11.5)
+	var yellow: Material = kit.mat(Color(0.9, 0.75, 0.15), "", 0.7)
+	var grey: Material = kit.mat(Color(0.3, 0.31, 0.33), "", 0.5)
+	kit.prop(booth + Vector3(-0.6, 0.75, -1.35), Vector3(0.36, 1.1, 0.3), yellow)
+	kit.prop(booth + Vector3(-0.6, 1.05, -1.19), Vector3(0.22, 0.14, 0.02), kit.glow(Color(1.0, 0.3, 0.2), 0.6))
+	kit.prop(booth + Vector3(-0.6, 0.85, -1.19), Vector3(0.12, 0.03, 0.03), grey)
+	kit.prop(booth + Vector3(-0.6, 0.6, -1.19), Vector3(0.2, 0.08, 0.02), grey)
+	kit.prop_carton(booth + Vector3(0.45, 0.4, -1.3), Vector3(0.5, 0.4, 0.4), Color(0.55, 0.42, 0.28), Color(0.62, 0.48, 0.32))
+	kit.prop(booth + Vector3(0.4, 0.66, -1.3), Vector3(0.2, 0.12, 0.12), kit.mat(Color(0.1, 0.1, 0.12), "", 0.8))
+	kit.prop(booth + Vector3(0.55, 0.64, -1.25), Vector3(0.14, 0.08, 0.2), kit.mat(Color(0.5, 0.15, 0.12), "", 0.8))
+	kit.sign_label("LOST & FOUND", booth + Vector3(0.45, 0.45, -1.09), 12, Color(0.1, 0.1, 0.1))
+	var drums: Array[Material] = [kit.mat(Color(0.15, 0.3, 0.55), "metal", 0.6), kit.mat(Color(0.6, 0.15, 0.1), "metal", 0.6)]
+	for index: int in range(3):
+		var at: Vector3 = Vector3(HALF.x - 0.75 - (index % 2) * 0.65, LEVELS[0], HALF.y - 1.0 - float(index / 2) * 0.65)
+		kit.prop(at + Vector3(0, 0.44, 0), Vector3(0.58, 0.88, 0.58), drums[index % 2], 0.4 * index)
+		kit.prop(at + Vector3(0, 0.3, 0), Vector3(0.6, 0.04, 0.6), grey, 0.4 * index)
+		kit.prop(at + Vector3(0, 0.62, 0), Vector3(0.6, 0.04, 0.6), grey, 0.4 * index)
+	kit.prop(Vector3(HALF.x - 1.9, LEVELS[0] + 0.2, HALF.y - 0.9), Vector3(0.35, 0.4, 0.35), kit.mat(Color(0.85, 0.8, 0.6), "", 0.8))
+	kit.end_props()

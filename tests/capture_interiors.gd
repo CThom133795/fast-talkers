@@ -41,18 +41,26 @@ const VIEWS: Array = [
 	["tower_lobby", "highrise", Vector3(0, 1.7, 12), Vector3(0, 1.8, -7)],
 	["tower_office", "highrise", Vector3(-7, 6.4, 2), Vector3(6, 5.2, -4)],
 	["tower_conference", "highrise", Vector3(-6, 6.4, 5), Vector3(-12, 5.4, 11)],
+	["tower_desk", "highrise", Vector3(-1.6, 6.5, 2.2), Vector3(-2.9, 5.6, -0.4)],
+	["gun_wall", "gunstore", Vector3(3.0, 1.8, 16.5), Vector3(2.0, 2.1, 7.0)],
+	["gun_counter", "gunstore", Vector3(-6.0, 1.9, 13.5), Vector3(-2.0, 1.1, 11.0)],
+	["diner_counter", "burger", Vector3(1.5, 1.8, 2.0), Vector3(-6.0, 1.5, -5.0)],
 ]
 
 var world: Node3D
 var camera: Camera3D
 var folder: String
 var only: String = ""
+## compare=1: after each capture, also print the draw calls with potato mode on (props hidden).
+var compare: bool = false
 
 
 func _initialize() -> void:
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("only="):
 			only = arg.substr(5)
+		if arg == "compare=1":
+			compare = true
 	call_deferred("_run")
 
 
@@ -83,6 +91,12 @@ func _run() -> void:
 		await RenderingServer.frame_post_draw
 		root.get_viewport().get_texture().get_image().save_png("%s/interior_%s.png" % [folder, label])
 		print("CAPTURED ", label, " draw calls ", Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+		if compare:
+			world.set_potato_mode(true)
+			await _frames(6)
+			await RenderingServer.frame_post_draw
+			print("  potato (props hidden) ", label, " draw calls ", Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+			world.set_potato_mode(false)
 	world.queue_free()
 	await _frames(5)
 	quit(0)

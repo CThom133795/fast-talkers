@@ -684,3 +684,135 @@ func stub_shell(shell_height: float, color: Color, tex: String, title: String, s
 		world._neon(title, Vector3(0, 4.6, size.y * 0.5 + 0.3), 0.0, sign_color, clampi(int(size.x * 3.0), 40, 84), false)
 	var landmark_at: Vector3 = Vector3(0, 0, size.y * 0.5 + 5.0)
 	world._landmark(title.replace("  ", " "), landmark_at)
+
+
+# --- Decorative props (business dressing) ----------------------------------------------------------
+## Small collision-free dressing that sells a business (display guns, bottles, binders, ketchup...).
+## begin_props() sends geometry into a "Props" node (under the interior node when there is one);
+## end_props() returns to where you were; finish_props() (call it before finish()) merges the props
+## into one mesh per material, puts them on the interior layer, draws them within PROP_RANGE, turns
+## their shadows off and adds the node to "potato_optional" so potato mode hides it. Props never get
+## collision: anything that must be cover is built with box(..., solid = true) outside the props node.
+const PROP_RANGE: float = 34.0
+var props: Node3D = null
+var _props_return: Node3D = null
+
+
+func begin_props() -> Node3D:
+	if props == null:
+		props = Node3D.new()
+		props.name = "Props"
+		(interior if interior != null else node).add_child(props)
+	_props_return = _current
+	_current = props
+	focus()
+	return props
+
+
+func end_props() -> void:
+	_current = _props_return if _props_return != null else node
+	focus()
+
+
+## A collision-free prop box (only valid between begin_props/end_props).
+func prop(center: Vector3, box_size: Vector3, material: Material, angle: float = 0.0) -> void:
+	focus()
+	world._box_with(center, box_size, material, false, angle)
+
+
+func finish_props() -> void:
+	if props == null or props.has_meta("finished"):
+		return
+	props.set_meta("finished", true)
+	world._batch_static_meshes(props)
+	world.MeshMerge.merge_children(props)
+	for child: Node in props.get_children():
+		if child is GeometryInstance3D:
+			var geometry: GeometryInstance3D = child as GeometryInstance3D
+			if interior != null and props.get_parent() == interior:
+				geometry.layers = 1 << (world.INTERIOR_LAYER - 1)
+			geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			geometry.visibility_range_end = PROP_RANGE
+			geometry.visibility_range_end_margin = 3.0
+	props.add_to_group("potato_optional")
+	props.set_meta("prop_node", true)
+
+
+## A display gun hung flat on a wall that faces +Z (or -Z with facing = -1), muzzle towards +X.
+## kind: "rifle", "shotgun", "carbine", "pistol", "revolver", "lever". `finish`: 0 wood, 1 blued,
+## 2 black synthetic. Built from a few boxes: stock, receiver, barrel, magazine/fore-end.
+## Returns the gun's overall length. Collision-free and not interactable: decoration only.
+func display_gun(at: Vector3, kind: String, finish_kind: int = 0, facing: float = 1.0) -> float:
+	var wood: StandardMaterial3D = mat(Color(0.36, 0.2, 0.09), "planks", 0.55)
+	var blued: StandardMaterial3D = mat(Color(0.08, 0.09, 0.12), "", 0.32)
+	var black: StandardMaterial3D = mat(Color(0.05, 0.05, 0.05), "", 0.7)
+	var steel: StandardMaterial3D = mat(Color(0.42, 0.43, 0.45), "", 0.3)
+	var furniture: StandardMaterial3D = [wood, blued, black][clampi(finish_kind, 0, 2)]
+	var metal: StandardMaterial3D = black if finish_kind == 2 else blued
+	var z: float = at.z + 0.03 * facing
+	var d: float = 0.045
+	match kind:
+		"pistol":
+			prop(Vector3(at.x, at.y, z), Vector3(0.2, 0.045, d), metal)
+			prop(Vector3(at.x - 0.065, at.y - 0.06, z), Vector3(0.05, 0.1, d), furniture if finish_kind == 0 else black)
+			prop(Vector3(at.x - 0.02, at.y - 0.04, z), Vector3(0.035, 0.012, d * 0.6), steel)
+			return 0.2
+		"revolver":
+			prop(Vector3(at.x + 0.05, at.y + 0.005, z), Vector3(0.17, 0.028, d), steel if finish_kind == 1 else metal)
+			prop(Vector3(at.x - 0.035, at.y, z), Vector3(0.07, 0.06, d * 1.3), metal)
+			prop(Vector3(at.x - 0.09, at.y - 0.06, z), Vector3(0.05, 0.1, d), wood)
+			return 0.28
+		_:
+			var stock_len: float = 0.34
+			var receiver_len: float = 0.26
+			var barrel_len: float = 0.62
+			match kind:
+				"shotgun":
+					barrel_len = 0.72
+				"carbine":
+					stock_len = 0.26
+					barrel_len = 0.4
+				"lever":
+					barrel_len = 0.52
+			var x: float = at.x
+			# Stock: a butt and a wrist.
+			prop(Vector3(x + stock_len * 0.35, at.y - 0.035, z), Vector3(stock_len * 0.7, 0.1, d), furniture)
+			prop(Vector3(x + stock_len * 0.85, at.y - 0.005, z), Vector3(stock_len * 0.3, 0.05, d), furniture)
+			x += stock_len
+			prop(Vector3(x + receiver_len * 0.5, at.y, z), Vector3(receiver_len, 0.07, d), metal)
+			# Fore-end under the barrel, then the barrel.
+			prop(Vector3(x + receiver_len + barrel_len * 0.25, at.y - 0.01, z), Vector3(barrel_len * 0.45, 0.045, d), furniture)
+			prop(Vector3(x + receiver_len + barrel_len * 0.5, at.y + 0.02, z), Vector3(barrel_len, 0.022, d * 0.6), metal)
+			match kind:
+				"rifle":
+					prop(Vector3(x + receiver_len * 0.5, at.y + 0.06, z), Vector3(0.26, 0.035, d * 0.8), black)
+					prop(Vector3(x + receiver_len * 0.6, at.y - 0.06, z), Vector3(0.05, 0.06, d * 0.8), metal)
+				"carbine":
+					prop(Vector3(x + receiver_len * 0.65, at.y - 0.1, z), Vector3(0.06, 0.16, d * 0.8), black)
+				"lever":
+					prop(Vector3(x + 0.02, at.y - 0.055, z), Vector3(0.1, 0.02, d * 0.6), metal)
+				"shotgun":
+					prop(Vector3(x + receiver_len + barrel_len * 0.35, at.y - 0.005, z), Vector3(barrel_len * 0.6, 0.02, d * 0.5), metal)
+			return stock_len + receiver_len + barrel_len
+
+
+## A cardboard box of cartridges (or any small carton) on a shelf.
+func prop_carton(at: Vector3, carton_size: Vector3, color: Color, band: Color = Color(0.96, 0.95, 0.88)) -> void:
+	prop(at, carton_size, mat(color, "", 0.8))
+	prop(at + Vector3(0, carton_size.y * 0.1, 0), carton_size * Vector3(1.02, 0.25, 1.02), mat(band, "", 0.8))
+
+
+## A bottle: body and neck (colour = glass tint).
+func prop_bottle(at: Vector3, color: Color, height: float = 0.28) -> void:
+	var glass: StandardMaterial3D = mat(color, "", 0.25)
+	prop(at + Vector3(0, height * 0.32, 0), Vector3(0.07, height * 0.64, 0.07), glass)
+	prop(at + Vector3(0, height * 0.82, 0), Vector3(0.028, height * 0.36, 0.028), glass)
+
+
+## A CRT monitor on a desk, facing `angle` (0 = local +Z).
+func prop_crt(at: Vector3, angle: float = 0.0) -> void:
+	var beige: StandardMaterial3D = mat(Color(0.78, 0.75, 0.66), "", 0.7)
+	var basis: Basis = Basis(Vector3.UP, angle)
+	prop(at + Vector3(0, 0.2, 0), Vector3(0.4, 0.36, 0.38), beige, angle)
+	prop(at + basis * Vector3(0, 0.21, 0.195), Vector3(0.32, 0.25, 0.02), glow(Color(0.25, 0.45, 0.6), 0.6), angle)
+	prop(at + basis * Vector3(0, 0.02, 0.28), Vector3(0.44, 0.03, 0.15), beige, angle)

@@ -80,11 +80,13 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_office(kit)
 	kit.interior_light(Vector3(0, 3.8, 4.0), Color(0.95, 0.95, 0.88), 2.4, 22.0)
 	kit.interior_light(Vector3(0, OFFICE_TOP - 0.6, 0.0), Color(0.9, 0.95, 1.0), 2.2, 22.0)
+	_office_props(kit)
 	kit.end_interior()
 	kit.world._landmark("HALCYON TRUST", Vector3(0, 0, HALF.y + 5.0))
 	kit.node.set_meta("walk_in", true)
 	kit.node.set_meta("interior_half", HALF)
 	kit.node.set_meta("routes", {"west_stair": WEST_ROUTE, "east_stair": EAST_ROUTE, "service": SERVICE_ROUTE})
+	kit.finish_props()
 	kit.finish()
 
 
@@ -193,3 +195,48 @@ static func _office(kit: BuildingKit) -> void:
 	for z: float in [-8.0, 0.0, 8.0]:
 		for x: float in [-6.0, 0.0, 6.0]:
 			kit.box(Vector3(x, OFFICE_TOP - 0.33, z), Vector3(1.2, 0.04, 0.6), kit.glow(Color(0.92, 0.96, 1.0), 1.0))
+
+
+## Office dressing (docs/INTERIOR_PROPS.md): binders, phones, in/out trays, keyboards, mugs and 1999
+## calendars on every desk; a fax on the filing wall; papers on the conference table. Collision-free,
+## merged, hidden in potato mode.
+static func _office_props(kit: BuildingKit) -> void:
+	kit.begin_props()
+	var y: float = FLOORS[1]
+	var desks: Array[Vector3] = []
+	for row: int in range(2):
+		for index: int in range(3):
+			desks.append(Vector3(-3.0 + index * 4.0 + 0.2, y, -1.5 + row * 5.5 + 1.1))
+	desks.append(Vector3(11.5, y, 0.0))
+	var binder_colors: Array[Color] = [Color(0.12, 0.2, 0.45), Color(0.1, 0.1, 0.1), Color(0.55, 0.1, 0.1), Color(0.85, 0.85, 0.8), Color(0.2, 0.4, 0.25)]
+	var beige: Material = kit.mat(Color(0.78, 0.75, 0.66), "", 0.7)
+	var dark: Material = kit.mat(Color(0.12, 0.12, 0.13), "", 0.6)
+	var paper: Material = kit.mat(Color(0.95, 0.95, 0.92), "", 0.9)
+	var mug: Material = kit.mat(Color(0.9, 0.9, 0.86), "", 0.5)
+	for n: int in range(desks.size()):
+		var at: Vector3 = desks[n]
+		var top: float = at.y + 0.95
+		for b: int in range(4 + n % 3):
+			kit.prop(Vector3(at.x - 0.9 + b * 0.07, top + 0.15, at.z - 0.3), Vector3(0.06, 0.3, 0.26), kit.mat(binder_colors[(b + n) % binder_colors.size()], "", 0.7))
+		kit.prop(Vector3(at.x - 0.15, top + 0.04, at.z - 0.2), Vector3(0.2, 0.07, 0.22), beige)
+		kit.prop(Vector3(at.x - 0.15, top + 0.09, at.z - 0.22), Vector3(0.2, 0.04, 0.06), dark)
+		for t: int in range(2):
+			kit.prop(Vector3(at.x - 0.55, top + 0.03 + t * 0.08, at.z + 0.1), Vector3(0.3, 0.02, 0.24), dark)
+			kit.prop(Vector3(at.x - 0.55, top + 0.05 + t * 0.08, at.z + 0.1), Vector3(0.22, 0.02 + t * 0.02, 0.28), paper)
+		kit.prop(Vector3(at.x + 0.45, top + 0.015, at.z + 0.25), Vector3(0.44, 0.03, 0.16), beige)
+		kit.prop(Vector3(at.x + 0.85, top + 0.05, at.z + 0.2), Vector3(0.08, 0.1, 0.08), mug if n % 2 == 0 else kit.mat(Color(0.2, 0.3, 0.55), "", 0.5))
+		# A 1999 wall calendar on the cubicle partition behind the desk (manager: on the window mullion side).
+		if n < 6:
+			kit.prop(Vector3(at.x - 0.3, y + 1.25, at.z - 1.05), Vector3(0.32, 0.44, 0.01), paper)
+			kit.prop(Vector3(at.x - 0.3, y + 1.38, at.z - 1.045), Vector3(0.3, 0.16, 0.01), kit.mat([Color(0.3, 0.5, 0.7), Color(0.7, 0.4, 0.2), Color(0.3, 0.55, 0.3)][n % 3], "", 0.8))
+	kit.sign_label("DEC  1999", Vector3(-3.1, y + 1.2, -1.435), 7, Color(0.15, 0.15, 0.18))
+	# Fax on the filing wall, papers and mugs on the conference table.
+	kit.prop(Vector3(-5.3, y + 1.49, -14.5), Vector3(0.42, 0.18, 0.36), beige)
+	kit.prop(Vector3(-5.3, y + 1.6, -14.62), Vector3(0.3, 0.06, 0.1), paper)
+	kit.prop(Vector3(-3.9, y + 1.45, -14.5), Vector3(0.3, 0.1, 0.35), dark)
+	for dx: float in [-1.4, 0.0, 1.4]:
+		for dz: float in [-0.6, 0.6]:
+			kit.prop(Vector3(-11.5 + dx, y + 0.8, 11.0 + dz), Vector3(0.22, 0.01, 0.3), paper, 0.1 * dx)
+			kit.prop(Vector3(-11.3 + dx, y + 0.84, 11.0 + dz * 0.6), Vector3(0.08, 0.1, 0.08), mug)
+	kit.prop(Vector3(-11.5, y + 0.83, 11.0), Vector3(0.24, 0.07, 0.24), kit.mat(Color(0.15, 0.15, 0.16), "", 0.5))
+	kit.end_props()
