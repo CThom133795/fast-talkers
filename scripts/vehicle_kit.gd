@@ -11,8 +11,11 @@ static var _cache: Dictionary = {}
 ## `outline`: closed (z, y) polygon in body space, any winding, may be concave.
 ## `half_width`: half the width at the bottom of the outline; the top is `tuck` narrower.
 ## `bevel`: how far the side edges are rounded off.
-static func profile(outline: PackedVector2Array, half_width: float, bevel: float, tuck: float = 0.0, cabin: Vector2 = Vector2.ZERO, inner_half: float = 0.0) -> ArrayMesh:
-	var key: String = "pr%s|%.3f|%.3f|%.3f|%s|%.3f" % [str(outline), half_width, bevel, tuck, str(cabin), inner_half]
+## `arch_inner`: when > 0, downward-facing strips above the sill line (wheel-arch roofs)
+## stop this far from the centre line instead of running as a tunnel across the whole
+## width (through the footwells and under the seats); a liner plate closes each well.
+static func profile(outline: PackedVector2Array, half_width: float, bevel: float, tuck: float = 0.0, cabin: Vector2 = Vector2.ZERO, inner_half: float = 0.0, arch_inner: float = 0.0) -> ArrayMesh:
+	var key: String = "pr%s|%.3f|%.3f|%.3f|%s|%.3f|%.3f" % [str(outline), half_width, bevel, tuck, str(cabin), inner_half, arch_inner]
 	if _cache.has(key):
 		return _cache[key] as ArrayMesh
 	var count: int = outline.size()
@@ -26,6 +29,11 @@ static func profile(outline: PackedVector2Array, half_width: float, bevel: float
 		bottom = minf(bottom, a.y)
 		top = maxf(top, a.y)
 	var ccw: bool = area > 0.0
+	var front: float = INF
+	var back: float = -INF
+	for point: Vector2 in outline:
+		front = minf(front, point.x)
+		back = maxf(back, point.x)
 	# Outward normal of each edge, in (z, y).
 	var edge_normals: Array[Vector2] = []
 	for index: int in range(count):
@@ -69,13 +77,21 @@ static func profile(outline: PackedVector2Array, half_width: float, bevel: float
 				if t > 0.001 and t < 0.999:
 					cuts.append(t)
 		cuts.sort()
+		# An arch edge faces into a concavity of the outline (the wheel opening), not out of
+		# its bounding box the way the nose, tail, bonnet and floor pan do.
+		var probe: Vector2 = (p0 + p1) * 0.5 + n_edge * 0.05
+		var arch_roof: bool = arch_inner > 0.0 and n_edge.y < 0.3 and (p0.y + p1.y) * 0.5 > bottom + 0.01 \
+			and probe.x > front and probe.x < back and probe.y > bottom and probe.y < top
 		for segment: int in range(cuts.size() - 1):
 			var a: Vector2 = p0.lerp(p1, cuts[segment])
 			var b: Vector2 = p0.lerp(p1, cuts[segment + 1])
 			var ha: float = lerpf(h0, h1, cuts[segment]) - bevel
 			var hb: float = lerpf(h0, h1, cuts[segment + 1]) - bevel
 			var middle: float = (a.x + b.x) * 0.5
-			if can_cut and middle > cabin.x and middle < cabin.y:
+			if arch_roof:
+				_strip(tool, a, b, -ha, -hb, -arch_inner, -arch_inner, n_start, n_end)
+				_strip(tool, a, b, arch_inner, arch_inner, ha, hb, n_start, n_end)
+			elif can_cut and middle > cabin.x and middle < cabin.y:
 				_strip(tool, a, b, -ha, -hb, -inner_half, -inner_half, n_start, n_end)
 				_strip(tool, a, b, inner_half, inner_half, ha, hb, n_start, n_end)
 			else:
