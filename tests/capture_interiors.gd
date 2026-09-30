@@ -1,5 +1,5 @@
 extends SceneTree
-## Review captures of the landmark interiors (club, strip club). Views are in each plot's local
+## Review captures of the landmark interiors (club, strip club, hotel lobby). Views are in each plot's local
 ## frame (+Z = out of the front door) and converted with the plot node's transform, so they follow
 ## the building if its plot moves. Run windowed (not headless); writes work/captures/interior_*.png.
 ##   godot --path . --script res://tests/capture_interiors.gd [-- only=<prefix>]
@@ -21,6 +21,12 @@ const VIEWS: Array = [
 	["velvet_vestibule", "stripclub", Vector3(-2, 1.7, 15), Vector3(4, 1.4, 13)],
 	["velvet_dressing", "stripclub", Vector3(-3, 1.7, -10.3), Vector3(-10, 1.5, -15.5)],
 	["velvet_office", "stripclub", Vector3(5, 1.7, -10.5), Vector3(13, 1.0, -15)],
+	["hotel_street", "hotel", Vector3(-6, 1.7, 30), Vector3(0, 8, 14)],
+	["hotel_lobby", "hotel", Vector3(-2, 1.7, 12.5), Vector3(9, 1.2, 2)],
+	["hotel_lounge", "hotel", Vector3(6, 1.7, 11), Vector3(-5, 0.8, -3)],
+	["hotel_bar", "hotel", Vector3(-4, 1.7, 3), Vector3(-12, 1.4, 11)],
+	["hotel_back", "hotel", Vector3(5, 1.7, -7), Vector3(12, 1.0, -13)],
+	["hotel_office", "hotel", Vector3(-1.5, 1.7, -8), Vector3(-12, 1.2, -12)],
 ]
 
 var world: Node3D

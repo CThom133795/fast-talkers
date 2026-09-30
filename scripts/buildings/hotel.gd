@@ -58,6 +58,7 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_bar(kit)
 	_lift_lobby(kit)
 	_back_of_house(kit)
+	_ceiling(kit)
 	kit.interior_light(Vector3(0, 3.9, 4.0), Color(1.0, 0.88, 0.66), 2.6, 22.0)
 	kit.interior_light(Vector3(0, 3.6, -10.0), Color(0.95, 0.95, 0.9), 1.5, 13.0)
 	kit.end_interior()
@@ -224,3 +225,32 @@ static func _back_of_house(kit: BuildingKit) -> void:
 		for column: int in range(10):
 			if (row + column * 3) % 4 == 0:
 				kit.box(Vector3(-8.85 + column * 0.3, FLOOR_Y + 1.7 + row * 0.25, -13.75), Vector3(0.12, 0.12, 0.02), kit.mat(Color(0.7, 0.15, 0.1)))
+
+
+## Lobby ceiling: a plaster lining with a coffered border, recessed light panels, a chandelier over
+## the lounge and a dark wainscot band on the walls. All visual (above head height), no collision.
+static func _ceiling(kit: BuildingKit) -> void:
+	var plaster: Material = kit.mat(Color(0.86, 0.8, 0.68), "stucco")
+	var trim: Material = kit.mat(Color(0.5, 0.36, 0.22), "planks")
+	var lobby_depth: float = HALF.y - BACK_Z - 0.3
+	var lobby_center: float = (HALF.y + BACK_Z) * 0.5
+	kit.box(Vector3(0, GROUND - 0.32, lobby_center), Vector3(HALF.x * 2 - 0.3, 0.04, lobby_depth), plaster)
+	for x: float in [-7.5, 0.0, 7.5]:
+		kit.box(Vector3(x, GROUND - 0.5, lobby_center), Vector3(0.3, 0.32, lobby_depth), trim)
+	for z: float in [-1.0, 6.5]:
+		kit.box(Vector3(0, GROUND - 0.5, z), Vector3(HALF.x * 2 - 0.3, 0.32, 0.3), trim)
+	var panel: Material = kit.glow(Color(1.0, 0.92, 0.75), 1.0)
+	for x: float in [-11.0, 4.0, 11.0]:
+		for z: float in [2.5, 10.0]:
+			kit.box(Vector3(x, GROUND - 0.35, z), Vector3(1.6, 0.03, 1.6), panel)
+	var brass: Material = kit.mat(Color(0.8, 0.66, 0.34), "metal", 0.3)
+	kit.box(Vector3(-2.5, GROUND - 0.9, 0.5), Vector3(0.04, 0.9, 0.04), brass)
+	kit.box(Vector3(-2.5, GROUND - 1.4, 0.5), Vector3(1.4, 0.12, 1.4), brass)
+	for dx: float in [-0.6, 0.6]:
+		for dz: float in [-0.6, 0.6]:
+			kit.box(Vector3(-2.5 + dx, GROUND - 1.28, 0.5 + dz), Vector3(0.16, 0.2, 0.16), kit.glow(Color(1.0, 0.85, 0.6), 1.8))
+	# Wainscot band on the lobby side walls (a thin skin on the inner face; the wall is the collider).
+	# The west run stops either side of the bar's street door.
+	kit.box(Vector3(HALF.x - 0.16, FLOOR_Y + 0.5, lobby_center), Vector3(0.02, 1.0, lobby_depth), trim)
+	for span: Vector2 in [Vector2(BACK_Z + 0.15, 1.1), Vector2(2.9, HALF.y - 0.15)]:
+		kit.box(Vector3(-HALF.x + 0.16, FLOOR_Y + 0.5, (span.x + span.y) * 0.5), Vector3(0.02, 1.0, span.y - span.x), trim)
