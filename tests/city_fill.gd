@@ -64,6 +64,7 @@ func _run() -> void:
 	print("CARVED STREETS: %s" % [world.city_fill.carved])
 	_prop_cost()
 	_road_solid_checks()
+	_road_sweep()
 	_cluster_checks()
 	_life_checks()
 	await _determinism()
@@ -637,9 +638,8 @@ func _road_solid_checks() -> void:
 				deepest = depth
 				deep_at = point
 				road_name = probe
-		# The Strip ring's south-west corner meets the beach rock revetment (known, see city_audit.gd); a wall or
-		# building edge may touch the kerb line (0.6 m) without standing in the carriageway.
-		if deepest > 0.6 and not Rect2(18, 394, 14, 14).has_point(deep_at):
+		# A wall or building edge may touch the kerb line (0.6 m) without standing in the carriageway.
+		if deepest > 0.6:
 			offenders.append("%5.2f m deep at (%.1f, %.1f) top %.2f on %s: box %s at %s %s" % [deepest, deep_at.x, deep_at.y, float(shape["top"]), road_name, shape["size"], shape["at"], shape["name"]])
 	offenders.sort()
 	offenders.reverse()
@@ -648,6 +648,65 @@ func _road_solid_checks() -> void:
 			print("  ON ROAD " + line)
 	print("ROAD SOLIDS: %d solid props tested, %d stand on a carriageway" % [tested, offenders.size()])
 	_check(tested > 500 and offenders.is_empty(), "No solid prop stands on a road carriageway (%d of %d tested)" % [offenders.size(), tested])
+
+
+## The physics version of the same claim, over the whole road network: a 1 m box (0.3 m to 5.0 m above the road, a truck's clearance) is
+## queried on a 1 m grid over every carriageway, 0.75 m inside the kerb line (so the box cannot reach past it): everything a car,
+## a truck or a walker could meet ( any shape, any prefab, any authored prop or fill prop, not just the colliders the outline test
+## samples). Bridge decks are the road itself and skipped; parked vehicles (CharacterBody3D) are counted apart.
+func _road_sweep() -> void:
+	var shape: BoxShape3D = BoxShape3D.new()
+	shape.size = Vector3(1.0, 4.7, 1.0)
+	var seen: Dictionary = {}
+	var found: Dictionary = {}
+	var vehicles: Dictionary = {}
+	var probes: int = 0
+	for road: Dictionary in world.roads:
+		var points: PackedVector2Array = road["points"]
+		var half: float = float(road["width"]) * 0.5
+		for index: int in range(points.size() - 1):
+			var a: Vector2 = points[index]
+			var b: Vector2 = points[index + 1]
+			var length: float = a.distance_to(b)
+			if length < 0.1:
+				continue
+			var along: Vector2 = (b - a) / length
+			var across: Vector2 = Vector2(-along.y, along.x)
+			var step: int = 0
+			while float(step) <= length:
+				var centre: Vector2 = a + along * float(step)
+				step += 1
+				var lateral: float = -half
+				while lateral <= half:
+					var p: Vector2 = centre + across * lateral
+					lateral += 1.0
+					var key: Vector2i = Vector2i(roundi(p.x), roundi(p.y))
+					if seen.has(key) or _road_depth(p) < 0.75:
+						continue
+					seen[key] = true
+					var on_bridge: bool = false
+					for bridge: Dictionary in world.bridges:
+						on_bridge = on_bridge or (bridge["rect"] as Rect2).grow(3.0).has_point(p)
+					if on_bridge:
+						continue
+					var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+					query.shape = shape
+					query.collision_mask = 1
+					query.transform = Transform3D(Basis.IDENTITY, Vector3(p.x, 2.65, p.y))
+					probes += 1
+					for hit: Dictionary in space.intersect_shape(query, 4):
+						var body: Node = hit["collider"]
+						var record: Dictionary = vehicles if body is CharacterBody3D else found
+						if not record.has(body.get_instance_id()):
+							record[body.get_instance_id()] = "%s at %s (%s, road %s)" % [body.get_path(), (body as Node3D).global_position.snapped(Vector3(0.1, 0.1, 0.1)), p.snapped(Vector2(0.1, 0.1)), road["name"]]
+	var lines: Array = found.values()
+	lines.sort()
+	for line: String in lines.slice(0, 40):
+		print("  IN ROAD " + str(line))
+	print("ROAD SWEEP: %d carriageway probes, %d solid bodies in the road, %d parked vehicles in the road" % [probes, found.size(), vehicles.size()])
+	for line: String in (vehicles.values() as Array).slice(0, 10):
+		print("  VEHICLE IN ROAD " + str(line))
+	_check(probes > 20000 and found.is_empty(), "A sweep of every carriageway finds nothing solid (%d bodies in %d probes)" % [found.size(), probes])
 
 
 # --- Life ------------------------------------------------------------------------------------------------

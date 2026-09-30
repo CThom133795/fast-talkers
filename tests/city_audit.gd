@@ -177,10 +177,9 @@ func _run() -> void:
 				var ground: float = _ground(at, 3.0)
 				if ground > 0.12 or ground < -0.1:
 					steps.append("%s at %s: %.2f (%s)" % [road.get("name", "road"), at.snapped(Vector2(0.1, 0.1)), ground, _top_hit(at)])
-	# Known, reported, outside this audit's files or needing a road-layout change:
-	# the Strip ring's south-west corner meets the beach rock revetment (x 24, z 400). (Coast Road
-	# used to cross the gun store range yard; it now swings east round it, so that exception is gone.)
-	var known: Array[Rect2] = [Rect2(18, 394, 14, 14)]
+	# No known exceptions remain: the Strip ring's south-west corner no longer meets the beach revetment
+	# (the coast was pulled out round it) and Coast Road no longer crosses the gun store range yard.
+	var known: Array[Rect2] = []
 	var unexpected: Array[String] = []
 	for line: String in steps:
 		var hit_known: bool = false

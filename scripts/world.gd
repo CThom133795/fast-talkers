@@ -1388,7 +1388,7 @@ const MAINLAND: PackedVector2Array = [
 	Vector2(411, 130), Vector2(406, 180), Vector2(410, 230),
 	# South-east: the south docks, then Halcyon Beach bulges south of the Strip.
 	Vector2(400, 275), Vector2(378, 320), Vector2(342, 356), Vector2(292, 384), Vector2(242, 398),
-	Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410), Vector2(24, 400),
+	Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(38, 416), Vector2(20, 412),
 	# South shore: Halcyon Avenue's end, Morris Marina and the Station's quay.
 	Vector2(8, 394), Vector2(-14, 384), Vector2(-34, 376), Vector2(-60, 372), Vector2(-100, 374), Vector2(-150, 376),
 	Vector2(-190, 380), Vector2(-240, 382), Vector2(-292, 372), Vector2(-338, 350), Vector2(-374, 324), Vector2(-396, 282),
@@ -1494,7 +1494,7 @@ func _define_roads() -> void:
 	_road("WEST END 150", [Vector2(-150, -100), Vector2(-150, 9)])
 	_road("WEST END NORTH", [Vector2(-212, -100), Vector2(-88, -100)])
 	_road("SLIP SIDE ROAD", [Vector2(-392, 62), Vector2(-190, 62)])
-	_road("SLIP SIDE LINK", [Vector2(-330, 62), Vector2(-330, 112), _ring_snap("station", Vector2(-322, 135))])
+	_road("SLIP SIDE LINK", [Vector2(-330, 62), Vector2(-330, 112), _ring_snap("station", Vector2(-330, 135))])
 	_road("WHARF NORTH", [Vector2(-380, -195), Vector2(-320, -195), Vector2(-235, -196)])
 	_road("WHARF SPINE", [Vector2(-320, -238), Vector2(-320, -195), _ring_snap("lantern", Vector2(-320, -140))])
 	_road("DOCK ROAD", [Vector2(215, 268), Vector2(215, 300), Vector2(330, 300), Vector2(385, 300)])
@@ -1641,7 +1641,7 @@ func _signed_area(poly: PackedVector2Array) -> float:
 		area += a.x * b.y - b.x * a.y
 	return area * 0.5
 
-const BEACH: PackedVector2Array = [Vector2(24, 400), Vector2(33, 391), Vector2(197, 391), Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(37, 410)]
+const BEACH: PackedVector2Array = [Vector2(24, 400), Vector2(33, 391), Vector2(197, 391), Vector2(218, 396), Vector2(198, 416), Vector2(165, 426), Vector2(130, 432), Vector2(95, 434), Vector2(63, 426), Vector2(38, 416)]
 
 ## Quay edges round a land mass: a stone face down to the water, a coping kerb and a rail on
 ## posts. Collision is exactly what you see: the coping is solid, the top rail is a thin bar,
@@ -1986,7 +1986,8 @@ func _build_district() -> void:
 		for z: float in [-66.0, -33.0, 9.0, 60.0]:
 			var height: float = _rng.randf_range(13.0, 27.0)
 			if not shop_sites.has(Vector2(side * 61.0, z)) and not SQUARE_SITES.has(Vector2(side * 61.0, z)):
-				_building(Vector3(side * 61.0, 0, z), Vector3(22, height, 21), Color(0.42, 0.46, 0.45), int(height / 3.2))
+				# The z -66 tower sits 0.5 m north so its face stops at the kerb of Meridian Street (z -56), not in the carriageway.
+				_building(Vector3(side * 61.0, 0, z - (0.5 if z < -60.0 else 0.0)), Vector3(22, height, 21), Color(0.42, 0.46, 0.45), int(height / 3.2))
 	# Midtown Parking: the old armory lot is a pay-and-display car park (the range moved to Halcyon Arms).
 	_box(Vector3(20, 0.02, -34), Vector3(21, 0.035, 22), Color(0.2, 0.22, 0.23), false, "asphalt")
 	_box(Vector3(21, 0.10, -43), Vector3(18, 0.20, 1.2), Color(0.70, 0.63, 0.45), true)
