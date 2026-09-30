@@ -23,7 +23,7 @@ for %%S in (integration free_roam soak map_interiors vehicle_art wiring_05 vehic
 echo.
 echo Results:!FAST_TALKERS_SUMMARY!
 echo 0 means every check passed. Logs are in the work folder (^<suite^>-test.log).
-echo Two-PC-style network round: powershell -File tests\run_net_pair.ps1 -Steps lobby,round
+echo Two-PC-style network round: powershell -File tests\run_net_pair.ps1 -Steps lobby,round,phone
 if defined FAST_TALKERS_FAILED (
   echo FAILED:!FAST_TALKERS_FAILED!
   pause

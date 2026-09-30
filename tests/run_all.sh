@@ -29,7 +29,7 @@ for s in $SUITES; do
 	if [ "$s" = "net_pair" ]; then
 		if [ ! -f tests/run_net_pair.sh ]; then SUMMARY+=("SKIP  net_pair (tests/run_net_pair.sh missing)"); continue; fi
 		echo "=== net_pair ==="
-		timeout 170 bash tests/run_net_pair.sh > "$TMP/net_pair.out" 2>&1; rc=$?
+		timeout 170 bash tests/run_net_pair.sh 24651 lobby,phone > "$TMP/net_pair.out" 2>&1; rc=$?
 		grep -a -v -E "$NOISE" "$TMP/net_pair.out" | tr -d '\r' | tail -n 8
 		res="$(grep -a -E 'NET PAIR (PASSED|FAILED)' "$TMP/net_pair.out" | tail -1 | tr -d '\r')"
 		[ "$rc" -ne 0 ] && FAILED=1
