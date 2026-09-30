@@ -30,6 +30,10 @@ const BANK_REACH: float = 5.5
 const STATE_RATE: float = 0.05
 const DRIVER_RATE: float = 1.0 / 30.0
 const HOST_CAR_RATE: float = 0.1
+## Resting cars are re-sent this often even when unchanged: a client resets every car to its spawn at the start of
+## a Day, and car states are unreliable, so the last "settled here" packet can arrive before that reset (or be lost),
+## leaving a parked car hanging at spawn height on that client until someone drives it. Late joiners need it too.
+const HOST_CAR_KEYFRAME: float = 2.0
 ## Item ids from PHONE_BASE up: one crew phone per crew, in Factions.ORDER order. Ids below are trade items.
 const PHONE_BASE: int = 2
 const TRADE_ITEMS: Array[int] = [LEDGER, CASH]
@@ -106,6 +110,7 @@ var _remote_root: Node3D
 var _state_timer: float = 0.0
 var _car_timer: float = 0.0
 var _host_car_timer: float = 0.0
+var _host_car_keyframe: float = 0.0
 ## Host: the last transform sent for each undriven car, so a car that comes to rest still
 ## sends its settled pose once (and a reset car its new spot).
 var _host_car_sent: Dictionary = {}
@@ -1721,6 +1726,10 @@ func _host_tick(delta: float) -> void:
 	_host_car_timer -= delta
 	if _host_car_timer <= 0.0:
 		_host_car_timer = HOST_CAR_RATE
+		_host_car_keyframe -= HOST_CAR_RATE
+		var keyframe: bool = _host_car_keyframe <= 0.0
+		if keyframe:
+			_host_car_keyframe = HOST_CAR_KEYFRAME
 		for index: int in range(game.cars.size()):
 			var ride: FastCar = game.cars[index]
 			if ride.net_puppet or (ride == game.vehicle and game.seat == 0):
@@ -1729,7 +1738,7 @@ func _host_tick(delta: float) -> void:
 			var xform: Transform3D = data["xform"]
 			if ride.is_resting():
 				var sent: Variant = _host_car_sent.get(index)
-				if sent != null and (sent as Transform3D).is_equal_approx(xform):
+				if sent != null and (sent as Transform3D).is_equal_approx(xform) and not keyframe:
 					continue
 				data["vel"] = Vector3.ZERO
 				data["speed"] = 0.0
