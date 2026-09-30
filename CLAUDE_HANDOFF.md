@@ -1,5 +1,7 @@
 # Project Fast Talkers — shared handoff
 
+**Goal for Claude Desktop: a multiplayer playtest tomorrow evening with 2+ players, with as many working features as possible, shipped as a .zip with a simple Steam (Spacewar) walkthrough. See the top of `docs/CLAUDE_DESKTOP_PICKUP.md`.**
+
 **Start with `docs/GAME_VISION.md`, a one-page picture of the game: a round-based deal-making game where a match is a Week and each round is a Day.**
 
 **Newest pickup (2026-09-30 overnight): branch `cloud/overnight-heavy-lift`. Read the "Overnight heavy lift" entry at the end of this file first. The paste-ready Claude Desktop command, which recreates the sub-agent split, is in `docs/CLAUDE_DESKTOP_PICKUP.md`.**
@@ -207,20 +209,47 @@ boomy, with no "childish beeps".
    - **Untested:** a real microphone, a 2-PC run and echo. No echo cancellation or jitter buffer yet; headsets are recommended.
      See the Windows checklist in `docs/VOICE_CHAT.md`.
 
+8. **Interior props (props agent).** Files: `scripts/buildings/*` (BuildingKit adds `begin_props`, `prop`,
+   `display_gun`, `prop_crt` and similar), `scripts/interiors.gd`, `tests/building_landmarks.gd` (204 checks),
+   `docs/INTERIOR_PROPS.md`.
+   - Halcyon Arms: a pegboard of 72 display guns (not usable, no collision) plus counters, ammo, holsters and signs.
+   - Every landmark and all 12 Midtown shops get props matching their trade.
+   - Props sit in a per-building `Props` node: merged, no collision or shadow, 34 m draw range, group `potato_optional`.
+   - Potato mode hides them; cover keeps its collision.
+   - Cost at worst is about 77 draw calls in the gun store; a shared palette material would cut it.
+9. **Outdoor anti-slop, pass 2 (city agent).** Files: `scripts/city_detail.gd`, `scripts/world.gd` (`park_rails`),
+   `scripts/retro_textures.gd`, `tests/city_detail.gd` (217), `tests/city_audit.gd` (72),
+   `docs/OVERNIGHT_CITY_PERF.md` ("Anti-slop pass 2").
+   - 44 roadside rail runs on 5 parks and plazas: a curb, posts, mid rail and top rail, with collision matching what is
+     drawn.
+     - A sedan at full throttle stops short of them.
+     - Entrances stay open; each park keeps 4 walkable openings.
+     - They are never hidden in potato mode.
+   - 98 street-name signs at named crossings.
+   - Seeded large-scale texture variation breaks up tile grids.
+   - Draw calls rose modestly: Midtown 1,235 → 1,322, mostly from sign text. Drawing the text into a texture is the
+     fix if it matters.
+   - Not done: bus shelters, avenue planters, manholes, and wider crosswalk and hydrant checks.
+
 ### Tests (Linux cloud, Godot 4.4.1 headless)
-`bash tests/run_all.sh` on the final tree reports **OVERALL: PASS** (exit 0), with 1,710 assertions and 0 failures:
+`bash tests/run_all.sh` on the final tree, with 19 suites, 1,955 assertions and 0 failures after the free_roam
+timing fix below:
 
 | Suite | Checks | Suite | Checks |
 |---|---:|---|---:|
-| vehicle_art | 110 | building_landmarks (new) | 187 |
+| vehicle_art | 110 | building_landmarks (new) | 204 |
 | vehicles_06 | 24 | sfx_audio (new) | 321 |
 | integration | 66 | social_features (new) | 29 |
 | free_roam | 137 | net_security (new) | 91 |
-| wiring_05 | 18 | remote_player | 74 |
-| map_interiors | 97 | chat_ui | 46 |
-| map_06 | 150 | net_lobby_ui | 84 |
-| city_detail | 207 | city_audit (new) | 69 |
+| wiring_05 | 18 | voice (new) | 87 |
+| map_interiors | 97 | remote_player | 74 |
+| map_06 | 150 | chat_ui | 46 |
+| city_detail | 217 | net_lobby_ui | 84 |
+| city_audit (new) | 72 | | |
 
+- **free_roam timing fix.** In the final full run, free_roam failed 2 checks: "round goes live when the buy timer runs out"
+  and the purchase check after it. They failed in 2 of 4 runs under load, because the test waited only 6 frames for a
+  0.05 s timer. The test now waits up to about 2 s for the phase change and passed 3 of 3 runs. The game code is unchanged.
 - soak: 6,000 frames, PASS.
 - net_pair (two-process localhost host and client, lobby and round): PASS.
 - `git diff --check` flags only CR line endings in three files that were already CRLF; `git -c core.whitespace=cr-at-eol diff --check` is clean.

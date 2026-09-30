@@ -523,7 +523,11 @@ func _run() -> void:
 	_check(game.menu.visible and game.menu_stack.get_child_count() > 6, "The MODS tab lists attachments")
 	_check(not player.switch_weapon("smg"), "Cannot switch to a weapon you do not own")
 	game.buy_time_left = 0.05
-	await _frames(6)
+	# Wait for the phase change itself (up to ~2 s) rather than a fixed 6 frames, which flaked under CPU load.
+	for wait: int in range(120):
+		await _frames(1)
+		if game.phase == game.Phase.LIVE:
+			break
 	_check(game.phase == game.Phase.LIVE and player.can_fire and not game.buy_menu_open, "The round goes live when the buy timer runs out")
 	_check(not game._purchase("armor", 650) and not game._purchase_attachment("rifle", "suppressor"), "Purchases require the HQ counter after deployment")
 	# Street tips: a payphone rings, the call reveals a stash, the stash banks at HQ.

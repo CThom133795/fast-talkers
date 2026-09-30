@@ -11,6 +11,28 @@ You are the lead for Project Fast Talkers (Godot 4.4.1, GDScript): a round-based
 (not a shooter with deals). A match is a five-Day Week; crews win on banked money, never kills. Continue the cloud
 session's overnight heavy lift.
 
+GOAL FOR THIS SESSION (the user's words, 2026-09-30): multiplayer playtest TOMORROW EVENING with 2 or possibly more
+players. Aim for AS MANY WORKING FEATURES FOR MULTIPLE PLAYERS as possible, and ship them as an easy .zip:
+- Stability beats scope. Every feature in the zip must work over the network for 2+ players: joining, crews, the buy
+  phase, driving, shooting, doors and lifts, voice (open-mic proximity plus crew radio), hands up, and the contract case.
+- Deliver `Fast Talkers Playtest.zip`: the exported exe and pck, the GodotSteam DLLs, steam_appid.txt (480) beside the
+  exe, and a one-page `HOW TO PLAY WITH FRIENDS.txt`:
+  1. Install and run Steam, and log in.
+  2. Unzip and run Fast Talkers.exe. Steam shows you as playing "Spacewar"; that is expected.
+  3. Host: PLAY ONLINE, then HOST ON STEAM (INVITE FRIENDS), and pick friends in the Steam overlay.
+  4. Friends: accept the Steam invite (or right-click the host in Steam, then Join Game).
+  5. Use a headset. Talk normally (open mic); hold Y for crew radio.
+  Also include a fallback section for direct IP / ENet if Steam misbehaves. Everyone must run the SAME zip.
+- Order: (1) get Steam host, invite and join working on 2 PCs (sub-agent B); (2) run every suite and a 2-PC round;
+  (3) build and smoke-test the zip; (4) only then add features, smallest and most multiplayer-visible first.
+  Candidates: the one-trade-item plus phone inventory with independent drops, and the crew phone at HQ spawn. The Week
+  structure is next if time allows. Nothing risky goes in the zip unless it is tested on 2 PCs.
+
+MODELS: run the lead (you) on Opus 5.5 at high effort, and switch to the highest effort only for hard Steam, network or
+merge debugging. Run sub-agents on Sonnet 5.5 (`model: "sonnet"`) for scoped work: captures and test runs, audio
+tuning, props and dressing, docs, and the zip and walkthrough. Keep B (Steam/voice/net security) and any host-authority
+code on Opus, or review it yourself before committing.
+
 SETUP (do these yourself, in order):
 1. Preserve local Windows-only changes: run `git status`; commit or stash anything local before switching branches.
 2. `git fetch origin` then `git checkout cloud/overnight-heavy-lift` (draft PR #2 targets cloud/map-integration).
@@ -68,10 +90,11 @@ D. "gameplay-week" (owns: scripts/main.gd, scripts/player.gd, scripts/character_
    also wire remaining audio hooks and gamepad binds for hands-up/binoculars.
 E. "city" (owns: scripts/world.gd, scripts/city_detail.gd, scripts/mesh_merge.gd, scripts/interiors.gd,
    scripts/retro_textures.gd, tests/city_detail.gd, tests/city_audit.gd, tests/map_06.gd, capture scripts for the city):
-   fix the remaining city_audit REPORTs, the Strip ring vs beach rocks step at (24, 400), harsh texture tiling,
-   CRT TVs in shop windows, and use the GPU numbers from A to decide further draw-call work.
+   fix the remaining city_audit REPORTs, the Strip ring vs beach rocks step at (24, 400), bus shelters, avenue
+   planters, manholes and grates, CRT TVs in shop windows, sign text drawn into a texture if the signs cost too much, and use the GPU numbers from A to decide further draw-call work.
 F. "landmarks" (owns: scripts/buildings/*, tests/building_landmarks.gd, tests/capture_interiors.gd):
-   raise the lot props that sit 16 cm into plinths (use world.surface_height), then build the next pieces:
+   investigate the gun store roof not rendering (see CLAUDE_HANDOFF.md known issues), raise the lot props that
+   sit 16 cm into plinths (use world.surface_height), then build the next pieces:
    hotel guest floors + lift/stair, motel drained pool (needs plot space, ask E), high-rise floors 3+ / roof.
    Every new floor needs walk/lift tests like building_landmarks.gd.
 G. "vehicles" (owns: scripts/car.gd, scripts/vehicle_kit.gd, tests/vehicle_art.gd, tests/capture_cabins.gd):
@@ -93,4 +116,6 @@ exporting and merging into cloud/map-integration (never master).
 | Audio | 110 procedural sounds; guns rebuilt; `sfx_audio` 321/0; nothing listened to yet | Listen and tune; surface footsteps |
 | Network | Host-validated relays; handshake; rate limits; `net_security` 91/0; Steam transport written, untested | GodotSteam install and a 2-PC test |
 | Voice | Open-mic proximity by default, optional push-to-talk on N, crew radio on Y (mutes proximity), building walls block passers-by; `voice` 87/0 including a real four-peer ENet run | Real-mic and 2-PC validation; jitter pre-buffer; echo; a mute-player menu; Steam voice API later |
+| Interior props | Gun wall (72 display guns) and trade props in every business; potato-hidden; `building_landmarks` 204/0 | Gun-store palette material; the gun store roof rendering issue |
+| Outdoor anti-slop 2 | Park rails that stop cars (44 runs, 5 parks), 98 street signs, texture variation; `city_detail` 217/0, `city_audit` 72/0 | Bus shelters, avenue planters, manholes; sign text into a texture |
 | Gameplay | Hands up, binoculars, round report, potato toggle, audio hooks; `social_features` 29/0 | Gamepad binds; decisions on the proposals |
