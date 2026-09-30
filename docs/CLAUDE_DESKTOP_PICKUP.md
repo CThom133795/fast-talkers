@@ -38,7 +38,8 @@ USER DECISIONS (binding; details in CLAUDE_HANDOFF.md "The user's decisions"):
 - BUILD ALL the trust systems in docs/DESIGN_WEEK_TRUST.md (W0 Week foundation first, then A-I in T0-T5 order) once
   the playtest zip is stable. Host-validated, tested, with the abuse counters as written.
 - FRIDAY IS ALWAYS A BLOODBATH: the Dead Drop has no truce rules; trust only pays out on Friday.
-- Comeback lifeline D defaults to the Loan Shark phone call (not a pawn shop); confirm with the user when building it.
+- Comeback lifeline D: BUILD THE LOAN SHARK phone call (user confirmed it keeps the pace going). Keep the pawn-shop
+  idea on the table for later; don't build it now.
 
 SETUP (do these yourself, in order):
 1. Preserve local Windows-only changes: run `git status`; commit or stash anything local before switching branches.

@@ -83,8 +83,8 @@ We don't have their telemetry, so these are design inferences, ordered by how mu
    - a **Loan Shark** phone call: borrow cash mid-week, repay with interest on Friday;
    - a **Pawn Shop**: sell your carried gear for quick cash.
 
-   The user wasn't sure what was being asked, so the default is the **Loan Shark**, because it fits the phone-driven
-   crime tone. Confirm with the user when D is built.
+   **Decided: build the Loan Shark.** The user finds it a fun way to keep the pace going. Keep the Pawn Shop on the
+   table as a possible later addition (it could sit alongside the loan shark), but don't build it now.
 
 ## 4. Proposals
 
