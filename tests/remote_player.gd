@@ -170,6 +170,13 @@ func _run() -> void:
 	_check(absf(remote.ledger_prop.position.z - remote.cash_prop.position.z) >= 0.5, "both carry props sit apart when both are held")
 	_settle(Vector3(50, 0, 0), 0)
 	_check(not remote.ledger_prop.visible and not remote.cash_prop.visible, "carry props hide again")
+	# --- Hands-up gesture (state flag 128) ----------------------------------------------------
+	_settle(Vector3(50, 0, 0), FastRemote.FLAG_HANDS_UP | FastRemote.FLAG_AIMING)
+	_check(remote.model.get("hands_up") == true, "hands-up flag raises the remote's hands")
+	_settle(Vector3(50, 0, 0), FastRemote.FLAG_HANDS_UP | FastRemote.FLAG_DEAD)
+	_check(remote.model.get("hands_up") != true, "a dead remote never shows hands up")
+	_settle(Vector3(50, 0, 0), 0)
+	_check(remote.model.get("hands_up") != true, "hands come down when the flag clears")
 	_check(remote.ledger_prop.position.x <= -0.1 and remote.cash_prop.position.x <= -0.1, "carry props hang outward of the leg")
 	var case_box: AABB = (remote.ledger_prop.get_child(0) as MeshInstance3D).mesh.get_aabb()
 	_check(case_box.size.z >= 0.45 and case_box.size.y >= 0.33, "carry props are large enough to read at range (%s)" % str(case_box.size))

@@ -22,6 +22,8 @@ const FLAG_FIRING: int = 8
 const FLAG_LEDGER: int = 16
 const FLAG_CASH: int = 32
 const FLAG_SPRINT: int = 64
+## Hands-up gesture (weapon away, both arms raised).
+const FLAG_HANDS_UP: int = 128
 
 const RENDER_DELAY: float = 0.1
 const EXTRAPOLATE_MAX: float = 0.15
@@ -343,7 +345,9 @@ func _process(delta: float) -> void:
 	_sample(_now() - RENDER_DELAY)
 	if _seated and is_instance_valid(_car):
 		global_transform = _car.global_transform * Transform3D(Basis.IDENTITY, _eye_local - Vector3(0, model.eye_height(), 0))
-	var aiming: bool = not _dead and (_flags & (FLAG_AIMING | FLAG_FIRING)) != 0
+	var hands_up: bool = (_flags & FLAG_HANDS_UP) != 0 and not _dead and not _seated
+	model.set("hands_up", hands_up)
+	var aiming: bool = not _dead and not hands_up and (_flags & (FLAG_AIMING | FLAG_FIRING)) != 0
 	var moving: Vector3 = Vector3.ZERO if (_dead or _seated) else _anim_velocity
 	model.animate(delta, moving, aiming)
 	if not _dead:

@@ -101,6 +101,11 @@ func setup(owner_game: Node, owner_net: FastNet) -> void:
 	net.host_seat_leave.connect(_host_seat_leave)
 	net.host_car_damage.connect(_host_car_damage)
 	net.host_item_request.connect(_host_item_request)
+	# Steam invites (overlay "Join Game" or +connect_lobby at launch) jump straight to the lobby screen.
+	net.steam_join_started.connect(func() -> void:
+		if not active:
+			show_lobby())
+	net.steam_autostart.call_deferred()
 	_build_items()
 
 
@@ -299,6 +304,7 @@ func _send_my_state() -> void:
 	if _holding(LEDGER): flags |= 16
 	if _holding(CASH): flags |= 32
 	if player.sprinting: flags |= 64
+	if player.get("hands_up") == true: flags |= 128
 	var car: int = car_index(game.vehicle) if game.vehicle != null else -1
 	var seat: int = game.seat if game.vehicle != null else -1
 	var yaw: float = player.rotation.y
@@ -347,11 +353,20 @@ func _on_remote_shot(id: int, origin: Vector3, end: Vector3, weapon: String, qui
 	if not active:
 		return
 	var stats: Dictionary = FastPlayer.WEAPONS.get(weapon, FastPlayer.WEAPONS["pistol"])
+	# Distance-aware gunshots (near / far samples) when sfx.gd offers them.
+	var shot_fx: bool = game.sfx.has_method("play_shot_at")
+	var listener: Vector3 = game.player.camera.global_position
 	if quiet:
-		game.sfx.play_at("suppressed", origin)
+		if shot_fx:
+			game.sfx.call("play_shot_at", "suppressed", origin, listener)
+		else:
+			game.sfx.play_at("suppressed", origin)
 		game.effects.call("tracer", origin, end, Color(0.55, 0.52, 0.48), 0.008, 0.03)
 	else:
-		game.sfx.play_at(str(stats.get("sound", weapon)), origin, 1.0, 3.0)
+		if shot_fx:
+			game.sfx.call("play_shot_at", str(stats.get("sound", weapon)), origin, listener, 1.0, 3.0)
+		else:
+			game.sfx.play_at(str(stats.get("sound", weapon)), origin, 1.0, 3.0)
 		game.effects.call("tracer", origin, end, Color(1.0, 0.86, 0.55), 0.016, 0.05)
 		game.effects.call("muzzle_light", origin)
 	# A near miss cracks past your ear.
@@ -1140,9 +1155,12 @@ func _host_seat_leave(from_id: int, car: int, seat: int) -> void:
 		net.broadcast_seat(car, seat, 0)
 
 
-func _host_car_damage(_from_id: int, car: int, amount: float) -> void:
-	if car < 0 or car >= game.cars.size():
+func _host_car_damage(from_id: int, car: int, amount: float) -> void:
+	if not active or car < 0 or car >= game.cars.size():
 		return
 	var ride: FastCar = game.cars[car]
+	# Only someone near the car (crashing it, or shooting it within weapon range) can damage it.
+	if from_id != net.my_id() and net.has_latest(from_id) and _host_pos(from_id).distance_to(ride.global_position) > FastNet.MAX_HIT_RANGE:
+		return
 	ride.apply_damage(amount)
 	net.broadcast_car_health(car, ride.health, ride.disabled)
