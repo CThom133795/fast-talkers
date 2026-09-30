@@ -524,7 +524,9 @@ class Ctx extends RefCounted:
 	## A sign board with painted text over the front, centred at local x.
 	func fascia(at_x: float, y: float, width: float, height: float = 0.7, font: int = 42) -> void:
 		kit.box(Vector3(at_x, y, hz + 0.16), Vector3(width, height, 0.14), m_accent)
-		kit.sign_label(sign_text, Vector3(at_x, y, hz + 0.25), font, Color(0.96, 0.92, 0.8))
+		# Keep the text inside the board: about 0.0095 m per character per font unit.
+		var fitted: int = mini(font, int((width - 0.3) / (maxf(1.0, float(sign_text.length())) * 0.0095)))
+		kit.sign_label(sign_text, Vector3(at_x, y, hz + 0.25), maxi(fitted, 14), Color(0.96, 0.92, 0.8))
 
 	## A tilted awning over the front: a slab pitched out and down.
 	func awning(at_x: float, y: float, width: float, out: float = 1.3) -> void:
@@ -1398,7 +1400,7 @@ static func _warehouse(c: Ctx) -> void:
 	c.door(Vector3(back_x, c.f0, -hz + WALL_T * 0.5), 1.5, DOOR_H, Vector3.FORWARD, c.sign_text + " back door")
 	c.door(Vector3(hx - WALL_T * 0.5, c.f0, side_z), 1.5, DOOR_H, Vector3.RIGHT, c.sign_text + " side door")
 	# A steel-frame lintel sign and a loading-bay bumper strip.
-	c.fascia(pd_x, c.f0 + 3.1, 4.4, 0.6, 30)
+	c.fascia(0.0, c.f0 + 4.9, minf(W_of(c) - 1.0, 9.0), 0.9, 44)
 	c.kit.box(Vector3(roll_x, c.f0 + 4.25, hz + 0.1), Vector3(4.8, 0.3, 0.2), c.m_metal)
 	c.kit.box(Vector3(roll_x, c.f0 + 0.2, hz + 0.2), Vector3(5.0, 0.4, 0.3), c.mat(Color(0.15, 0.15, 0.16), "", 0.8))
 	c.to_interior()
