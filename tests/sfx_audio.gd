@@ -90,6 +90,23 @@ func _brightness(samples: PackedFloat32Array) -> float:
 	return diff / level
 
 
+## Goertzel: relative power of one frequency in `samples` (compare tones within one clip).
+func _tone_power(samples: PackedFloat32Array, hz: float) -> float:
+	var coefficient: float = 2.0 * cos(TAU * hz / 22050.0)
+	var s1: float = 0.0
+	var s2: float = 0.0
+	for sample: float in samples:
+		var s0: float = sample + coefficient * s1 - s2
+		s2 = s1
+		s1 = s0
+	var count: float = maxf(float(samples.size()), 1.0)
+	return (s1 * s1 + s2 * s2 - coefficient * s1 * s2) / (count * count)
+
+
+func _window(samples: PackedFloat32Array, from_s: float, to_s: float) -> PackedFloat32Array:
+	return samples.slice(int(from_s * 22050.0), mini(int(to_s * 22050.0), samples.size()))
+
+
 func _run() -> void:
 	var sfx: Node = SfxScript.new()
 	root.add_child(sfx)
@@ -226,6 +243,60 @@ func _run() -> void:
 	_check(_brightness(_samples(sfx.stream("rain_awning"))) > 0.3, "rain on the awning is a broadband patter")
 	_check(_rms(_samples(sfx.stream("neon_buzz"))) > 0.05, "neon buzz is audible")
 	_check(sfx.gain_hint("room_tone") < sfx.gain_hint("ambience_hush") + 5.0 and sfx.gain_hint("neon_buzz") <= -20.0, "ambient beds sit low in the mix")
+
+	# Playtest additions: stings, HQ bank, phone hardware, newspaper.
+	_check(sfx.sting_names() == ["sting_title", "sting_deaddrop", "sting_week_end"], "sting_names lists the three stings")
+	var windows: Dictionary = {
+		"sting_title": [3.0, 4.0], "sting_deaddrop": [2.5, 3.5], "sting_week_end": [3.0, 4.0], "bank": [0.85, 1.15],
+		"dial": [0.1, 0.14], "busy": [1.95, 2.05], "hangup": [0.3, 0.4], "pickup_phone": [0.2, 0.3], "paper": [0.7, 0.9],
+		"ringback": [1.95, 2.05],
+	}
+	for sound: String in windows:
+		var range_s: Array = windows[sound]
+		var seconds: float = sfx.duration(sound)
+		var wav: AudioStreamWAV = sfx.stream(sound)
+		var samples: PackedFloat32Array = _samples(wav)
+		_check(sfx.has_sound(sound) and seconds >= float(range_s[0]) and seconds <= float(range_s[1]), "%s length is in range (%.2f s)" % [sound, seconds])
+		_check(wav.loop_mode == AudioStreamWAV.LOOP_DISABLED, "%s is a one-shot" % sound)
+		_check(_peak(samples) > 0.5 and _peak(samples) <= 0.93, "%s is audible and not clipping (peak %.2f)" % [sound, _peak(samples)])
+		_check(_rms(samples) > 0.04 and _rms(samples) < 0.5, "%s rms is sane (%.3f)" % [sound, _rms(samples)])
+		_check(absf(samples[samples.size() - 1]) < 0.01, "%s ends without a click" % sound)
+		_check(sfx.gain_hint(sound) <= -4.0 and sfx.gain_hint(sound) >= -24.0, "%s gain sits with the UI sounds (%.0f dB)" % [sound, sfx.gain_hint(sound)])
+	for sound: String in sfx.sting_names():
+		var sting: PackedFloat32Array = _samples(sfx.stream(sound))
+		_check(_rms(_window(sting, sfx.duration(sound) - 0.2, sfx.duration(sound))) < _rms(sting) * 0.5, "%s fades away at the end" % sound)
+		_check(_rms(sting) <= 0.16, "%s sustained level is held in check (rms %.3f)" % [sound, _rms(sting)])
+		_check(_brightness(sting) < 0.5, "%s is dark, not hissy (%.2f)" % [sound, _brightness(sting)])
+	var dead: PackedFloat32Array = _samples(sfx.stream("sting_deaddrop"))
+	_check(_rms(_window(dead, 1.85, 2.05)) > _rms(_window(dead, 1.2, 1.4)), "dead drop sting lands a hit louder than its swell")
+	_check(_rms(_window(dead, 0.05, 0.3)) < _rms(_window(dead, 1.4, 1.65)) * 0.5, "dead drop braam swells up")
+	var title: PackedFloat32Array = _samples(sfx.stream("sting_title"))
+	_check(_tone_power(_window(title, 0.0, 1.0), 65.41) > _tone_power(_window(title, 0.0, 1.0), 98.0) * 3.0, "title sting has its low C bass")
+	var week: PackedFloat32Array = _samples(sfx.stream("sting_week_end"))
+	_check(_rms(_window(week, 0.0, 0.3)) > _rms(_window(week, 0.6, 0.9)), "week-end sting opens on a low hit, then the chord")
+	_check(_tone_power(_window(week, 2.0, 3.0), 311.13) > _tone_power(_window(week, 2.0, 3.0), 349.23) * 3.0, "week-end chord resolved to Eb, not the suspended F")
+	# Each sting is its own waveform, and the bank hit is not the cash pickup.
+	var heads: Dictionary = {}
+	for sound: String in ["sting_title", "sting_deaddrop", "sting_week_end", "bank", "cash", "hangup", "phone_hangup", "pickup_phone", "phone_pickup"]:
+		heads[sfx.stream(sound).data.slice(0, 3000).hex_encode()] = true
+	_check(heads.size() == 9, "new sounds are distinct from each other and the legacy ones (%d)" % heads.size())
+	var bank_sound: PackedFloat32Array = _samples(sfx.stream("bank"))
+	_check(_tone_power(_window(bank_sound, 0.0, 0.1), 95.0) > _tone_power(_window(bank_sound, 0.0, 0.1), 400.0) * 3.0, "bank opens on a low safe thud")
+	_check(_tone_power(_window(bank_sound, 0.16, 0.5), 1865.0) > _tone_power(_window(bank_sound, 0.16, 0.5), 1500.0) * 5.0, "bank has the register bell partial")
+	_check(_brightness(_window(bank_sound, 0.42, 0.85)) > 0.6, "bank ends in dry paper riffle ticks")
+	var blip: PackedFloat32Array = _samples(sfx.stream("dial"))
+	var wanted: float = _tone_power(blip, 770.0) + _tone_power(blip, 1336.0)
+	var unwanted: float = _tone_power(blip, 697.0) + _tone_power(blip, 852.0) + _tone_power(blip, 1209.0) + _tone_power(blip, 1477.0)
+	_check(wanted > unwanted * 4.0, "dial is a real DTMF pair (770 + 1336 Hz, %.1fx)" % (wanted / maxf(unwanted, 0.0000001)))
+	var busy_pattern: PackedFloat32Array = _samples(sfx.stream("busy"))
+	_check(_rms(_window(busy_pattern, 0.05, 0.45)) > 0.2 and _rms(_window(busy_pattern, 0.55, 0.95)) < 0.001 and _rms(_window(busy_pattern, 1.05, 1.45)) > 0.2 and _rms(_window(busy_pattern, 1.55, 1.95)) < 0.001, "busy is 0.5 s on, 0.5 s off, twice")
+	_check(_tone_power(busy_pattern, 480.0) > _tone_power(busy_pattern, 440.0) * 4.0 and _tone_power(busy_pattern, 620.0) > _tone_power(busy_pattern, 700.0) * 4.0, "busy is 480 + 620 Hz")
+	var ringback: PackedFloat32Array = _samples(sfx.stream("ringback"))
+	_check(_tone_power(ringback, 440.0) > _tone_power(ringback, 520.0) * 10.0 and _tone_power(ringback, 480.0) > _tone_power(ringback, 520.0) * 10.0, "ringback is 440 + 480 Hz")
+	_check(_rms(_window(ringback, 0.5, 1.5)) > 0.2 and _rms(_window(ringback, 0.0, 0.01)) < 0.05, "ringback is one steady burst with a soft fade")
+	for sound: String in ["hangup", "pickup_phone", "paper"]:
+		_check(_brightness(_samples(sfx.stream(sound))) > 0.35, "%s is broadband hardware noise, not a tone (%.2f)" % [sound, _brightness(_samples(sfx.stream(sound)))])
+	_check(_brightness(_samples(sfx.stream("paper"))) > 0.6, "newspaper is dry broadband rustle")
 
 	# Distance selection and playback.
 	_check(sfx.shot_sound("pistol", 10.0) == "pistol", "near shot within range")
