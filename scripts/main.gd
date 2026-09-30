@@ -2031,6 +2031,8 @@ func _show_title() -> void:
 		_show_title())
 	_button("PLAY ONLINE  /  HOST OR JOIN A MATCH  →", online.show_lobby)
 	_text("The deal round with friends: LAN, Tailscale or a forwarded port. Players only, no bots.", 14, MUTED)
+	_button("SOLO WEEK  /  THE REAL WEEK, JUST YOU  →", online.start_solo_week)
+	_text("Monday to Friday on this PC: the crew phone, the cases, the Friday Dead Drop. For demos and practice.", 14, MUTED)
 	_button("FREE ROAM  /  ARMORY, RANGE & MOTOR POOL  →", _start_free_roam)
 	_text("No clock, no money. Every weapon and vehicle, the range and practice bots.", 14, MUTED)
 	_button("CONTRACT  /  ROUND MODE  →",func():

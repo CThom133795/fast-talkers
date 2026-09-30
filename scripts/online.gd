@@ -175,6 +175,8 @@ func _on_match_started() -> void:
 	recap = []
 	drop_site = ""
 	_seen_week = -1
+	if net.is_host():
+		week_days = clampi(net.week_days, 1, WEEKDAYS.size())
 	for guard: Node in game._all_guards():
 		guard.call("set_present", false)
 	_ensure_chat()
@@ -205,6 +207,19 @@ func _apply_my_crew() -> void:
 	game.hq_spawn += side * ((slot + 1) / 2) * 1.4 * (1.0 if slot % 2 == 1 else -1.0)
 	if is_instance_valid(chat_ui):
 		chat_ui.call("set_my_crew", game.crew)
+
+
+## Title menu: the real Week on this PC alone (a localhost host, no bots), for demos and solo testing
+## of the Day flow, phones, the Dead Drop and the Week standings.
+func start_solo_week() -> void:
+	if net.local_name.strip_edges().is_empty():
+		net.local_name = "Solo"
+	var err: Error = net.host(FastNet.PORT + 11, "127.0.0.1")
+	if err != OK:
+		game._message("Could not start the solo Week (%s)." % error_string(err), 6.0)
+		return
+	net.request_crew(game.crew)
+	net.request_start()
 
 
 func leave_match() -> void:
@@ -255,6 +270,7 @@ func _spawn_remote(id: int) -> void:
 	_remote_root.add_child(remote)
 	remote.struck.connect(_on_remote_struck.bind(id))
 	remotes[id] = remote
+	_update_remote_phones()
 
 
 func _on_peer_joined(id: int) -> void:
@@ -330,6 +346,10 @@ func tick(delta: float) -> void:
 			_respawn()
 	_set_sidearm_only(_my_trade_item() >= 0)
 	_update_item_visuals()
+	var voice: Node = game.get("voice")
+	if voice != null and voice.has_method("is_speaking"):
+		for id: int in remotes.keys():
+			(remotes[id] as FastRemote).set_speaking(bool(voice.call("is_speaking", id)))
 
 
 ## The user's rule: carrying a trade item limits you to the sidearm (player.gd owns the weapon logic).
@@ -722,9 +742,20 @@ func _on_item_update(item: int, data: Dictionary) -> void:
 			game._message("You have %s. Open chat, TAB to a crew and call. %s drops it." % [whose, game._glyph("drop_phone")], 7.0)
 		else:
 			game._message("You have %s: sidearm only while you carry it. Bank it at your HQ (teal), trade it, or hide it. %s drops it." % [_item_name(item), game._glyph("drop")], 6.0)
+	if is_phone(item):
+		_update_remote_phones()
 	# Our own phone just walked off with a rival: the crew should know.
 	if is_phone(item) and phone_crew(item) == game.crew and holder != 0 and holder != int(before.get("holder", 0)) and net.crew_of(holder) != game.crew:
 		game._message("A rival has your crew's phone. Their calls will sound like you.", 6.0)
+
+
+## Rivals see a phone on the carrier's belt, banded in the owning crew's colour (never a map marker).
+func _update_remote_phones() -> void:
+	for id: int in remotes.keys():
+		var owner_crew: String = _phone_of(id)
+		var remote: Node = remotes[id]
+		if remote.has_method("set_phone"):
+			remote.call("set_phone", not owner_crew.is_empty(), Factions.color(owner_crew) if not owner_crew.is_empty() else Color.WHITE)
 
 
 func _update_item_visuals() -> void:

@@ -321,6 +321,14 @@ func peer_count() -> int:
 	return _peers.size()
 
 
+## True while this peer's proximity voice is reaching us (crew radio never counts: that stays secret).
+func is_speaking(id: int) -> bool:
+	if not _peers.has(id):
+		return false
+	var entry: Dictionary = _peers[id]
+	return Time.get_ticks_msec() - int(entry["last_ms"]) < 400 and int(entry["mode"]) != Relay.Mode.CREW
+
+
 ## Names of remote players heard in the last half second (for the HUD).
 func speakers() -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()

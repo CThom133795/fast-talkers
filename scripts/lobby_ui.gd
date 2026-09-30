@@ -43,6 +43,8 @@ var _lobby_status: Label
 var _player_list: VBoxContainer
 var _crew_buttons: Dictionary = {}
 var _start_button: Button
+## Host only: a 3-Day Week instead of 5 (net.week_days).
+var _week_toggle: CheckButton
 var _leave_button: Button
 var _info_label: Label
 var _wait_label: Label
@@ -163,6 +165,13 @@ func _build_lobby(parent: Control) -> void:
 		button.alignment = HORIZONTAL_ALIGNMENT_CENTER
 		grid.add_child(button)
 		_crew_buttons[crew] = button
+	_week_toggle = CheckButton.new()
+	_week_toggle.text = "Quick Week: Wednesday to Friday (3 Days)"
+	_week_toggle.add_theme_font_size_override("font_size", 14)
+	_week_toggle.toggled.connect(func(on: bool) -> void:
+		if net != null:
+			net.week_days = 3 if on else 5)
+	_lobby_box.add_child(_week_toggle)
 	_start_button = _button("START MATCH", _on_start_pressed)
 	_lobby_box.add_child(_start_button)
 	_wait_label = _label("Waiting for the host to start the match...", 14, TEAL, true)
@@ -320,6 +329,8 @@ func _refresh_lobby() -> void:
 		button.add_theme_color_override("font_color", color.lightened(0.25) if selected else INK)
 		button.add_theme_stylebox_override("normal", _style(Color("35453d") if selected else Color("1c2d30"), color if selected else Color("53645d"), 12))
 	_start_button.visible = hosting
+	_week_toggle.visible = hosting and not net.in_match
+	_week_toggle.set_pressed_no_signal(net.week_days == 3)
 	_start_button.disabled = net.players.size() < 1 or net.in_match
 	_wait_label.visible = not hosting
 	_wait_label.text = "Match in progress." if net.in_match else "Waiting for the host to start the match..."

@@ -60,6 +60,11 @@ var sidearm_prop: Node3D
 var longgun_prop: Node3D
 var ledger_prop: Node3D
 var cash_prop: Node3D
+## The crew phone on the belt while this player carries one (online.gd calls set_phone from the item state).
+var phone_prop: Node3D
+var _phone_band: StandardMaterial3D
+var _has_phone: bool = false
+var _speaking: bool = false
 
 var _configured: bool = false
 var _built: bool = false
@@ -125,6 +130,7 @@ func _build() -> void:
 	name_tag = Label3D.new()
 	name_tag.name = "NameTag"
 	name_tag.text = display_name
+	_speaking = false
 	name_tag.font_size = 44
 	name_tag.pixel_size = 0.0055
 	name_tag.outline_size = 10
@@ -217,6 +223,42 @@ func _build_carry_props() -> void:
 	_add_box(cash_prop, Vector3(0.05, 0.14, 0.18), Vector3(0.0, 0.24, 0.0), edge)
 	ledger_prop.visible = false
 	cash_prop.visible = false
+	# A brick cellphone clipped to the belt: dark shell, stub antenna, a band in the owning crew's colour.
+	var belt: BoneAttachment3D = BoneAttachment3D.new()
+	belt.bone_name = "hips"
+	model.skeleton.add_child(belt)
+	phone_prop = Node3D.new()
+	phone_prop.name = "CrewPhone"
+	belt.add_child(phone_prop)
+	phone_prop.position = Vector3(0.18, 0.02, -0.03)
+	var shell: StandardMaterial3D = StandardMaterial3D.new()
+	shell.albedo_color = Color(0.08, 0.08, 0.09)
+	shell.roughness = 0.6
+	_phone_band = StandardMaterial3D.new()
+	_phone_band.emission_enabled = true
+	_phone_band.emission_energy_multiplier = 0.6
+	_add_box(phone_prop, Vector3(0.06, 0.2, 0.045), Vector3.ZERO, shell)
+	_add_box(phone_prop, Vector3(0.014, 0.09, 0.014), Vector3(0.018, 0.14, 0.0), shell)
+	_add_box(phone_prop, Vector3(0.062, 0.025, 0.047), Vector3(0.0, -0.05, 0.0), _phone_band)
+	phone_prop.visible = false
+
+
+## Voice cue: the name tag reads "(( NAME ))" while this player's proximity voice reaches us.
+func set_speaking(on: bool) -> void:
+	if on == _speaking or name_tag == null:
+		return
+	_speaking = on
+	name_tag.text = "((  %s  ))" % display_name if on else display_name
+
+
+## Show (or hide) the crew phone on this player's belt, banded in the colour of the crew that owns it.
+func set_phone(carrying: bool, crew_color: Color = Color.WHITE) -> void:
+	_has_phone = carrying
+	if _phone_band != null:
+		_phone_band.albedo_color = crew_color
+		_phone_band.emission = crew_color
+	if phone_prop != null:
+		phone_prop.visible = carrying and not _dead
 
 
 func _add_box(parent: Node3D, size: Vector3, at: Vector3, material: StandardMaterial3D) -> void:
@@ -414,6 +456,7 @@ func _refresh(force: bool) -> void:
 	if ledger_prop != null:
 		ledger_prop.visible = not dead and (_flags & FLAG_LEDGER) != 0
 		cash_prop.visible = not dead and (_flags & FLAG_CASH) != 0
+		phone_prop.visible = not dead and _has_phone
 		# Both at once: keep the cases from overlapping.
 		var both: bool = ledger_prop.visible and cash_prop.visible
 		ledger_prop.position.z = -0.29 if both else 0.0
