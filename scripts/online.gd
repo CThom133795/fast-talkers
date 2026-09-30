@@ -67,6 +67,8 @@ var _round_rotation: int = 0
 ## Pellets that hit the same player in one frame go to the host as one summed claim
 ## (the host accepts at most 25 claims a second per shooter).
 var _pending_hits: Dictionary = {}
+## The round this peer last spawned for (a late joiner spawns mid-round).
+var _spawned_round: int = -1
 
 
 func setup(owner_game: Node, owner_net: FastNet) -> void:
@@ -172,6 +174,11 @@ func leave_match() -> void:
 	var was_active: bool = active
 	active = false
 	phase = ""
+	_spawned_round = -1
+	round_number = 0
+	bank.clear()
+	results = []
+	_kills.clear()
 	for id: int in remotes.keys():
 		(remotes[id] as Node).queue_free()
 	remotes.clear()
@@ -209,8 +216,22 @@ func _spawn_remote(id: int) -> void:
 
 
 func _on_peer_joined(id: int) -> void:
-	if active:
-		_spawn_remote(id)
+	if not active:
+		return
+	_spawn_remote(id)
+	if net.is_host():
+		# Catch a late joiner up: where the cases are, who sits where, where parked cars ended up.
+		for item: int in items.keys():
+			var data: Dictionary = (items[item] as Dictionary).duplicate()
+			data["msg"] = ""
+			net.broadcast_item(item, data)
+		for car: int in range(game.cars.size()):
+			for seat: int in range((game.cars[car] as FastCar).seat_count()):
+				var holder: int = net.seat_holder(car, seat)
+				if holder != 0:
+					net.broadcast_seat(car, seat, holder)
+		_host_car_sent.clear()
+		_host_broadcast()
 
 
 func _on_peer_left(id: int) -> void:
@@ -633,13 +654,20 @@ func _on_round_state(data: Dictionary) -> void:
 	if not changed:
 		return
 	match phase:
-		"buy": _enter_buy()
-		"live": _enter_live()
-		"settle": _enter_settle()
+		"buy":
+			_enter_buy()
+		"live":
+			# Joined mid-round: spawn at HQ first.
+			if _spawned_round != round_number:
+				_enter_buy()
+			_enter_live()
+		"settle":
+			_enter_settle()
 
 
 func _enter_buy() -> void:
 	var g: Node = game
+	_spawned_round = round_number
 	g._hide_title_set()
 	g.free_roam = false
 	var keep: bool = g._carry_gear and not g.player.is_dead()
@@ -680,7 +708,8 @@ func _enter_buy() -> void:
 	for ride: FastCar in g.cars:
 		ride.enabled = false
 	g.buy_tab = "rifle" if g._current_primary().is_empty() else "mods"
-	g._show_buy()
+	if phase == "buy":
+		g._show_buy()
 	g._message(briefing(), 14.0)
 
 
