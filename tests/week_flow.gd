@@ -343,8 +343,12 @@ func _monday() -> void:
 	await _teleport(_item(phone).get("pos", Vector3.ZERO))
 	online.interact()
 	await _wait_until(func() -> bool: return int(_item(phone).get("holder", 0)) == 1, 2.0)
+	# The strip hides under the buy menu; with the menu closed it is on screen.
+	var menu_was_open: bool = game.buy_menu_open
+	game.buy_menu_open = false
 	await _frames(2)
-	_check(str(game.action_label.text).contains("CALL A CREW"), "the HUD action strip is on screen ('%s')" % str(game.action_label.text))
+	_check(str(game.action_label.text).contains("CALL A CREW"), "the HUD action strip is on screen with the buy menu closed ('%s')" % str(game.action_label.text))
+	game.buy_menu_open = menu_was_open
 	_check(online.action_prompts().contains("[%s] CALL A CREW" % str(game._glyph("phone_call"))) and online.action_prompts().contains("DROP PHONE"), "holding the phone, the action strip shows CALL and DROP PHONE ('%s')" % online.action_prompts())
 	await _phone_calls(phone)
 	await _teleport(_item(0).get("pos", Vector3.ZERO))

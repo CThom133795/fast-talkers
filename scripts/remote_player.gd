@@ -62,6 +62,13 @@ var ledger_prop: Node3D
 var cash_prop: Node3D
 ## The crew phone on the belt while this player carries one (online.gd calls set_phone from the item state).
 var phone_prop: Node3D
+## During a live call (or while they wait for the other end to pick up) the holder puts the handset to their ear:
+## the left arm comes up and a second phone mesh sits in the left hand. Set by online.gd from the replicated calls.
+var on_call: bool = false
+var handset_prop: Node3D
+const CALL_UPPERARM: Vector3 = Vector3(0.9, 1.7, 0.35)
+const CALL_FOREARM: Vector3 = Vector3(2.7, 0.0, 0.0)
+var _call_blend: float = 0.0
 var _phone_band: StandardMaterial3D
 var _has_phone: bool = false
 var _speaking: bool = false
@@ -241,6 +248,18 @@ func _build_carry_props() -> void:
 	_add_box(phone_prop, Vector3(0.014, 0.09, 0.014), Vector3(0.018, 0.14, 0.0), shell)
 	_add_box(phone_prop, Vector3(0.062, 0.025, 0.047), Vector3(0.0, -0.05, 0.0), _phone_band)
 	phone_prop.visible = false
+	# The same brick phone again, in the left hand, shown at the ear during a call.
+	var hand: BoneAttachment3D = BoneAttachment3D.new()
+	hand.bone_name = "hand_l"
+	model.skeleton.add_child(hand)
+	handset_prop = Node3D.new()
+	handset_prop.name = "Handset"
+	hand.add_child(handset_prop)
+	handset_prop.position = Vector3(0.02, 0.06, 0.03)
+	_add_box(handset_prop, Vector3(0.06, 0.2, 0.045), Vector3.ZERO, shell)
+	_add_box(handset_prop, Vector3(0.014, 0.09, 0.014), Vector3(0.018, 0.14, 0.0), shell)
+	_add_box(handset_prop, Vector3(0.062, 0.025, 0.047), Vector3(0.0, -0.05, 0.0), _phone_band)
+	handset_prop.visible = false
 
 
 ## Voice cue: the name tag reads "(( NAME ))" while this player's proximity voice reaches us.
@@ -257,8 +276,28 @@ func set_phone(carrying: bool, crew_color: Color = Color.WHITE) -> void:
 	if _phone_band != null:
 		_phone_band.albedo_color = crew_color
 		_phone_band.emission = crew_color
+	_update_phone_props()
+
+
+## Belt phone or handset at the ear (_pose_extras blends it in each frame). A case in the left hand wins: then the
+## phone stays on the belt (speakerphone).
+func _update_phone_props() -> void:
+	var at_ear: bool = _call_pose_wanted() and _call_blend > 0.6
 	if phone_prop != null:
-		phone_prop.visible = carrying and not _dead
+		phone_prop.visible = _has_phone and not _dead and not at_ear
+	if handset_prop != null:
+		handset_prop.visible = at_ear
+
+
+func _call_pose_wanted() -> bool:
+	return on_call and _has_phone and not _dead and not _seated and (_flags & (FLAG_LEDGER | FLAG_CASH | FLAG_HANDS_UP)) == 0
+
+
+func set_on_call(value: bool) -> void:
+	if value == on_call:
+		return
+	on_call = value
+	_update_phone_props()
 
 
 func _add_box(parent: Node3D, size: Vector3, at: Vector3, material: StandardMaterial3D) -> void:
@@ -416,6 +455,20 @@ func _pose_extras(delta: float) -> void:
 			skeleton.set_bone_pose_rotation(leg[2], Quaternion(Vector3.RIGHT, 0.6 * t))
 		var spine: int = CharacterModel.Bone.SPINE
 		skeleton.set_bone_pose_rotation(spine, skeleton.get_bone_pose_rotation(spine) * Quaternion(Vector3.RIGHT, -0.5 * t))
+	# On the phone: blend the left arm up so the handset sits at the ear (after the walk/idle springs).
+	var want_call: bool = _call_pose_wanted()
+	_call_blend = move_toward(_call_blend, 1.0 if want_call else 0.0, delta * 5.0)
+	if _call_blend > 0.001:
+		var upper: int = CharacterModel.Bone.UPPERARM_L
+		var fore: int = CharacterModel.Bone.FOREARM_L
+		skeleton.set_bone_pose_rotation(upper, skeleton.get_bone_pose_rotation(upper).slerp(Quaternion.from_euler(CALL_UPPERARM), _call_blend))
+		skeleton.set_bone_pose_rotation(fore, skeleton.get_bone_pose_rotation(fore).slerp(Quaternion.from_euler(CALL_FOREARM), _call_blend))
+	# The phone leaves the belt once the hand is most of the way up.
+	var at_ear: bool = want_call and _call_blend > 0.6
+	if handset_prop != null:
+		handset_prop.visible = at_ear
+	if phone_prop != null:
+		phone_prop.visible = _has_phone and not at_ear
 	# Positive pitch looks up: tilt the head most and the chest a little.
 	var pitch: float = clampf(look_pitch, -1.2, 1.2)
 	var head: int = CharacterModel.Bone.HEAD
@@ -456,7 +509,9 @@ func _refresh(force: bool) -> void:
 	if ledger_prop != null:
 		ledger_prop.visible = not dead and (_flags & FLAG_LEDGER) != 0
 		cash_prop.visible = not dead and (_flags & FLAG_CASH) != 0
-		phone_prop.visible = not dead and _has_phone
+		if dead and handset_prop != null:
+			handset_prop.visible = false
+		phone_prop.visible = not dead and _has_phone and not (handset_prop != null and handset_prop.visible)
 		# Both at once: keep the cases from overlapping.
 		var both: bool = ledger_prop.visible and cash_prop.visible
 		ledger_prop.position.z = -0.29 if both else 0.0

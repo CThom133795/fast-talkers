@@ -103,6 +103,7 @@ var _dial_targets: Array[int] = []
 var _dial_index: int = 0
 var _dial_until: float = 0.0
 var _ring_timer: float = 0.0
+var _ringback_timer: float = 0.0
 var _phone_label: Label
 
 var _item_nodes: Dictionary = {}
@@ -834,7 +835,7 @@ func _on_item_update(item: int, data: Dictionary) -> void:
 	var me: int = net.my_id()
 	var holder: int = int(data.get("holder", 0))
 	if holder == me and int(before.get("holder", 0)) != me:
-		game.sfx.play("draw", 0.8)
+		game.sfx.play("pickup_phone" if is_phone(item) else "draw", 1.0 if is_phone(item) else 0.8)
 		if is_phone(item):
 			var owner_crew: String = phone_crew(item)
 			var whose: String = "your crew's phone" if owner_crew == game.crew else "the %s phone. Your calls will come from them" % Factions.get_crew(owner_crew)["name"]
@@ -845,7 +846,12 @@ func _on_item_update(item: int, data: Dictionary) -> void:
 		_update_remote_phones()
 	# Our own phone just walked off with a rival: the crew should know.
 	if is_phone(item) and phone_crew(item) == game.crew and holder != 0 and holder != int(before.get("holder", 0)) and net.crew_of(holder) != game.crew:
-		game._message("A rival has your crew's phone. Their calls will sound like you.", 6.0)
+		var thief: String = Factions.get_crew(net.crew_of(holder))["name"]
+		game.sfx.play("deny")
+		game._message("YOUR CREW PHONE IS GONE: %s has it. Their calls will sound like you." % str(thief).to_upper(), 7.0)
+		_system("Your crew phone was taken by %s." % thief)
+	elif is_phone(item) and phone_crew(item) == game.crew and holder != 0 and holder != me and holder != int(before.get("holder", 0)) and net.crew_of(holder) == game.crew and int(before.get("holder", 0)) != 0 and net.crew_of(int(before.get("holder", 0))) != game.crew:
+		game._message("%s got the crew phone back." % net.name_of(holder), 5.0)
 
 
 ## Rivals see a phone on the carrier's belt, banded in the owning crew's colour (never a map marker).
@@ -1078,6 +1084,8 @@ func _enter_buy() -> void:
 	print("[week] Week %d, %s (Day %d of %d), %s, %d players" % [week, day_name(), day, week_days, my_role(), net.players.size()])
 	for line: String in morning_paper():
 		_system(line)
+	if not morning_paper().is_empty():
+		g.sfx.play("paper", 1.0, -4.0)
 	g._message("%s.  %s" % [day_name(), role_line()], 8.0)
 	if phase == "buy" and week == 1 and day == 1 and not _week_card_done:
 		_week_card_done = true
@@ -1156,7 +1164,11 @@ func _enter_live() -> void:
 	for ride: FastCar in g.cars:
 		ride.enabled = true
 	g._resume()
-	g._message("Doors open. %s" % role_line(), 6.0)
+	if is_dead_drop():
+		g.sfx.play("sting_deaddrop", 1.0, -2.0)
+		g._message("FRIDAY. THE DEAD DROP. %s" % role_line(), 8.0)
+	else:
+		g._message("Doors open. %s" % role_line(), 6.0)
 
 
 func _enter_settle() -> void:
@@ -1176,12 +1188,35 @@ func _enter_settle() -> void:
 func _enter_week_end() -> void:
 	var g: Node = game
 	_result_screen("END OF WEEK %d" % week, "A NEW WEEK STARTS IN A FEW SECONDS. MONEY AND GEAR RESET.")
+	g.sfx.play("sting_week_end", 1.0, -2.0)
+	# The Friday late edition: a headline, then the crews ranked by what they banked (never by kills).
+	var order: Array = standings_order()
+	g._text("THE HALCYON HERALD  ·  FRIDAY LATE EDITION", 13, g.MUTED)
+	g._text(week_headline(), 30, g.GOLD)
+	for rank: int in range(order.size()):
+		var crew_id: String = order[rank]
+		var mark: String = "  ← YOUR CREW" if crew_id == g.crew else ""
+		g._text("%d.  %s   $%s%s" % [rank + 1, str(Factions.get_crew(crew_id)["name"]).to_upper(), g._money(int(bank.get(crew_id, 0))), mark], 22 if rank == 0 else 18, g.INK if rank == 0 else g.MUTED)
 	var lines: PackedStringArray = PackedStringArray()
 	for line: Variant in results:
 		lines.append(str(line))
-	g._text("\n".join(lines), 16, g.GOLD)
+	if not lines.is_empty():
+		g._text("\n".join(lines), 14, g.TEAL)
 	g._button("LEAVE MATCH", leave_match)
 	g.menu.show()
+
+
+## The END OF WEEK headline, from the banked standings only (pure: tests call it).
+func week_headline() -> String:
+	var order: Array = standings_order()
+	if order.is_empty() or int(bank.get(order[0], 0)) <= 0:
+		return "QUIET WEEK ON THE WATERFRONT"
+	var winner: String = str(Factions.get_crew(order[0])["name"]).to_upper()
+	if order.size() > 1 and int(bank.get(order[1], 0)) * 10 >= int(bank.get(order[0], 0)) * 9:
+		return "PHOTO FINISH: %s EDGE IT" % winner
+	if order.size() > 1 and int(bank.get(order[1], 0)) * 3 <= int(bank.get(order[0], 0)):
+		return "BLOOD ON THE STREET, MONEY IN THE SAFE: %s RUN THE CITY" % winner
+	return "%s TAKE THE WEEK" % winner
 
 
 func _result_screen(title: String, subtitle: String) -> void:
@@ -1368,7 +1403,8 @@ func gps_target() -> Vector3:
 func _on_grant(amount: int, reason: String) -> void:
 	game.cash = clampi(game.cash + amount, 0, CASH_CAP)
 	if amount > 0:
-		game.sfx.play("cash")
+		# Banking at HQ gets the safe-and-register moment; wages and bonuses the lighter cash sound.
+		game.sfx.play("bank" if reason.begins_with("Banked") else "cash")
 	game._message("%s%s$%s  /  %s" % ["+" if amount >= 0 else "-", "", game._money(absi(amount)), reason], 5.0)
 
 
@@ -1469,6 +1505,7 @@ func _dial_input(event: InputEvent, mine: int) -> bool:
 		if button == JOY_BUTTON_DPAD_LEFT or button == JOY_BUTTON_DPAD_RIGHT:
 			_dial_index = (_dial_index + (1 if button == JOY_BUTTON_DPAD_RIGHT else _dial_targets.size() - 1)) % _dial_targets.size()
 			_dial_until = _now() + DIAL_STRIP_SECONDS
+			game.sfx.play("dial", 0.9 + _dial_index * 0.07)
 			return true
 		if button == JOY_BUTTON_A:
 			_dial_selected(mine)
@@ -1478,6 +1515,7 @@ func _dial_input(event: InputEvent, mine: int) -> bool:
 			if event.is_action_pressed("weapon_%d" % (index + 1)):
 				_dial_index = index
 				_dial_until = _now() + DIAL_STRIP_SECONDS
+				game.sfx.play("dial", 0.9 + index * 0.07)
 				return true
 		if event.is_action_pressed("phone_call"):
 			_dial_selected(mine)
@@ -1488,6 +1526,7 @@ func _dial_input(event: InputEvent, mine: int) -> bool:
 func _dial_selected(mine: int) -> void:
 	if _dial_index >= 0 and _dial_index < _dial_targets.size():
 		net.send_phone_request("dial", _dial_targets[_dial_index])
+		game.sfx.play("dial", 1.15)
 	_close_dial()
 
 
@@ -1498,6 +1537,8 @@ func _close_dial() -> void:
 
 ## Replicated calls from the host. Keeps when each one changed state, for the "0:42" on the HUD.
 func _on_phone_calls(calls: Array) -> void:
+	var mine: int = my_phone_item()
+	var before: Dictionary = _view_call_of(mine) if mine >= 0 else {}
 	var next: Array[Dictionary] = []
 	for entry: Dictionary in calls:
 		var known: Dictionary = {}
@@ -1508,9 +1549,19 @@ func _on_phone_calls(calls: Array) -> void:
 		row["since_ms"] = int(known["since_ms"]) if not known.is_empty() else Time.get_ticks_msec() - int(float(entry["t"]) * 1000.0)
 		next.append(row)
 	phone_view = next
+	if mine >= 0:
+		var after: Dictionary = _view_call_of(mine)
+		if not before.is_empty() and after.is_empty():
+			game.sfx.play("hangup")
+		elif not before.is_empty() and int(before["state"]) == PhoneCallsScript.State.RINGING and not after.is_empty() and int(after["state"]) == PhoneCallsScript.State.LIVE:
+			game.sfx.play("pickup_phone")
 
 
 func _on_phone_notice(text: String) -> void:
+	if text == "Line busy.":
+		game.sfx.play("busy")
+	elif text == "No answer.":
+		game.sfx.play("hangup")
 	game._message(text, 4.0)
 	_system(text)
 
@@ -1577,6 +1628,24 @@ func _phone_tick(delta: float) -> void:
 					game.sfx.play_at("ring", at, 1.0, -3.0)
 	if _dial_until > 0.0 and _now() >= _dial_until:
 		_close_dial()
+	# The caller hears the ringback while the other phone rings (2 s on, 4 s off).
+	var mine: int = my_phone_item()
+	var my_call: Dictionary = _view_call_of(mine) if mine >= 0 else {}
+	if not my_call.is_empty() and int(my_call["state"]) == PhoneCallsScript.State.RINGING and int(my_call["a"]) == mine:
+		_ringback_timer -= delta
+		if _ringback_timer <= 0.0:
+			_ringback_timer = 6.0
+			game.sfx.play("ringback", 1.0, -2.0)
+	else:
+		_ringback_timer = 0.0
+	# Rivals see who is on the phone: the holder of a phone in a live call (or dialling) raises it to the ear.
+	for id: int in remotes.keys():
+		var item: int = _phone_item_of(id)
+		var view: Dictionary = _view_call_of(item) if item >= 0 else {}
+		var talking: bool = not view.is_empty() and (int(view["state"]) == PhoneCallsScript.State.LIVE or int(view["a"]) == item)
+		var remote: Node = remotes[id]
+		if remote.has_method("set_on_call"):
+			remote.call("set_on_call", talking)
 	_update_phone_label()
 
 
