@@ -5,9 +5,12 @@ extends RefCounted
 ## back of the lobby and two U-stairwells at opposite corners (front-east, back-west), so the upper
 ## floor has no single chokepoint; an open-plan office with cubicles, a glass-walled corner
 ## conference room, copier and water cooler, and a rear service door. The west stairwell does not stop
-## at the office: a third flight climbs along the west wall through the office ceiling to a covered
-## roof deck notched into the west face of the tower (railed edge, air conditioners) and a plant room
-## with a door, so no stair in the building leads to a sealed ceiling.
+## at the office: a third flight climbs along the west wall through the office ceiling onto the podium
+## roof, an open-air terrace (railed edges, air conditioners, sky above) because the tower shaft is set
+## back from the west face; a plant room with a door in the tower face opens off it, so no stair in the
+## building leads to a sealed ceiling. Every stair stands flush to its walls (no slot beside a flight),
+## every landing runs out to the wall behind it, and the lobby ceiling lining stops short of every stair
+## hole and lift shaft.
 ## Local frame (BuildingKit): +Z = out of the front door, +X along the facade. Half size 15 x 15.
 
 const BuildingKit = preload("res://scripts/buildings/building_kit.gd")
@@ -17,37 +20,42 @@ const HALF: Vector2 = Vector2(15, 15)
 const FLOORS: Array[float] = [0.17, 4.77]
 const OFFICE_TOP: float = 8.37
 const TOWER_TOP: float = 62.0
-## Roof stair: continues stair A along the west wall from the office floor up to the roof deck.
-const ROOF_STAIR: Vector3 = Vector3(-13.8, 4.77, -6.0)
-## The office ceiling slab is open over the upper part of that flight (head room needs 1.9 m).
-const HOLE_ROOF: Rect2 = Rect2(-14.5, -4.5, 1.4, 4.5)
-## Roof deck: a recess cut into the west face of the tower's lowest DECK_HEIGHT metres, open to the west.
-const DECK: Rect2 = Rect2(-15.0, -5.0, 6.0, 8.0)
-const DECK_HEIGHT: float = 4.0
-## Head of the plant room door opening, above the deck floor.
+## West face of the tower shaft above the podium. West of it (x -15 to TOWER_W) the podium roof is an open-air terrace.
+const TOWER_W: float = -6.0
+## Roof stair: continues stair A along the west wall (flush to it) from the office floor up to the terrace.
+const ROOF_STAIR: Vector3 = Vector3(-14.25, 4.77, -6.0)
+## The office ceiling slab is open over the upper part of that flight (head room needs 1.9 m); 0.1 m to the east of the flight.
+const HOLE_ROOF: Rect2 = Rect2(-14.85, -4.5, 1.3, 4.5)
+## Height of the tower's lowest storey (the plant room sits in it).
+const PODIUM_CAP: float = 4.0
+## Head of the plant room door opening, above the terrace floor.
 const DOOR_HEAD: float = 2.6
-## Plant room inside the tower (clear interior), entered from the deck by a door in its west wall.
-const PLANT: Rect2 = Rect2(-8.7, -4.0, 4.7, 5.0)
+## Plant room inside the tower (clear interior), entered from the terrace by a door in its west wall (the tower face).
+const PLANT: Rect2 = Rect2(-5.7, -4.0, 4.4, 5.0)
 const PLANT_HEIGHT: float = 3.3
 const PLANT_DOOR_Z: float = -1.5
 const LIFT_A: Rect2 = Rect2(-4.2, -9.0, 2.4, 2.6)
 const LIFT_B: Rect2 = Rect2(1.8, -9.0, 2.4, 2.6)
-## Stair A (back-west) rises toward the back wall and returns; stair B (front-east) toward the front.
-const STAIR_A: Vector3 = Vector3(-12.4, 0.17, -8.7)
-const STAIR_B: Vector3 = Vector3(12.4, 0.17, 8.7)
-const HOLE_A: Rect2 = Rect2(-14.6, -14.6, 3.0, 5.9)
-const HOLE_B: Rect2 = Rect2(11.6, 8.7, 3.0, 5.9)
-const WEST_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(-9.0, 0.17, -2.0), Vector3(-12.4, 0.17, -7.6),
-	Vector3(-12.4, 0.17, -8.4), Vector3(-12.4, 2.47, -12.4), Vector3(-12.4, 2.47, -13.3), Vector3(-13.8, 2.47, -13.3), Vector3(-13.8, 2.47, -12.4),
-	Vector3(-13.8, 4.77, -8.4), Vector3(-13.8, 4.77, -7.4), Vector3(-9.0, 4.77, -4.0), Vector3(-7.0, 4.77, 2.0)]
-const EAST_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(9.5, 0.17, 7.0), Vector3(12.4, 0.17, 7.6),
-	Vector3(12.4, 0.17, 8.4), Vector3(12.4, 2.47, 12.4), Vector3(12.4, 2.47, 13.3), Vector3(13.8, 2.47, 13.3), Vector3(13.8, 2.47, 12.4),
-	Vector3(13.8, 4.77, 8.4), Vector3(13.8, 4.77, 7.4), Vector3(9.0, 4.77, 4.0)]
-## Stair A on to the roof: lobby, both office flights, the roof flight, the deck and the plant room.
-const ROOF_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(-9.0, 0.17, -2.0), Vector3(-12.4, 0.17, -7.6),
-	Vector3(-12.4, 0.17, -8.4), Vector3(-12.4, 2.47, -12.4), Vector3(-12.4, 2.47, -13.3), Vector3(-13.8, 2.47, -13.3), Vector3(-13.8, 2.47, -12.4),
-	Vector3(-13.8, 4.77, -8.4), Vector3(-13.8, 4.77, -7.4), Vector3(-13.8, 4.77, -6.0), Vector3(-13.8, 8.37, -0.3), Vector3(-13.8, 8.37, 1.0),
-	Vector3(-11.0, 8.37, 1.0), Vector3(-10.0, 8.37, -1.5), Vector3(-6.5, 8.37, -1.5)]
+## Stair A (back-west) rises toward the back wall and returns; stair B (front-east) toward the front. Each is two
+## 1.2 m flights 0.2 m apart: the return flight's outer edge is flush with the side wall, the landing runs to the end wall.
+const STAIR_A: Vector3 = Vector3(-12.85, 0.17, -8.7)
+const STAIR_B: Vector3 = Vector3(12.85, 0.17, 8.7)
+const HOLE_A: Rect2 = Rect2(-14.85, -14.85, 2.6, 6.15)
+const HOLE_B: Rect2 = Rect2(12.25, 8.7, 2.6, 6.15)
+const LANDING_DEEP: float = 2.25
+const WEST_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(-9.0, 0.17, -2.0), Vector3(-12.85, 0.17, -7.6),
+	Vector3(-12.85, 0.17, -8.4), Vector3(-12.85, 2.47, -12.4), Vector3(-12.85, 2.47, -13.7), Vector3(-14.25, 2.47, -13.7), Vector3(-14.25, 2.47, -12.4),
+	Vector3(-14.25, 4.77, -8.4), Vector3(-14.25, 4.77, -7.4), Vector3(-9.0, 4.77, -4.0), Vector3(-7.0, 4.77, 2.0)]
+const EAST_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(9.5, 0.17, 7.0), Vector3(12.85, 0.17, 7.6),
+	Vector3(12.85, 0.17, 8.4), Vector3(12.85, 2.47, 12.4), Vector3(12.85, 2.47, 13.7), Vector3(14.25, 2.47, 13.7), Vector3(14.25, 2.47, 12.4),
+	Vector3(14.25, 4.77, 8.4), Vector3(14.25, 4.77, 7.4), Vector3(9.0, 4.77, 4.0)]
+## Stair A on to the roof: lobby, both office flights, the roof flight and out onto the open terrace (it ends in the open air).
+const ROOF_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.0), Vector3(-9.0, 0.17, -2.0), Vector3(-12.85, 0.17, -7.6),
+	Vector3(-12.85, 0.17, -8.4), Vector3(-12.85, 2.47, -12.4), Vector3(-12.85, 2.47, -13.7), Vector3(-14.25, 2.47, -13.7), Vector3(-14.25, 2.47, -12.4),
+	Vector3(-14.25, 4.77, -8.4), Vector3(-14.25, 4.77, -7.4), Vector3(-14.25, 4.77, -6.0), Vector3(-14.25, 8.37, -0.3), Vector3(-14.25, 8.37, 1.5),
+	Vector3(-11.0, 8.37, 2.5), Vector3(-9.5, 8.37, 2.5)]
+## From the terrace through the plant room door (level: published for tests/stair_walk.gd's extras).
+const PLANT_ROUTE: Array[Vector3] = [Vector3(-9.5, 8.37, -1.5), Vector3(-7.0, 8.37, -1.5), Vector3(-4.5, 8.37, -1.5), Vector3(-3.7, 8.37, -1.5)]
 const SERVICE_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 11.0), Vector3(6.0, 0.17, -3.0), Vector3(8.0, 0.17, -12.5), Vector3(8.0, 0.17, -16.6)]
 
 
@@ -61,7 +69,7 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	kit.footprint(rect)
 	kit.floor_slab(rect, FLOORS[0], granite)
 	kit.floor_slab(rect, FLOORS[1], carpet, [LIFT_A, LIFT_B, HOLE_A, HOLE_B])
-	kit.floor_slab(rect, OFFICE_TOP, kit.mat(Color(0.7, 0.7, 0.68), "panel"), [LIFT_A, LIFT_B, HOLE_ROOF])
+	kit.floor_slab(rect, OFFICE_TOP, kit.mat(Color(0.52, 0.52, 0.5), "roof", 0.95), [LIFT_A, LIFT_B, HOLE_ROOF])
 	# Lobby shell: glass frontage with double doors, a service door at the back.
 	kit.wall(Vector2(-HALF.x, HALF.y), Vector2(HALF.x, HALF.y), FLOORS[1], granite, [
 		BuildingKit.opening(HALF.x, 3.0), BuildingKit.opening(HALF.x - 7.5, 8.0, 0.4, 3.9, "window"), BuildingKit.opening(HALF.x + 7.5, 8.0, 0.4, 3.9, "window")])
@@ -74,9 +82,12 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	var ribbon: Array = []
 	for index: int in range(5):
 		ribbon.append(BuildingKit.opening(3.0 + index * 6.0, 4.2, 0.9, 2.6, "window"))
+	# The west wall has no windows where the roof stair climbs flush against it (z -6 to 0).
+	var west_ribbon: Array = [ribbon[0], ribbon[3], ribbon[4]]
 	for wall_line: Array in [[Vector2(-HALF.x, HALF.y), Vector2(HALF.x, HALF.y)], [Vector2(-HALF.x, -HALF.y), Vector2(HALF.x, -HALF.y)],
 			[Vector2(-HALF.x, -HALF.y), Vector2(-HALF.x, HALF.y)], [Vector2(HALF.x, -HALF.y), Vector2(HALF.x, HALF.y)]]:
-		kit.wall(wall_line[0], wall_line[1], OFFICE_TOP - FLOORS[1], panel, ribbon, FLOORS[1])
+		var west: bool = (wall_line[0] as Vector2).x < 0.0 and (wall_line[1] as Vector2).x < 0.0
+		kit.wall(wall_line[0], wall_line[1], OFFICE_TOP - FLOORS[1], panel, west_ribbon if west else ribbon, FLOORS[1])
 	# Lifts (both serve both floors), stairs and rails round the stair holes on the office floor.
 	var lift_wall: Material = kit.mat(Color(0.55, 0.5, 0.42), "metal", 0.5)
 	var lift_a: int = kit.lift(LIFT_A, FLOORS, Vector3.BACK, "Halcyon Trust lift A", lift_wall)
@@ -85,26 +96,29 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	# A wall in the niche between the two shafts carries the company plaque.
 	kit.wall(Vector2(-1.65, -7.7), Vector2(1.65, -7.7), FLOORS[1] - FLOORS[0], plaster, [], FLOORS[0], 0.2)
 	var steel: Material = kit.mat(Color(0.3, 0.32, 0.34), "metal", 0.6)
-	kit.stairs_u(STAIR_A, Vector3.FORWARD, FLOORS[1] - FLOORS[0], 1.2, 0.2, steel)
-	kit.stairs_u(STAIR_B, Vector3.BACK, FLOORS[1] - FLOORS[0], 1.2, 0.2, steel)
+	kit.stairs_u(STAIR_A, Vector3.FORWARD, FLOORS[1] - FLOORS[0], 1.2, 0.2, steel, true, BuildingKit.STEP_RUN, LANDING_DEEP)
+	kit.stairs_u(STAIR_B, Vector3.BACK, FLOORS[1] - FLOORS[0], 1.2, 0.2, steel, true, BuildingKit.STEP_RUN, LANDING_DEEP)
 	kit.stairs_straight(ROOF_STAIR, Vector3.BACK, OFFICE_TOP - FLOORS[1], 1.2, steel)
 	# Stairwell walls on the lobby side (fire doors are open arches) and rails on the office floor.
-	kit.wall(Vector2(-11.3, -14.85), Vector2(-11.3, -8.4), FLOORS[1] - FLOORS[0], plaster, [], FLOORS[0], 0.2)
-	kit.wall(Vector2(11.3, 14.85), Vector2(11.3, 8.4), FLOORS[1] - FLOORS[0], plaster, [], FLOORS[0], 0.2)
+	kit.wall(Vector2(HOLE_A.end.x + 0.1, -14.85), Vector2(HOLE_A.end.x + 0.1, -8.4), FLOORS[1] - FLOORS[0], plaster, [], FLOORS[0], 0.2)
+	kit.wall(Vector2(HOLE_B.position.x - 0.1, 14.85), Vector2(HOLE_B.position.x - 0.1, 8.4), FLOORS[1] - FLOORS[0], plaster, [], FLOORS[0], 0.2)
 	kit.railing(Vector3(HOLE_A.end.x, FLOORS[1], HOLE_A.position.y), Vector3(HOLE_A.end.x, FLOORS[1], HOLE_A.end.y))
 	kit.railing(Vector3(HOLE_A.end.x - 1.4, FLOORS[1], HOLE_A.end.y), Vector3(HOLE_A.end.x, FLOORS[1], HOLE_A.end.y))
 	kit.railing(Vector3(HOLE_B.position.x, FLOORS[1], HOLE_B.position.y), Vector3(HOLE_B.position.x, FLOORS[1], HOLE_B.end.y))
 	kit.railing(Vector3(HOLE_B.position.x, FLOORS[1], HOLE_B.position.y), Vector3(HOLE_B.position.x + 1.4, FLOORS[1], HOLE_B.position.y))
-	# Roof deck: rail along the open west edge and round the stair opening in the deck.
-	kit.railing(Vector3(-HALF.x + 0.1, OFFICE_TOP, DECK.position.y), Vector3(-HALF.x + 0.1, OFFICE_TOP, DECK.end.y))
+	# Open-air terrace on the podium roof: rails round its three open edges and round the stair opening.
+	kit.railing(Vector3(-HALF.x + 0.1, OFFICE_TOP, -HALF.y + 0.1), Vector3(-HALF.x + 0.1, OFFICE_TOP, HALF.y - 0.1))
+	kit.railing(Vector3(-HALF.x + 0.1, OFFICE_TOP, -HALF.y + 0.1), Vector3(TOWER_W - 0.1, OFFICE_TOP, -HALF.y + 0.1))
+	kit.railing(Vector3(-HALF.x + 0.1, OFFICE_TOP, HALF.y - 0.1), Vector3(TOWER_W - 0.1, OFFICE_TOP, HALF.y - 0.1))
 	kit.railing(Vector3(HOLE_ROOF.end.x - 0.05, OFFICE_TOP, HOLE_ROOF.position.y), Vector3(HOLE_ROOF.end.x - 0.05, OFFICE_TOP, HOLE_ROOF.end.y))
 	kit.railing(Vector3(HOLE_ROOF.position.x, OFFICE_TOP, HOLE_ROOF.position.y), Vector3(HOLE_ROOF.end.x - 0.05, OFFICE_TOP, HOLE_ROOF.position.y))
 	_tower(kit, panel)
 	_street_front(kit)
+	_terrace(kit)
 	kit.begin_interior()
 	_lobby(kit)
 	_office(kit)
-	_roof_deck(kit)
+	_plant_room(kit)
 	kit.interior_light(Vector3(0, 3.8, 4.0), Color(0.95, 0.95, 0.88), 2.4, 22.0)
 	kit.interior_light(Vector3(0, OFFICE_TOP - 0.6, 0.0), Color(0.9, 0.95, 1.0), 2.2, 22.0)
 	_office_props(kit)
@@ -113,47 +127,52 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	kit.world._landmark("HALCYON TRUST", Vector3(0, 0, HALF.y + 5.0))
 	kit.node.set_meta("walk_in", true)
 	kit.node.set_meta("interior_half", HALF)
-	kit.node.set_meta("routes", {"west_stair": WEST_ROUTE, "east_stair": EAST_ROUTE, "service": SERVICE_ROUTE, "roof_stair": ROOF_ROUTE})
+	kit.node.set_meta("routes", {"west_stair": WEST_ROUTE, "east_stair": EAST_ROUTE, "service": SERVICE_ROUTE, "roof_stair": ROOF_ROUTE, "plant_door": PLANT_ROUTE})
 	kit.finish_props()
 	kit.finish()
 
 
-## The tower above the office floor: solid mass, with the roof deck recess and the plant room cut out of its
-## lowest DECK_HEIGHT metres (the mass above them is unbroken), a deterministic lit-window pattern (no
-## RNG), a crown and roof plant.
+## The tower above the podium: a solid shaft set back from the west face (x TOWER_W to the east face), so the
+## podium roof west of it is an open-air terrace with nothing above it. Its lowest PODIUM_CAP metres hold the plant
+## room's void and a door opening in the west face; above that the mass is unbroken. A deterministic lit-window
+## pattern (no RNG), a crown and roof plant.
 static func _tower(kit: BuildingKit, panel: Material) -> void:
-	var cap: float = OFFICE_TOP + DECK_HEIGHT
-	# Lowest storey: everything except the deck recess and the plant room's void.
-	_mass(kit, panel, Rect2(-HALF.x, -HALF.y, HALF.x * 2.0, DECK.position.y + HALF.y), OFFICE_TOP, cap)
-	_mass(kit, panel, Rect2(-HALF.x, DECK.end.y, HALF.x * 2.0, HALF.y - DECK.end.y), OFFICE_TOP, cap)
+	var cap: float = OFFICE_TOP + PODIUM_CAP
+	var shaft: Rect2 = Rect2(TOWER_W, -HALF.y, HALF.x - TOWER_W, HALF.y * 2.0)
+	# Lowest storey: everything except the plant room's void and the door opening in its west wall.
 	var door_lo: float = PLANT_DOOR_Z - 0.6
 	var door_hi: float = PLANT_DOOR_Z + 0.6
-	_mass(kit, panel, Rect2(DECK.end.x, DECK.position.y, PLANT.position.x - DECK.end.x, door_lo - DECK.position.y), OFFICE_TOP, cap)
-	_mass(kit, panel, Rect2(DECK.end.x, door_hi, PLANT.position.x - DECK.end.x, DECK.end.y - door_hi), OFFICE_TOP, cap)
-	_mass(kit, panel, Rect2(DECK.end.x, door_lo, PLANT.position.x - DECK.end.x, door_hi - door_lo), OFFICE_TOP + DOOR_HEAD, cap)
-	_mass(kit, panel, Rect2(PLANT.position.x, DECK.position.y, HALF.x - PLANT.position.x, PLANT.position.y - DECK.position.y), OFFICE_TOP, cap)
-	_mass(kit, panel, Rect2(PLANT.position.x, PLANT.end.y, HALF.x - PLANT.position.x, DECK.end.y - PLANT.end.y), OFFICE_TOP, cap)
-	_mass(kit, panel, Rect2(PLANT.end.x, PLANT.position.y, HALF.x - PLANT.end.x, PLANT.size.y), OFFICE_TOP, cap)
+	_mass(kit, panel, Rect2(shaft.position.x, shaft.position.y, shaft.size.x, PLANT.position.y - shaft.position.y), OFFICE_TOP, cap)
+	_mass(kit, panel, Rect2(shaft.position.x, PLANT.end.y, shaft.size.x, shaft.end.y - PLANT.end.y), OFFICE_TOP, cap)
+	_mass(kit, panel, Rect2(PLANT.end.x, PLANT.position.y, shaft.end.x - PLANT.end.x, PLANT.size.y), OFFICE_TOP, cap)
+	var west_wall: float = PLANT.position.x - shaft.position.x
+	_mass(kit, panel, Rect2(shaft.position.x, PLANT.position.y, west_wall, door_lo - PLANT.position.y), OFFICE_TOP, cap)
+	_mass(kit, panel, Rect2(shaft.position.x, door_hi, west_wall, PLANT.end.y - door_hi), OFFICE_TOP, cap)
+	_mass(kit, panel, Rect2(shaft.position.x, door_lo, west_wall, door_hi - door_lo), OFFICE_TOP + DOOR_HEAD, cap)
 	_mass(kit, panel, PLANT, OFFICE_TOP + PLANT_HEIGHT, cap)
 	# The rest of the tower.
-	_mass(kit, panel, Rect2(-HALF.x, -HALF.y, HALF.x * 2.0, HALF.y * 2.0), cap, TOWER_TOP)
+	_mass(kit, panel, shaft, cap, TOWER_TOP)
 	var dark: Material = kit.mat(Color(0.14, 0.2, 0.26), "", 0.25)
 	var lit: Material = kit.glow(Color(0.9, 0.95, 1.0), 1.1)
 	var rows: int = int((TOWER_TOP - OFFICE_TOP - 1.0) / 3.4)
+	var faces: Array = [[Vector3.BACK, Vector3(shaft.get_center().x, 0, HALF.y), shaft.size.x], [Vector3.FORWARD, Vector3(shaft.get_center().x, 0, -HALF.y), shaft.size.x],
+		[Vector3.LEFT, Vector3(shaft.position.x, 0, 0), shaft.size.y], [Vector3.RIGHT, Vector3(HALF.x, 0, 0), shaft.size.y]]
 	for face: int in range(4):
-		var normal: Vector3 = [Vector3.BACK, Vector3.FORWARD, Vector3.LEFT, Vector3.RIGHT][face]
+		var normal: Vector3 = faces[face][0]
+		var centre: Vector3 = faces[face][1]
+		var length: float = faces[face][2]
 		var along: Vector3 = Vector3.UP.cross(normal)
 		var angle: float = atan2(normal.x, normal.z)
 		for row: int in range(rows):
 			if face == 2 and row == 0:
-				continue  # the roof deck recess is cut into this band of the west face
+				continue  # the plant room door is cut into this band of the west face
 			var y: float = OFFICE_TOP + 1.9 + row * 3.4
 			var pattern: int = (row * 5 + face * 3) % 13
-			kit.box(normal * (HALF.x + 0.05) + Vector3(0, y, 0), Vector3(HALF.x * 2 - 1.0, 1.5, 0.1), lit if pattern < 2 else dark, false, angle)
+			kit.box(centre + normal * 0.05 + Vector3(0, y, 0), Vector3(length - 1.0, 1.5, 0.1), lit if pattern < 2 else dark, false, angle)
 			if pattern >= 2 and pattern < 4:
-				kit.box(normal * (HALF.x + 0.07) + along * ((row % 3) - 1) * 7.0 + Vector3(0, y, 0), Vector3(3.0, 1.5, 0.1), lit, false, angle)
-	kit.box(Vector3(0, TOWER_TOP + 0.6, 0), Vector3(HALF.x * 2 + 0.6, 1.2, HALF.y * 2 + 0.6), kit.mat(Color(0.3, 0.34, 0.38), "metal", 0.5))
-	kit.box(Vector3(-5, TOWER_TOP + 2.4, -4), Vector3(8.0, 2.4, 6.0), kit.mat(Color(0.5, 0.52, 0.52), "metal", 0.6))
+				kit.box(centre + normal * 0.07 + along * ((row % 3) - 1) * 7.0 + Vector3(0, y, 0), Vector3(3.0, 1.5, 0.1), lit, false, angle)
+	kit.box(Vector3(shaft.get_center().x, TOWER_TOP + 0.6, 0), Vector3(shaft.size.x + 0.6, 1.2, shaft.size.y + 0.6), kit.mat(Color(0.3, 0.34, 0.38), "metal", 0.5))
+	kit.box(Vector3(1.0, TOWER_TOP + 2.4, -4), Vector3(8.0, 2.4, 6.0), kit.mat(Color(0.5, 0.52, 0.52), "metal", 0.6))
 	kit.box(Vector3(7, TOWER_TOP + 5.0, 6), Vector3(0.3, 8.0, 0.3), kit.mat(Color(0.6, 0.2, 0.15), "metal"))
 	kit.box(Vector3(7, TOWER_TOP + 9.1, 6), Vector3(0.4, 0.3, 0.4), kit.glow(Color(1.0, 0.2, 0.15), 2.0))
 
@@ -193,9 +212,13 @@ static func _lobby(kit: BuildingKit) -> void:
 	for x: float in [-10.0, -4.5, 4.5, 10.0]:
 		kit.box(Vector3(x, FLOORS[0] + 0.3, 12.8), Vector3(1.4, 0.6, 1.0), granite, true)
 		kit.box(Vector3(x, FLOORS[0] + 1.0, 12.8), Vector3(1.1, 0.9, 0.8), kit.mat(Color(0.2, 0.34, 0.18)))
-	# Ceiling: a plaster lining under the office slab with a grid of light panels (visual only).
+	# Ceiling: a plaster lining under the office slab with a grid of light panels (visual only). It stops short of the
+	# lift shafts (z < -6.3) and the front-east stair hole, so nothing is drawn across a stair or a lift.
 	var lining_y: float = FLOORS[1] - 0.32
-	kit.box(Vector3(0, lining_y, 3.0), Vector3(HALF.x * 2 - 0.4, 0.03, 23.4), kit.mat(Color(0.82, 0.8, 0.74), "stucco"))
+	var lining: Material = kit.mat(Color(0.82, 0.8, 0.74), "stucco")
+	var z_back: float = LIFT_A.end.y + 0.1
+	kit.box(Vector3((-HALF.x + 0.2 + HOLE_B.position.x) * 0.5, lining_y, (z_back + HALF.y - 0.3) * 0.5), Vector3(HOLE_B.position.x + HALF.x - 0.2, 0.03, HALF.y - 0.3 - z_back), lining)
+	kit.box(Vector3((HOLE_B.position.x + HALF.x - 0.2) * 0.5, lining_y, (z_back + HOLE_B.position.y) * 0.5), Vector3(HALF.x - 0.2 - HOLE_B.position.x, 0.03, HOLE_B.position.y - z_back), lining)
 	for x: float in [-9.0, -3.0, 3.0, 9.0]:
 		for z: float in [-3.0, 3.0, 9.0]:
 			kit.box(Vector3(x, lining_y - 0.02, z), Vector3(1.8, 0.02, 1.2), kit.glow(Color(1.0, 0.95, 0.85), 1.1))
@@ -292,27 +315,38 @@ static func _office_props(kit: BuildingKit) -> void:
 	kit.end_props()
 
 
-## Roof deck and plant room dressing: work lights under the overhang, air conditioners and a crate on the
-## deck, a boiler, pipe runs, a breaker panel and signs in the plant room. Big pieces are solid.
-static func _roof_deck(kit: BuildingKit) -> void:
+## The open-air terrace on the podium roof (exterior layer, lit by the sun): a row of air conditioners and a crate
+## on the open floor, a roof-access sign beside the plant room door, a bench on the street side. The stair head
+## (x -14.85 to -13.55, z -4.5 to 2.5) and the way to the plant room door are left clear.
+static func _terrace(kit: BuildingKit) -> void:
 	var y: float = OFFICE_TOP
 	var steel: Material = kit.mat(Color(0.5, 0.52, 0.52), "metal", 0.6)
 	var dark: Material = kit.mat(Color(0.2, 0.21, 0.22), "metal", 0.5)
+	for unit: Vector2 in [Vector2(-12.4, -10.5), Vector2(-10.6, -10.5), Vector2(-12.4, 8.0), Vector2(-10.6, 8.0), Vector2(-8.2, 12.2)]:
+		kit.box(Vector3(unit.x, y + 0.5, unit.y), Vector3(1.4, 1.0, 1.0), steel, true)
+		kit.box(Vector3(unit.x, y + 1.03, unit.y), Vector3(1.3, 0.06, 0.9), dark)
+		kit.box(Vector3(unit.x, y + 1.06, unit.y), Vector3(0.7, 0.03, 0.7), kit.mat(Color(0.12, 0.12, 0.13), "metal", 0.4))
+	kit.box(Vector3(-7.4, y + 0.3, 5.5), Vector3(0.8, 0.6, 0.8), kit.mat(Color(0.45, 0.33, 0.2), "planks"), true)
+	kit.box(Vector3(-7.2, y + 0.22, 10.0), Vector3(0.5, 0.44, 2.4), kit.mat(Color(0.35, 0.22, 0.14), "planks"), true)
+	kit.sign_label("ROOF ACCESS\nAUTHORISED STAFF ONLY", Vector3(TOWER_W - 0.02, y + 1.9, PLANT_DOOR_Z - 1.4), 12, Color(0.85, 0.2, 0.15), -PI * 0.5)
+	# A pipe run up the tower face and a work lamp over the plant room door.
+	kit.box(Vector3(TOWER_W - 0.08, y + 2.0, 4.5), Vector3(0.14, 4.0, 0.14), kit.mat(Color(0.62, 0.4, 0.22), "metal", 0.4))
+	kit.box(Vector3(TOWER_W - 0.1, y + DOOR_HEAD + 0.25, PLANT_DOOR_Z), Vector3(0.12, 0.12, 0.6), kit.glow(Color(1.0, 0.95, 0.85), 1.0))
+
+
+## Plant room dressing (interior layer): a boiler with a flue, pipe runs along the north wall, a breaker panel and
+## a sign. Big pieces are solid.
+static func _plant_room(kit: BuildingKit) -> void:
+	var y: float = OFFICE_TOP
+	var dark: Material = kit.mat(Color(0.2, 0.21, 0.22), "metal", 0.5)
 	var lamp: Material = kit.glow(Color(1.0, 0.95, 0.85), 1.0)
-	kit.box(Vector3(-12.0, y + DECK_HEIGHT - 0.06, -1.0), Vector3(3.0, 0.05, 0.3), lamp)
-	kit.box(Vector3(-12.0, y + DECK_HEIGHT - 0.06, 1.8), Vector3(3.0, 0.05, 0.3), lamp)
-	for x: float in [-13.4, -10.6]:
-		kit.box(Vector3(x, y + 0.5, DECK.end.y - 0.7), Vector3(1.4, 1.0, 1.0), steel, true)
-		kit.box(Vector3(x, y + 1.02, DECK.end.y - 0.7), Vector3(1.3, 0.05, 0.9), dark)
-	kit.box(Vector3(-9.7, y + 0.3, 1.3), Vector3(0.8, 0.6, 0.8), kit.mat(Color(0.45, 0.33, 0.2), "planks"), true)
-	kit.sign_label("ROOF ACCESS\nAUTHORISED STAFF ONLY", Vector3(-8.84, y + 1.9, PLANT_DOOR_Z - 1.0), 12, Color(0.85, 0.2, 0.15), -PI * 0.5)
-	# Plant room: boiler by the east wall with a flue, pipe runs along the north wall, a breaker panel.
 	var pipe: Material = kit.mat(Color(0.62, 0.4, 0.22), "metal", 0.4)
+	var mid: float = PLANT.get_center().x
 	kit.box(Vector3(PLANT.end.x - 0.9, y + 1.0, -1.5), Vector3(1.6, 2.0, 1.6), kit.mat(Color(0.42, 0.44, 0.42), "metal", 0.5), true)
 	kit.box(Vector3(PLANT.end.x - 0.9, y + 2.65, -1.5), Vector3(0.3, 1.3, 0.3), dark)
-	kit.box(Vector3(-6.3, y + 2.5, PLANT.position.y + 0.15), Vector3(4.2, 0.12, 0.12), pipe)
-	kit.box(Vector3(-6.3, y + 0.15, PLANT.position.y + 0.15), Vector3(4.2, 0.12, 0.12), pipe)
-	kit.box(Vector3(-4.3, y + 1.3, PLANT.end.y - 0.15), Vector3(0.9, 1.4, 0.12), kit.mat(Color(0.35, 0.4, 0.37), "metal", 0.5))
-	kit.box(Vector3(-4.3, y + 1.6, PLANT.end.y - 0.22), Vector3(0.6, 0.3, 0.02), kit.glow(Color(0.5, 0.8, 0.5), 0.6))
-	kit.box(Vector3(-6.3, y + PLANT_HEIGHT - 0.06, -1.5), Vector3(2.4, 0.05, 0.3), lamp)
+	kit.box(Vector3(mid, y + 2.5, PLANT.position.y + 0.15), Vector3(4.2, 0.12, 0.12), pipe)
+	kit.box(Vector3(mid, y + 0.15, PLANT.position.y + 0.15), Vector3(4.2, 0.12, 0.12), pipe)
+	kit.box(Vector3(mid - 0.8, y + 1.3, PLANT.end.y - 0.15), Vector3(0.9, 1.4, 0.12), kit.mat(Color(0.35, 0.4, 0.37), "metal", 0.5))
+	kit.box(Vector3(mid - 0.8, y + 1.6, PLANT.end.y - 0.22), Vector3(0.6, 0.3, 0.02), kit.glow(Color(0.5, 0.8, 0.5), 0.6))
+	kit.box(Vector3(mid, y + PLANT_HEIGHT - 0.06, -1.5), Vector3(2.4, 0.05, 0.3), lamp)
 	kit.sign_label("MECHANICAL\nPLANT", Vector3(PLANT.end.x - 0.02, y + 1.9, -3.2), 14, Color(0.9, 0.85, 0.5), PI * 0.5)
