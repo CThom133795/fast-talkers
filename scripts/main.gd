@@ -8,6 +8,7 @@ const CarScript = preload("res://scripts/car.gd")
 const WorldScript = preload("res://scripts/world.gd")
 const GuardScript = preload("res://scripts/guard.gd")
 const SfxScript = preload("res://scripts/sfx.gd")
+const VoiceScript = preload("res://scripts/voice.gd")
 const EffectsScript = preload("res://scripts/effects.gd")
 const ArmoryScript = preload("res://scripts/armory.gd")
 const Factions = preload("res://scripts/factions.gd")
@@ -79,6 +80,7 @@ var online: FastOnline
 var armory: ArmoryScript
 var effects: EffectsScript
 var sfx: SfxScript
+var voice: Node
 var chase: Camera3D
 var case_mesh: Node3D
 var cash: int = START_CASH
@@ -276,6 +278,20 @@ func _ready() -> void:
 	online.name = "Online"
 	add_child(online)
 	online.setup(self, net)
+	voice = VoiceScript.new()
+	voice.name = "Voice"
+	add_child(voice)
+	voice.setup(net, sfx)
+	net.voice_space = func(at: Vector3) -> int:
+		var building: Node3D = _building_at(at)
+		return -1 if building == null else building.get_instance_id()
+	net.voice_doors = func() -> Array:
+		var open_doors: Array = []
+		if is_instance_valid(world):
+			for door: Dictionary in world.interactable_doors:
+				if bool(door.get("open", false)) and door.get("position") is Vector3:
+					open_doors.append(door["position"])
+		return open_doors
 	_load_settings()
 	_apply_crew()
 	_show_title()
@@ -353,7 +369,7 @@ func _setup_input() -> void:
 	var keys: Dictionary = {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"crouch":KEY_CTRL,"jump":KEY_SPACE,"handbrake":KEY_SPACE,"reload":KEY_R,"interact":KEY_E,"buy":KEY_B,"escape":KEY_ESCAPE,"drop":KEY_G,
 		"weapon_1":KEY_1,"weapon_2":KEY_2,"weapon_3":KEY_3,"weapon_4":KEY_4,"weapon_5":KEY_5,"quick_swap":KEY_Q,"horn":KEY_H,"rearm":KEY_T,"fullscreen":KEY_F11,"fps":KEY_F3,
 		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER,
-		"hands_up":KEY_X,"binoculars":KEY_Z}
+		"hands_up":KEY_X,"binoculars":KEY_Z,"voice_radio":KEY_Y,"voice_ptt":KEY_N}
 	for action: String in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
@@ -1785,10 +1801,15 @@ func player_indoors() -> bool:
 ## The walk-in building (a node with meta "interior_half") the player stands inside, or null. The
 ## open roof deck of the parking garage and the motel's roof walkway count as outdoors.
 func _building_around_player() -> Node3D:
+	return _building_at(player.global_position)
+
+
+## The walk-in building around a world point, or null (also used by the voice relay to decide who
+## shares a room with whom).
+func _building_at(at: Vector3) -> Node3D:
 	if not _interiors_scanned and is_instance_valid(world):
 		_interiors_scanned = true
 		_collect_interiors(world, 0)
-	var at: Vector3 = player.global_position
 	for node: Node3D in _interior_nodes:
 		if not is_instance_valid(node):
 			continue
@@ -1984,7 +2005,7 @@ func _settings(from_title: bool) -> void:
 		if from_title: _show_title()
 		else: _pause()
 	_heading("OPERATOR HANDBOOK", "CONTROLS & SETTINGS")
-	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        T  rearm (free roam)\nX  hands up (weapon away: a peace signal)        Z  hold for binoculars\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
+	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        T  rearm (free roam)\nX  hands up (weapon away: a peace signal)        Z  hold for binoculars\nVoice: open mic reaches players within 35 m (or hold N to talk if you switch to push-to-talk)        Y  hold for crew radio\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
 	_text("Sound volume",14,TEAL)
 	var slider := HSlider.new()
 	slider.min_value = 0.0
@@ -1995,6 +2016,33 @@ func _settings(from_title: bool) -> void:
 		master_volume = value
 		_apply_settings())
 	menu_stack.add_child(slider)
+	_text("Voice chat  /  proximity mic is on by default; hold Y for crew radio",14,TEAL)
+	var voice_on := CheckButton.new()
+	voice_on.text = "Voice chat"
+	voice_on.button_pressed = voice.enabled
+	voice_on.toggled.connect(func(on: bool): voice.enabled = on)
+	menu_stack.add_child(voice_on)
+	var open_mic := CheckButton.new()
+	open_mic.text = "Open mic (recommended); off = hold N to talk to people nearby"
+	open_mic.button_pressed = voice.proximity_mode == "open"
+	open_mic.toggled.connect(func(on: bool): voice.proximity_mode = "open" if on else "push_to_talk")
+	menu_stack.add_child(open_mic)
+	_text("Voice volume",14,TEAL)
+	var voice_volume := HSlider.new()
+	voice_volume.min_value = 0.0
+	voice_volume.max_value = 2.0
+	voice_volume.step = 0.05
+	voice_volume.value = voice.output_volume
+	voice_volume.value_changed.connect(func(value: float): voice.output_volume = value)
+	menu_stack.add_child(voice_volume)
+	_text("Microphone level",14,TEAL)
+	var mic_level := HSlider.new()
+	mic_level.min_value = 0.2
+	mic_level.max_value = 4.0
+	mic_level.step = 0.1
+	mic_level.value = voice.mic_gain
+	mic_level.value_changed.connect(func(value: float): voice.mic_gain = value)
+	menu_stack.add_child(mic_level)
 	_text("Mouse sensitivity",14,TEAL)
 	var sensitivity := HSlider.new()
 	sensitivity.min_value = 0.0005
@@ -2103,6 +2151,11 @@ func _load_settings() -> void:
 		player.invert_y = bool(config.get_value("input", "invert_y", player.invert_y))
 		vibration = bool(config.get_value("input", "vibration", vibration))
 		drive_third_person = bool(config.get_value("video", "drive_third_person", drive_third_person))
+		if voice != null:
+			voice.apply_settings({
+				"enabled": config.get_value("voice", "enabled", voice.enabled), "mic_gain": config.get_value("voice", "mic_gain", voice.mic_gain),
+				"gate_db": config.get_value("voice", "gate_db", voice.gate_db), "output_volume": config.get_value("voice", "output_volume", voice.output_volume),
+				"proximity_mode": config.get_value("voice", "proximity_mode", voice.proximity_mode)})
 		var saved_crew: String = str(config.get_value("profile", "crew", crew))
 		if Factions.ORDER.has(saved_crew):
 			crew = saved_crew
@@ -2113,6 +2166,9 @@ func _load_settings() -> void:
 func _save_settings() -> void:
 	var config := ConfigFile.new()
 	config.set_value("audio", "volume", master_volume)
+	if voice != null:
+		for key: String in voice.settings():
+			config.set_value("voice", key, voice.settings()[key])
 	config.set_value("input", "sensitivity", player.mouse_sensitivity)
 	config.set_value("video", "fov", fov_setting)
 	config.set_value("video", "show_fps", show_fps)

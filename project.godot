@@ -26,4 +26,4 @@ environment/defaults/default_clear_color=Color(0.48, 0.55, 0.59, 1)
 common/physics_ticks_per_second=60
 
 [audio]
-driver/enable_input=false
+driver/enable_input=true

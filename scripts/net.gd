@@ -24,6 +24,8 @@ extends Node
 
 const Factions = preload("res://scripts/factions.gd")
 const Sec = preload("res://scripts/net_security.gd")
+const VoiceRelayS = preload("res://scripts/voice_relay.gd")
+const VoiceCodecS = preload("res://scripts/voice_codec.gd")
 ## Loaded on demand (never preloaded), so net.gd works even if this file or the extension is missing.
 const STEAM_TRANSPORT_PATH: String = "res://scripts/steam_transport.gd"
 
@@ -43,6 +45,8 @@ const MAX_HIT_DAMAGE: float = 250.0
 const LIMIT_STATE: int = 40
 const LIMIT_CAR: int = 40
 const LIMIT_CHAT: int = 3
+## Voice frames per second a peer may send (a talker sends 25/s of 40 ms frames); 5x this for two windows is a kick.
+const LIMIT_VOICE: int = 40
 const LIMIT_REQUEST: int = 10
 const LIMIT_HIT: int = 25
 const LIMIT_HELLO: int = 3
@@ -92,6 +96,8 @@ signal item_update(item: int, data: Dictionary)
 signal round_state(data: Dictionary)
 signal grant(amount: int, reason: String)
 signal chat(from_id: int, channel: String, text: String)
+## A voice frame for the local player to play: from_id, mode (VoiceRelayS.Mode), ADPCM frame, metres from the talker.
+signal voice_frame(from_id: int, mode: int, frame: PackedByteArray, distance: float, muffled: bool)
 ## Shared world state changed by a player: kind "door" (value 1 open / 0 shut) or "lift"
 ## (value = target floor). Cosmetic-plus-cover state; every peer applies it.
 signal world_event(kind: String, index: int, value: int)
@@ -139,6 +145,17 @@ var _connected: bool = false
 var _port: int = PORT
 var _address: String = ""
 var _latest: Dictionary = {}
+## Test hook: when valid, the host calls it (target, sender, mode, distance, frame) instead of sending the relay RPC.
+var voice_tap: Callable = Callable()
+## Host-side world knowledge for proximity occlusion (set by main.gd): `voice_space(pos: Vector3) -> int`
+## (-1 outdoors, else an id of the walk-in building around that point) and `voice_doors() -> Array` of
+## the world positions of currently open doorways.
+var voice_space: Callable = Callable()
+var voice_doors: Callable = Callable()
+var voice_range: float = 35.0
+## Host: peer id -> tick (ms) until which that peer is "on the radio": their proximity frames are dropped.
+var _voice_radio_until: Dictionary = {}
+const VOICE_RADIO_HOLD_MS: int = 300
 var _dead_until: Dictionary = {}
 var _death_ms: Dictionary = {}
 var _claim_ok: Dictionary = {}
@@ -762,6 +779,7 @@ func _on_peer_disconnected(id: int) -> void:
 	_claim_ok.erase(id)
 	_hello_done.erase(id)
 	_rl.erase(id)
+	_voice_radio_until.erase(id)
 	_hello_deadline.erase(id)
 	_hello_rejected.erase(id)
 	_budget.erase(id)
@@ -1495,6 +1513,80 @@ func _chat(from_id: int, channel: String, text: String) -> void:
 	var clean: String = clean_text(text, CHAT_MAX)
 	if not clean.is_empty():
 		chat.emit(from_id, channel, clean)
+
+
+# ---------------------------------------------------------------- voice
+#
+# Clients send ADPCM frames (scripts/voice_codec.gd) to the host on transfer channel 2, unreliable.
+# The host validates sender / mode / size / rate, decides who may hear it (scripts/voice_relay.gd:
+# proximity = within voice_range metres by the HOST'S view of positions, crew = the talker's crew only)
+# and relays with the real sender id stamped in. Clients accept voice from the host only.
+
+func send_voice(mode: int, frame: PackedByteArray) -> void:
+	if _mode == Mode.HOST:
+		_h_voice(1, mode, frame)
+	elif _can_send():
+		_host_voice.rpc_id(1, mode, frame)
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote", 2)
+func _host_voice(mode: int, frame: PackedByteArray) -> void:
+	var sender: int = multiplayer.get_remote_sender_id()
+	if _gate(sender, "voice", LIMIT_VOICE):
+		_h_voice(sender, mode, frame)
+
+
+## Host: validate and route one frame. Returns how many listeners it went to (0 when dropped).
+func _h_voice(sender: int, mode: int, frame: PackedByteArray) -> int:
+	if not players.has(sender) or not VoiceRelayS.valid_mode(mode):
+		_strike(sender, "bad voice mode")
+		return 0
+	if frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
+		_strike(sender, "bad voice frame size")
+		return 0
+	var now: int = Time.get_ticks_msec()
+	if mode == VoiceRelayS.Mode.CREW:
+		_voice_radio_until[sender] = now + VOICE_RADIO_HOLD_MS
+	elif now < int(_voice_radio_until.get(sender, 0)):
+		# Holding the squad key mutes you in proximity: the same mic can't go out both ways.
+		return 0
+	var peers: Dictionary = {}
+	for id: int in players.keys():
+		var pos: Vector3 = Vector3.INF
+		var state: Dictionary = _latest.get(id, {})
+		if state.has("pos"):
+			pos = state["pos"]
+		var space: int = -1
+		if voice_space.is_valid() and pos.is_finite():
+			space = int(voice_space.call(pos))
+		peers[id] = {"crew": crew_of(id), "pos": pos, "dead": is_dead(id), "space": space}
+	var doors: Array = []
+	if voice_doors.is_valid():
+		doors = voice_doors.call()
+	var sent: int = 0
+	for entry: Array in VoiceRelayS.targets(sender, mode, peers, voice_range, doors):
+		var id: int = int(entry[0])
+		var dist: float = float(entry[1])
+		var muffled: bool = bool(entry[2])
+		if voice_tap.is_valid():
+			voice_tap.call(id, sender, mode, dist, frame, muffled)
+			sent += 1
+		elif id == 1:
+			voice_frame.emit(sender, mode, frame, dist, muffled)
+			sent += 1
+		elif is_inside_tree() and multiplayer.get_peers().has(id) and _hello_done.has(id):
+			_relay_voice.rpc_id(id, sender, mode, dist, frame, muffled)
+			sent += 1
+	return sent
+
+
+@rpc("authority", "unreliable_ordered", "call_remote", 2)
+func _relay_voice(from_id: int, mode: int, dist: float, frame: PackedByteArray, muffled: bool) -> void:
+	if _mode != Mode.CLIENT or multiplayer.get_remote_sender_id() != 1 or from_id <= 1 or from_id == my_id():
+		return
+	if not VoiceRelayS.valid_mode(mode) or not is_finite(dist) or frame.size() < VoiceCodecS.MIN_FRAME_BYTES or frame.size() > VoiceCodecS.MAX_FRAME_BYTES:
+		return
+	voice_frame.emit(from_id, mode, frame, clampf(dist, 0.0, 9999.0), muffled)
 
 
 # ---------------------------------------------------------------- UPnP (worker threads)

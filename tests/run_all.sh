@@ -17,7 +17,7 @@ if ! command -v "$GODOT" >/dev/null 2>&1 && [ ! -x "$GODOT" ]; then
 	exit 2
 fi
 
-ALL="vehicle_art vehicles_06 integration free_roam wiring_05 map_interiors map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security remote_player chat_ui net_lobby_ui soak"
+ALL="vehicle_art vehicles_06 integration free_roam wiring_05 map_interiors map_06 city_detail city_audit building_landmarks sfx_audio social_features net_security voice remote_player chat_ui net_lobby_ui soak"
 if [ $# -gt 0 ]; then SUITES="$*"; else SUITES="$ALL net_pair"; fi
 
 NOISE='BUG: Unreferenced static string|RID allocations|leaked at exit|Thread object is being destroyed|ObjectDB instances leaked|Pages in use exist at exit|Orphan StringName|WARNING: .*at: (cleanup|~)'
