@@ -73,6 +73,10 @@ func _ensure_init() -> bool:
 		return false
 	if not _init_error.is_empty():
 		return false
+	# Headless test runs must not sign the developer into Spacewar (FT_STEAM_HEADLESS=1 overrides).
+	if DisplayServer.get_name() == "headless" and OS.get_environment("FT_STEAM_HEADLESS") != "1":
+		_init_error = "Steam is off in headless runs"
+		return false
 	_steam = Engine.get_singleton("Steam")
 	# Dev builds: the Steam API reads the app id from steam_appid.txt next to the exe or from these.
 	if OS.get_environment("SteamAppId").is_empty():
