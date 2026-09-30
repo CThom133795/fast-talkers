@@ -54,6 +54,20 @@ var week_days: int = DEFAULT_WEEK_DAYS
 var recap: Array = []
 ## Friday: where the Dead Drop is (a neutral landmark name), announced when the doors open.
 var drop_site: String = ""
+## The nervous client (docs/LEAD_DESIGN_DECISIONS.md §7): if nobody has moved a contract item this far into the
+## street phase, the contract loses NERVOUS_STEP of its value per minute (to at most NERVOUS_FLOOR) until someone
+## picks one up. Never on Friday. `nervous_steps` is host-owned and broadcast with the round state.
+const NERVOUS_AFTER: float = 240.0
+const NERVOUS_STEP: float = 0.1
+const NERVOUS_FLOOR: float = 0.5
+var nervous_after: float = NERVOUS_AFTER
+var nervous_steps: int = 0
+## Host: has anyone picked up a trade item this Day?
+var _contract_touched: bool = false
+var _nervous_announced: bool = false
+## Host playtest telemetry (T0 in docs/DESIGN_WEEK_TRUST.md): one JSON line per Day in `telemetry_path`.
+var telemetry_path: String = ""
+var _day_stats: Dictionary = {}
 ## Phase lengths; tests shorten them (tests/week_flow.gd).
 var buy_seconds: float = BUY_SECONDS
 var live_seconds: float = LIVE_SECONDS
@@ -105,7 +119,7 @@ func setup(owner_game: Node, owner_net: FastNet) -> void:
 	net.max_cars = game.cars.size()
 	net.max_items = PHONE_BASE + Factions.ORDER.size()
 	# Only whoever holds a crew phone may call another crew (docs/LEAD_DESIGN_DECISIONS.md §2).
-	net.call_gate = func(sender: int) -> bool: return not _phone_of(sender).is_empty()
+	net.call_gate = _host_may_call
 	net.seat_owner = func(car: int) -> int: return net.seat_holder(car, 0)
 	net.match_started.connect(_on_match_started)
 	net.peer_joined.connect(_on_peer_joined)
@@ -214,7 +228,12 @@ func _apply_my_crew() -> void:
 func start_solo_week() -> void:
 	if net.local_name.strip_edges().is_empty():
 		net.local_name = "Solo"
-	var err: Error = net.host(FastNet.PORT + 11, "127.0.0.1")
+	# A few local ports, so a second copy of the game (or a test run) doesn't block it.
+	var err: Error = ERR_CANT_CREATE
+	for offset: int in range(11, 19):
+		err = net.host(FastNet.PORT + offset, "127.0.0.1")
+		if err == OK:
+			break
 	if err != OK:
 		game._message("Could not start the solo Week (%s)." % error_string(err), 6.0)
 		return
@@ -407,6 +426,8 @@ func _flush_hits() -> void:
 func weapon_fired(quiet: bool) -> void:
 	if not active:
 		return
+	if net.is_host():
+		_host_shot()
 	_fired_at = _now()
 	var camera: Camera3D = game.player.camera
 	var origin: Vector3 = camera.global_position
@@ -420,6 +441,8 @@ func weapon_fired(quiet: bool) -> void:
 func _on_remote_shot(id: int, origin: Vector3, end: Vector3, weapon: String, quiet: bool) -> void:
 	if not active:
 		return
+	if net.is_host():
+		_host_shot()
 	var stats: Dictionary = FastPlayer.WEAPONS.get(weapon, FastPlayer.WEAPONS["pistol"])
 	# Distance-aware gunshots (near / far samples) when sfx.gd offers them.
 	var shot_fx: bool = game.sfx.has_method("play_shot_at")
@@ -475,6 +498,7 @@ func _on_player_died(id: int, killer: int, pos: Vector3) -> void:
 	if not active:
 		return
 	if net.is_host():
+		_tally("deaths")
 		_host_drop_all(id, pos)
 		var a: String = net.crew_of(killer)
 		var b: String = net.crew_of(id)
@@ -878,7 +902,8 @@ func contract_value(item: int) -> int:
 		base = LEDGER_VALUE
 	elif item == CASH:
 		base = CASH_VALUE
-	return int(round(base * DAY_VALUE[weekday_index()] / 100.0)) * 100
+	var nerves: float = maxf(1.0 - NERVOUS_STEP * nervous_steps, NERVOUS_FLOOR) if item >= 0 else 1.0
+	return int(round(base * DAY_VALUE[weekday_index()] * nerves / 100.0)) * 100
 
 
 func _on_round_state(data: Dictionary) -> void:
@@ -899,6 +924,14 @@ func _on_round_state(data: Dictionary) -> void:
 	week_days = clampi(int(data.get("week_days", week_days)), 1, WEEKDAYS.size())
 	recap = data.get("recap", [])
 	drop_site = str(data.get("drop_site", ""))
+	var steps: int = clampi(int(data.get("nervous", 0)), 0, 10)
+	if steps >= 1 and not _nervous_announced and active:
+		_nervous_announced = true
+		_system("The client is getting nervous: nobody has moved the goods. The contract loses 10% a minute until someone does.")
+		game._message("The client is getting nervous: the contract loses value until someone moves the goods.", 6.0)
+	elif steps == 0:
+		_nervous_announced = false
+	nervous_steps = steps
 	if not changed:
 		return
 	match phase:
@@ -1269,6 +1302,12 @@ func _host_tick(delta: float) -> void:
 					_host_new_round()
 			"week_end": _host_new_week()
 		return
+	if phase == "live" and not _contract_touched and not is_dead_drop():
+		var elapsed: float = live_seconds - time_left
+		var steps: int = 0 if elapsed < nervous_after else int((elapsed - nervous_after) / 60.0) + 1
+		if steps != nervous_steps:
+			nervous_steps = steps
+			_host_broadcast()
 	if _broadcast_timer <= 0.0:
 		_host_broadcast()
 	# Cars nobody drives are simulated here and followed by clients.
@@ -1294,7 +1333,7 @@ func _host_tick(delta: float) -> void:
 ## Everything a peer needs to draw the Day: phase, clock, roles, the Week and the bank.
 func _round_payload(phase_name: String, seconds: float) -> Dictionary:
 	return {"phase": phase_name, "time": seconds, "round": round_number, "seller": seller, "buyer": buyer, "bank": bank,
-		"results": results, "day": day, "week": week, "week_days": week_days, "recap": recap, "drop_site": drop_site}
+		"results": results, "day": day, "week": week, "week_days": week_days, "recap": recap, "drop_site": drop_site, "nervous": nervous_steps}
 
 
 func _host_broadcast() -> void:
@@ -1328,6 +1367,9 @@ func _host_new_round() -> void:
 	recap = results.duplicate()
 	day += 1
 	drop_site = ""
+	nervous_steps = 0
+	_contract_touched = false
+	_day_stats.clear()
 	if is_dead_drop():
 		seller = ""
 		buyer = ""
@@ -1490,6 +1532,13 @@ func _host_item_request(from_id: int, action: String, item: int, pos: Vector3) -
 			if not phone and _trade_item_of(from_id) >= 0:
 				return
 			data["holder"] = from_id
+			if not phone:
+				# The goods moved: the client calms down (the lost value stays lost).
+				_contract_touched = true
+				_tally("pickups")
+				_mark_first("first_pickup_s")
+			elif phone_crew(item) != crew_id:
+				_tally("phones_taken_by_rivals")
 			var own_phone: bool = phone and phone_crew(item) == crew_id
 			# Grabbing your own crew's phone is routine; everything else is news.
 			data["msg"] = "" if own_phone else "%s (%s) picked up %s." % [who, Factions.get_crew(crew_id)["short"], _item_name(item)]
@@ -1507,6 +1556,7 @@ func _host_item_request(from_id: int, action: String, item: int, pos: Vector3) -
 				return
 			data["holder"] = 0
 			data["banked"] = crew_id
+			_tally("banks")
 			data["msg"] = "%s banked %s at the %s HQ." % [who, _item_name(item), Factions.get_crew(crew_id)["short"]]
 			_host_payout(item, crew_id)
 		_:
@@ -1559,7 +1609,52 @@ func _host_settle() -> void:
 		results.append("Time ran out. Nobody banked anything.")
 	# Tomorrow's paper also says who shot whom: yesterday's grudges are today's phone calls.
 	results.append_array(blood_lines(_kills))
+	_write_day_log(clean)
 	_host_set_phase("settle", settle_seconds)
+
+
+# --------------------------------------------------------------------- host: playtest telemetry
+
+## Host call gate (net.call_gate): only a phone holder may call another crew. Counts the calls placed.
+func _host_may_call(sender: int) -> bool:
+	var allowed: bool = not _phone_of(sender).is_empty()
+	if allowed:
+		_tally("calls")
+	return allowed
+
+
+func _host_shot() -> void:
+	_tally("shots")
+	if phase == "live":
+		_mark_first("first_shot_s")
+
+
+func _tally(key: String, amount: int = 1) -> void:
+	_day_stats[key] = int(_day_stats.get(key, 0)) + amount
+
+
+## Seconds into the street phase when something first happened this Day.
+func _mark_first(key: String) -> void:
+	if not _day_stats.has(key):
+		_day_stats[key] = snappedf(live_seconds - time_left, 0.1)
+
+
+## One JSON line per Day (user://telemetry/<session>.jsonl) for tuning after a playtest. Never blocks play.
+func _write_day_log(clean: bool) -> void:
+	if telemetry_path.is_empty():
+		telemetry_path = "user://telemetry/%s_week.jsonl" % Time.get_datetime_string_from_system().replace(":", "-")
+	var entry: Dictionary = {"time": Time.get_datetime_string_from_system(), "build": net.build_tag, "transport": net.transport,
+		"week": week, "day": day, "weekday": day_name(), "players": net.players.size(), "crews": _active_crews(), "seller": seller,
+		"buyer": buyer, "clean": clean, "street_s": snappedf(live_seconds - maxf(time_left, 0.0), 0.1), "nervous_steps": nervous_steps,
+		"kills": _kills.duplicate(), "bank": bank.duplicate(), "results": results.duplicate()}
+	entry.merge(_day_stats)
+	DirAccess.make_dir_recursive_absolute("user://telemetry")
+	var file: FileAccess = FileAccess.open(telemetry_path, FileAccess.READ_WRITE if FileAccess.file_exists(telemetry_path) else FileAccess.WRITE)
+	if file == null:
+		return
+	file.seek_end()
+	file.store_line(JSON.stringify(entry))
+	file.close()
 
 
 ## "MORRIS dropped ROYALS x2" lines from the Day's crew-on-crew kills ("a>b" -> count). Pure: tests call it.
