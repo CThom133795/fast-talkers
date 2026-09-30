@@ -28,7 +28,11 @@ USER DIRECTION (binding):
   push-to-talk for local is optional; the squad/crew key mutes the talker in proximity so only crew hear them.
   People inside a building can hear each other; passers-by outside cannot.
 - Steam play with friends must be as simple as possible for the end user (host -> invite -> accept).
-- Deal/round rule changes (inspect-trade, anti-turtling, crew spectate, carrier cue) are proposals; ask the user first.
+- A match is a WEEK and a round is a DAY (Monday-Friday; Friday is always the Dead Drop). The Week structure does
+  not exist in code yet: read the "Week and Day mindset" section of CLAUDE_HANDOFF.md and docs/DESIGN_WEEK_TRUST.md.
+  Use Week/Day vocabulary in UI, code and tests.
+- Deal/round rule changes (docs/DESIGN_WEEK_TRUST.md A-I, inspect-trade, anti-turtling, crew spectate, carrier cue)
+  are proposals: present them to the user, then build the Week foundation (W0) and the approved items in order.
 - No NPCs or traffic. Keep deterministic world generation (seeded _rng, stable parked_vehicles order) and the
   existing multiplayer APIs.
 
@@ -49,9 +53,11 @@ B. "steam-voice" (owns: scripts/net.gd, scripts/online.gd, scripts/lobby_ui.gd, 
 C. "audio" (owns: scripts/sfx.gd, tests/sfx_audio.gd, docs/AUDIO_PASS.md): listen to work/audio/*.wav (regenerate
    with SFX_DUMP=1 ... tests/sfx_audio.gd), tune the gun profiles (drive/sub/grit, GUN_TRIM_DB) by ear with the user,
    then add surface-aware footsteps once a surface lookup exists (coordinate with D).
-D. "gameplay" (owns: scripts/main.gd, scripts/player.gd, scripts/character_model.gd, tests/social_features.gd,
-   tests/integration.gd, tests/free_roam.gd): wire the remaining audio hooks in docs/AUDIO_PASS.md, add gamepad
-   bindings for hands-up/binoculars, and prototype only the proposals the user approves.
+D. "gameplay-week" (owns: scripts/main.gd, scripts/player.gd, scripts/character_model.gd, tests/social_features.gd,
+   tests/integration.gd, tests/free_roam.gd, NEW tests/week_flow.gd; coordinate online.gd changes with B):
+   build the Week foundation (W0 in docs/DESIGN_WEEK_TRUST.md: host-owned week_state, weekday HUD, morning recap,
+   CS gear carry-over, Friday Dead Drop, END OF WEEK standings, rejoin restores state), then the user-approved
+   trust items in T0-T5 order; also wire remaining audio hooks and gamepad binds for hands-up/binoculars.
 E. "city" (owns: scripts/world.gd, scripts/city_detail.gd, scripts/mesh_merge.gd, scripts/interiors.gd,
    scripts/retro_textures.gd, tests/city_detail.gd, tests/city_audit.gd, tests/map_06.gd, capture scripts for the city):
    fix the remaining city_audit REPORTs, the Strip ring vs beach rocks step at (24, 400), harsh texture tiling,

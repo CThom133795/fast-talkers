@@ -249,6 +249,57 @@ boomy, with no "childish beeps".
 - `Run Tests.cmd` was not edited here; Claude Desktop takes it over (see `docs/CLAUDE_DESKTOP_PICKUP.md`) and adds the new suites: `voice`, `city_audit`,
   `building_landmarks`, `sfx_audio`, `social_features`, `net_security`.
 
+### The Week and Day mindset (read before any gameplay work)
+
+A **match is a Week**, and each **round is a Day**, Monday to Friday. As of this branch, **no Week structure exists in
+code**: `main.gd` and `online.gd` run standalone rounds, with no weekday names, no carry-over state and no week standings.
+Design is in `docs/MULTIPLAYER_DESIGN.md` §4 and `docs/DESIGN_WEEK_TRUST.md`. Suggestions to align everything with it:
+
+- **Vocabulary everywhere.** Say "Week" and "Day" (not match and round) in the UI, docs, test names and code comments
+  going forward:
+  - the HUD shows "TUESDAY, DAY 2 OF 5" and a clock;
+  - the result screen is "END OF DAY";
+  - after Friday comes "END OF WEEK" with standings.
+- **One server-owned `week_state`:**
+  - day index, crew banks, carried gear per player (CS rule: survivors keep gear, the dead restart with the free
+    pistol), the deals board;
+  - overnight escrow/collateral, grievances and settlements, quota and audit, loans.
+
+  The host owns it; clients get snapshots. It must survive a player disconnecting and rejoining mid-week (match by
+  Steam ID or name plus crew).
+- **Day rhythm is a ritual:**
+  - morning lineup: the HQ phone rings with the day's contract, any sit-down offers and the audit call;
+  - buy phase, then street, then settle;
+  - "the morning paper": a 10–15 s recap card between days (yesterday's honoured and broken deals, who got robbed,
+    which district got loud).
+
+  The recap turns yesterday into today's grudges and offers.
+- **Days differ on purpose.**
+  - Monday is low stakes: a smaller contract that teaches the roster who is who.
+  - Wednesday is the pivot: audit call, standings shown, loan offers.
+  - Thursday sets up Friday: insider info is earned.
+  - Friday is always the Dead Drop climax.
+
+  Contract value should rise through the week, so honesty early is cheap and betrayal late is expensive.
+- **Consequences cross the night.**
+  - Collateral releases and interest pay "at 9:00 next morning".
+  - Reputation marks and settlements last the whole Week and reset for the next Week.
+  - Nothing persists past the Week except cosmetics and stats.
+- **Everyone plays to Friday.** Opportunity-based catch-up (tips favour the hungry, loans), a quota raise for the
+  leader, and no elimination before Friday. At most, a crew that misses its quota is "restructured" (NBD-style
+  replacement) at the Week's end.
+- **Tests should speak Week.** Add a `week_flow` headless suite: run 5 days quickly (short timers), assert that money
+  and gear carry correctly, that the dead restart with a pistol, that Friday forces the Dead Drop, that the standings
+  are right, and that a rejoining player gets their state back. Extend `net_pair` with a two-day step.
+- **Settings and lobby.** The host picks the Week length (5 days default; 3 for a quick session) and day length (9:00
+  street default). Store both in the week state so every peer agrees.
+
+### Interim-lead design proposal: trust and the Week
+`docs/DESIGN_WEEK_TRUST.md` diagnoses why Sub Rosa and No Big Deal weeks collapse mid-week, and proposes phone-driven
+tools for honesty and repair. They include the Sit-Down call, collateral held overnight, noise-is-news gunfire tips,
+hungry-crew tips, the audit call, and honour paying on Friday. It also gives an order of work (T0–T5) and playtest
+metrics. **Design only; the user decides before any code.**
+
 ### Claude Desktop: next steps
 1. `git fetch origin && git checkout cloud/overnight-heavy-lift`. Keep your local Windows-only files. Review the diff per commit.
 2. Run the suites on Windows: `Run Tests.cmd` (after adding the six new suites above), and `tests/run_net_pair.ps1 -Steps 'lobby,round'`.
@@ -257,6 +308,8 @@ boomy, with no "childish beeps".
 5. Steam: follow `docs/NETWORK_SECURITY_AND_STEAM.md`. Install a GodotSteam build that matches 4.4.1, put `steam_appid.txt` (480)
    beside the project and the exe, and run the two-PC checklist. `create_host` and `create_client` arguments are the likeliest
    thing to need adjusting.
-6. Drive the rerouted Coast Road round the gun store, and decide on the proposals in `docs/SUBROSA_NBD_RESEARCH.md`.
+6. Drive the rerouted Coast Road round the gun store. Then walk the user through `docs/DESIGN_WEEK_TRUST.md` §7
+   and `docs/SUBROSA_NBD_RESEARCH.md`. Build the Week structure (week_state, weekday HUD, morning recap, `week_flow`
+   tests) first, then the approved trust proposals in T0–T5 order.
 7. Only after local validation: export, smoke-test, and decide whether to merge into `cloud/map-integration`. Never merge into `master`
    from here.
