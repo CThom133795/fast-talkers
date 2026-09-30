@@ -78,6 +78,8 @@ var plazas: Array[PackedVector2Array] = []
 ## Authored public spaces and their solid furniture; used by collision/playtest checks.
 var public_spaces: Array[Dictionary] = []
 var city_furniture: Array[Dictionary] = []
+## Park/plaza perimeter rail runs (CityDetail): {site, from, to, y, inward}. Solid to vehicles.
+var park_rails: Array[Dictionary] = []
 ## Static lived-in clutter (alley bins, bags, boxes, rooftop plant, oil stains): kind, at (x/z), radius, roof.
 var city_clutter: Array[Dictionary] = []
 ## Flat tower roofs for rooftop plant: world centre, size, yaw, roof height, world front, business sign.

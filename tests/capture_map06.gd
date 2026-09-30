@@ -11,6 +11,10 @@ const ArmoryScript = preload("res://scripts/armory.gd")
 ## [label, camera position, look-at point]
 const VIEWS: Array = [
 	["detail_trust", Vector3(174, 1.7, -107), Vector3(171, 1.1, -123)],
+	["pass2_rails_trust", Vector3(166, 1.7, -151), Vector3(178, 0.9, -140)],
+	["pass2_rails_picnic", Vector3(229, 1.7, 76), Vector3(238, 0.8, 64)],
+	["pass2_signs_halcyon", Vector3(-2.5, 1.7, 51), Vector3(-8.7, 2.3, 42.7)],
+	["pass2_avenue", Vector3(-9, 1.7, 40), Vector3(-2, 2.5, 120)],
 	["detail_garden", Vector3(-161, 1.7, -22), Vector3(-185, 1.1, -24)],
 	["detail_nightlife", Vector3(148, 1.7, 105), Vector3(150, 1.1, 126)],
 	["detail_wharf_lot", Vector3(-254, 2.8, -154), Vector3(-286, 0.5, -171)],

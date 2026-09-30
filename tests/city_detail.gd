@@ -34,6 +34,85 @@ func _clear(at: Vector3) -> bool:
 		print("BLOCKED at %s by %s at %s" % [at, collider.get_path(), collider.global_position])
 	return hits.is_empty()
 
+## Park/plaza perimeter rails: real, road-clear, shot-transparent above, open at entrances,
+## and a driven sedan cannot cross one into the park.
+func _park_rails() -> void:
+	var rails: Array[Dictionary] = world.park_rails
+	var sites: Dictionary = {}
+	for rail: Dictionary in rails:
+		sites[rail["site"]] = true
+	_check(rails.size() >= 10 and sites.size() >= 4, "Park perimeter rails built (%d runs across %d sites)" % [rails.size(), sites.size()])
+	var space: PhysicsDirectSpaceState3D = world.get_world_3d().direct_space_state
+	var road_clear: bool = true
+	var curb_hits: int = 0
+	var clear_above: int = 0
+	for rail: Dictionary in rails:
+		for p: Vector2 in [rail["from"], rail["to"], ((rail["from"] as Vector2) + (rail["to"] as Vector2)) * 0.5]:
+			for road: Dictionary in world.roads:
+				var points: PackedVector2Array = road["points"]
+				for i: int in range(points.size() - 1):
+					road_clear = road_clear and p.distance_to(Geometry2D.get_closest_point_to_segment(p, points[i], points[i + 1])) >= float(road["width"]) * 0.5 + 0.95
+		var mid: Vector2 = ((rail["from"] as Vector2) + (rail["to"] as Vector2)) * 0.5 + (rail["to"] - rail["from"]).normalized() * 1.1
+		var inward: Vector2 = rail["inward"]
+		var y: float = rail["y"]
+		var outside: Vector2 = mid - inward * 1.5
+		var inside: Vector2 = mid + inward * 1.5
+		var low: Dictionary = space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(outside.x, y + 0.15, outside.y), Vector3(inside.x, y + 0.15, inside.y)))
+		if not low.is_empty() and (low["collider"] as Node).is_in_group("park_rail"):
+			curb_hits += 1
+		var high: Dictionary = space.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(outside.x, y + 1.62, outside.y), Vector3(inside.x, y + 1.62, inside.y)))
+		if high.is_empty() or not (high["collider"] as Node).is_in_group("park_rail"):
+			clear_above += 1
+	_check(road_clear, "Park rails stay off roads and shoulders")
+	_check(curb_hits == rails.size(), "Every rail run has a solid curb (%d/%d)" % [curb_hits, rails.size()])
+	_check(clear_above == rails.size(), "Eye-height shots clear every rail (%d/%d)" % [clear_above, rails.size()])
+	for spec: Dictionary in world.public_spaces:
+		if spec["style"] in ["parking", "promenade"]:
+			continue
+		var rect: Rect2 = spec["rect"]
+		var c: Vector2 = rect.get_center()
+		var openings: int = 0
+		# An entrance counts when a walker fits through somewhere in its gap (a lamp post
+		# may stand in the middle of it).
+		for gate: Array in [[Vector2(c.x, rect.position.y + 1.3), Vector2.RIGHT], [Vector2(c.x, rect.end.y - 1.3), Vector2.RIGHT], [Vector2(rect.position.x + 1.3, c.y), Vector2.DOWN], [Vector2(rect.end.x - 1.3, c.y), Vector2.DOWN]]:
+			for offset: float in [0.0, -1.6, 1.6]:
+				var p: Vector2 = (gate[0] as Vector2) + (gate[1] as Vector2) * offset
+				if _clear(Vector3(p.x, world.surface_height(p) + 0.05, p.y)):
+					openings += 1
+					break
+		_check(openings >= 2, "%s keeps %d walkable openings" % [spec["name"], openings])
+	# Drive a sedan straight at the longest rail run from the road side.
+	var best: Dictionary = {}
+	for rail: Dictionary in rails:
+		if best.is_empty() or (rail["from"] as Vector2).distance_to(rail["to"]) > (best["from"] as Vector2).distance_to(best["to"]):
+			best = rail
+	if best.is_empty():
+		return
+	var line: Vector2 = best["from"]
+	var inward: Vector2 = best["inward"]
+	var mid: Vector2 = ((best["from"] as Vector2) + (best["to"] as Vector2)) * 0.5
+	var start: Vector2 = mid - inward * 7.0
+	var car: Node3D = Car.new()
+	car.vehicle_type = "sedan"
+	root.add_child(car)
+	car.reset_car(Vector3(start.x, world.surface_height(start) + 0.3, start.y))
+	car.rotation.y = atan2(-inward.x, -inward.y)
+	car.enabled = true
+	await _frames(10)
+	car.occupied = true
+	Input.action_press("move_forward")
+	var deepest: float = -99.0
+	for i: int in range(240):
+		await physics_frame
+		var at: Vector2 = Vector2(car.global_position.x, car.global_position.z)
+		deepest = maxf(deepest, (at - line).dot(inward))
+	Input.action_release("move_forward")
+	print("Sedan vs %s rail: deepest %.2f m past the rail line, speed %.1f" % [best["site"], deepest, car.velocity.length()])
+	_check(deepest < 0.0, "Sedan driven at the %s rail is stopped outside it (%.2f m)" % [best["site"], deepest])
+	car.occupied = false
+	car.queue_free()
+	await _frames(2)
+
 func _run() -> void:
 	create_timer(100).timeout.connect(func() -> void: quit(2))
 	# main.gd normally registers gameplay actions; this isolated world/car test supplies them.
@@ -77,6 +156,7 @@ func _run() -> void:
 				var p: Vector2 = Vector2(lerpf(rect.position.x + 2, rect.end.x - 2, step / 10.0), rect.get_center().y)
 				open = open and _clear(Vector3(p.x, 0.22, p.y))
 			_check(open, name + " retains an open pedestrian crossing")
+	await _park_rails()
 	for key: String in ["burger", "motel"]:
 		var node: Node3D = world.plot_nodes[key]
 		_check(node.has_meta("walk_in") and node.has_node("Interior"), key + " is a furnished walk-in building")

@@ -3,6 +3,7 @@ extends SceneTree
 ## no over-repeated shop signs, furnished public spaces, and static clutter that keeps roads,
 ## doors, crew spawns and parked cars clear. Headless: godot --headless --path . --script res://tests/city_audit.gd
 const World = preload("res://scripts/world.gd")
+const CityDetail = preload("res://scripts/city_detail.gd")
 var checks: int = 0
 var failures: int = 0
 var world: Node3D
@@ -277,6 +278,41 @@ func _run() -> void:
 	for line: String in clutter_bad:
 		print("  CLUTTER " + line)
 	_check(clutter_bad.is_empty(), "Clutter keeps roads, doors, crew spawns and parked cars clear (%d problems)" % clutter_bad.size())
+
+	# 6b. Anti-slop pass 2: named street signs at crossings and park perimeter rails.
+	var road_names: Dictionary = {}
+	for road: Dictionary in world.roads:
+		road_names[CityDetail.sign_name(str(road["name"]))] = true
+	var signs: int = 0
+	for item: Dictionary in world.city_clutter:
+		if item["kind"] == "street sign":
+			signs += 1
+	var sign_words: Dictionary = {}
+	var stray_words: Array[String] = []
+	for label: Node in world.find_children("*", "Label3D", true, false):
+		if label.has_meta("street_sign"):
+			var text: String = (label as Label3D).text
+			sign_words[text] = true
+			if not road_names.has(text):
+				stray_words.append(text)
+	_check(signs >= 12, "Street name signs stand at crossings (%d)" % signs)
+	_check(sign_words.size() >= 10 and stray_words.is_empty(), "Street signs name %d real streets from world.roads (%d unknown)" % [sign_words.size(), stray_words.size()])
+	var rail_sites: Dictionary = {}
+	var rail_bad: Array[String] = []
+	for rail: Dictionary in world.park_rails:
+		rail_sites[rail["site"]] = true
+		for p: Vector2 in [rail["from"], rail["to"]]:
+			for door: Dictionary in world.interactable_doors:
+				var position: Vector3 = door["position"]
+				if p.distance_to(Vector2(position.x, position.z)) < 3.0:
+					rail_bad.append("rail %s blocks door %s" % [rail["site"], door["label"]])
+			for vehicle: Dictionary in world.parked_vehicles:
+				var position: Vector3 = vehicle["at"]
+				if p.distance_to(Vector2(position.x, position.z)) < 3.0:
+					rail_bad.append("rail %s crowds a parked car" % rail["site"])
+	for line: String in rail_bad:
+		print("  RAIL " + line)
+	_check(rail_sites.size() >= 5 and rail_bad.is_empty(), "Every park/plaza has perimeter rails clear of doors and parked cars (%d sites, %d problems)" % [rail_sites.size(), rail_bad.size()])
 
 	# 7. Coast railings: collision explains what is seen (docs/RAILING_COLLISION_NOTES.md).
 	# A standing shot (1.62 m) over the 1.12 m rail passes; a low one (0.2 m) meets the coping.

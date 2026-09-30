@@ -86,6 +86,7 @@ func build() -> void:
 				child.visibility_range_end_margin = 8.0
 				w._detail_ranges.append(child)
 	_clutter()
+	_perimeter_rails()
 
 ## Reject solid furniture near roads, building footprints, doors, spawns or existing props.
 ## Clearance uses a conservative bounding circle, including road shoulders and turning space.
@@ -492,6 +493,7 @@ func _clutter() -> void:
 					_decor(at, "oil stain", 0.6)
 					var stain: MeshInstance3D = w._mesh_at(MeshKit.cylinder(0.6, 0.6, 0.004, 10), Vector3(at.x, 0.228, at.y), dark, rng.randf() * TAU)
 					stain.scale = Vector3(rng.randf_range(0.8, 1.5), 1.0, rng.randf_range(0.6, 1.0))
+	_street_signs()
 	for key: Vector3i in _cell_order:
 		var node: Node3D = _cells[key]
 		# Clutter is small and low: a shadow-pass draw per cell costs more than it shows (measured
@@ -518,3 +520,198 @@ func _contact(at: Vector2, size: Vector2, yaw: float, material: Material) -> voi
 ## Walking-surface height at a clutter spot (raised slabs are recorded as they are built).
 func _ground_y(at: Vector2) -> float:
 	return w.surface_height(at)
+
+## Waist-high steel pipe rails on a low concrete curb along the road-facing edges of the parks
+## and plazas: they read as a kept municipal park and stop cars cutting across the lawns.
+## Collision is what you see (RAILING_COLLISION_NOTES): a solid 0.3 m curb, a thin post at
+## every visible post and a thin top rail at 1.0 m; shots pass above and between. The path
+## entrance at the middle of every edge stays open, and runs stop short of road shoulders,
+## doors, crew spawns, parked cars and props already placed. Built last; uses no RNG.
+const RAIL_TOP: float = 1.0
+const CURB_HEIGHT: float = 0.3
+const POST_GAP: float = 2.2
+const ENTRANCE_HALF: float = 3.2
+
+func _rail_spot_ok(at: Vector2) -> bool:
+	if not w._on_land(at):
+		return false
+	for footprint: Rect2 in w.footprints:
+		if footprint.grow(0.3).has_point(at):
+			return false
+	var near_road: bool = false
+	for road: Dictionary in w.roads:
+		var points: PackedVector2Array = road["points"]
+		for i: int in range(points.size() - 1):
+			var gap: float = at.distance_to(Geometry2D.get_closest_point_to_segment(at, points[i], points[i + 1])) - float(road["width"]) * 0.5
+			if gap < 1.0:
+				return false
+			near_road = near_road or gap < 9.0
+	if not near_road:
+		return false
+	for door: Dictionary in w.interactable_doors:
+		var position: Vector3 = door["position"]
+		if at.distance_to(Vector2(position.x, position.z)) < 4.0:
+			return false
+	for crew: Dictionary in w.crew_spawns.values():
+		for key: String in ["spawn", "car", "hq"]:
+			var position: Vector3 = crew[key]
+			if at.distance_to(Vector2(position.x, position.z)) < 6.0:
+				return false
+	for vehicle: Dictionary in w.parked_vehicles:
+		var position: Vector3 = vehicle["at"]
+		if at.distance_to(Vector2(position.x, position.z)) < 4.0:
+			return false
+	for used: Vector2 in w._occupied:
+		if used.distance_to(at) < 1.1:
+			return false
+	return true
+
+func _perimeter_rails() -> void:
+	var steel: StandardMaterial3D = w._material(Color(0.16, 0.2, 0.17), 0.55)
+	var curb: StandardMaterial3D = w._material(Color(0.6, 0.58, 0.53), 0.95, "stucco")
+	for spec: Dictionary in SITES:
+		if spec["style"] in ["parking", "promenade"]:
+			continue
+		var rect: Rect2 = spec["rect"]
+		# One node per site: its merged mesh's bounds sit on the site, so the range cull works.
+		var node: Node3D = w._begin("Park Rails " + str(spec["name"]))
+		var corners: Array[Vector2] = [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
+		for edge: int in range(4):
+			var a: Vector2 = corners[edge]
+			var b: Vector2 = corners[(edge + 1) % 4]
+			var length: float = a.distance_to(b)
+			var dir: Vector2 = (b - a) / length
+			var inward: Vector2 = (rect.get_center() - (a + b) * 0.5).normalized()
+			# Parks abut the carriageway: the rail stands 1.3 m in, behind a walkable verge.
+			var line_a: Vector2 = a + inward * 1.3
+			var runs: Array[Vector2] = []
+			var start: float = -1.0
+			# Runs start and end on the neighbouring edges' rail lines, so corners meet cleanly.
+			var t: float = 1.3
+			while t <= length - 1.3 + 0.001:
+				var ok: bool = absf(t - length * 0.5) > ENTRANCE_HALF and _rail_spot_ok(line_a + dir * t)
+				if ok and start < 0.0:
+					start = t
+				if (not ok or t + 0.5 > length - 1.3 + 0.001) and start >= 0.0:
+					var stop: float = t if ok else t - 0.5
+					if stop - start >= 2.0:
+						runs.append(Vector2(start, stop))
+					start = -1.0
+				t += 0.5
+			for run: Vector2 in runs:
+				_rail_run(spec["name"], line_a + dir * run.x, line_a + dir * run.y, inward, steel, curb)
+		w._finish(node)
+		for child: Node in node.get_children():
+			if child is GeometryInstance3D:
+				var geometry: GeometryInstance3D = child as GeometryInstance3D
+				geometry.layers = 1 << (w.CLUTTER_LAYER - 1)
+				geometry.visibility_range_end = 150.0
+				geometry.visibility_range_end_margin = 10.0
+				w._detail_ranges.append(geometry)
+
+func _rail_run(site_name: String, from: Vector2, to: Vector2, inward: Vector2, steel: Material, curb: Material) -> void:
+	var length: float = from.distance_to(to)
+	var mid: Vector2 = (from + to) * 0.5
+	var y: float = maxf(w.surface_height(from), w.surface_height(to))
+	var yaw: float = atan2(to.x - from.x, to.y - from.y)
+	var body: StaticBody3D = StaticBody3D.new()
+	body.add_to_group("park_rail")
+	w._target.add_child(body)
+	var add_shape: Callable = func(at: Vector3, size: Vector3) -> void:
+		var shape: BoxShape3D = BoxShape3D.new()
+		shape.size = size
+		var collision: CollisionShape3D = CollisionShape3D.new()
+		collision.shape = shape
+		collision.position = at
+		collision.rotation.y = yaw
+		body.add_child(collision)
+	# Curb (kick board): solid concrete, sunk 0.1 m so it never floats on a sloped slab.
+	var curb_size: Vector3 = Vector3(0.24, CURB_HEIGHT + 0.1, length + 0.24)
+	var curb_at: Vector3 = Vector3(mid.x, y + (CURB_HEIGHT - 0.1) * 0.5, mid.y)
+	w._box_with(curb_at, curb_size, curb, false, yaw)
+	add_shape.call(curb_at, curb_size)
+	var posts: int = maxi(1, ceili(length / POST_GAP))
+	var post_size: Vector3 = Vector3(0.06, RAIL_TOP - CURB_HEIGHT, 0.06)
+	for i: int in range(posts + 1):
+		var p: Vector2 = from.lerp(to, float(i) / posts)
+		var post_at: Vector3 = Vector3(p.x, y + (RAIL_TOP + CURB_HEIGHT) * 0.5, p.y)
+		w._box_with(post_at, post_size, steel, false, yaw)
+		add_shape.call(post_at, post_size)
+	var rail_size: Vector3 = Vector3(0.06, 0.06, length + 0.06)
+	var rail_at: Vector3 = Vector3(mid.x, y + RAIL_TOP, mid.y)
+	w._box_with(rail_at, rail_size, steel, false, yaw)
+	add_shape.call(rail_at, rail_size)
+	# Thin mid rail with its own thin collider; the open gaps above and below it stay open.
+	var mid_at: Vector3 = Vector3(mid.x, y + 0.62, mid.y)
+	var mid_size: Vector3 = Vector3(0.04, 0.04, length)
+	w._box_with(mid_at, mid_size, steel, false, yaw)
+	add_shape.call(mid_at, mid_size)
+	w.park_rails.append({"site": site_name, "from": from, "to": to, "y": y, "inward": inward})
+
+## Street name signs: one post per named crossing, on the first free corner (fixed order),
+## with two blades naming both streets from world.roads. Collision-free decor (thin pole),
+## so it lives in the potato_optional Decor cell; labels cull at 40 m.
+const SIGN_GREEN: Color = Color(0.12, 0.34, 0.2)
+
+static func sign_name(title: String) -> String:
+	for pair: Array in [[" AVENUE", " AVE"], [" STREET", " ST"], [" ROAD", " RD"], [" DRIVE", " DR"], [" BOULEVARD", " BLVD"]]:
+		if title.ends_with(pair[0]):
+			return title.substr(0, title.length() - (pair[0] as String).length()) + pair[1]
+	return title
+
+func _street_signs() -> void:
+	var done: Array[Vector2] = []
+	var plate: StandardMaterial3D = w._material(SIGN_GREEN, 0.6)
+	var pole: StandardMaterial3D = w._material(Color(0.3, 0.31, 0.3), 0.6)
+	for a: int in range(w.roads.size()):
+		for b: int in range(a + 1, w.roads.size()):
+			var road_a: Dictionary = w.roads[a]
+			var road_b: Dictionary = w.roads[b]
+			if str(road_a["name"]) == str(road_b["name"]):
+				continue
+			var pa: PackedVector2Array = road_a["points"]
+			var pb: PackedVector2Array = road_b["points"]
+			for i: int in range(pa.size() - 1):
+				for j: int in range(pb.size() - 1):
+					var hit: Variant = Geometry2D.segment_intersects_segment(pa[i], pa[i + 1], pb[j], pb[j + 1])
+					if hit == null:
+						continue
+					var cross: Vector2 = hit
+					var seen: bool = false
+					for other: Vector2 in done:
+						seen = seen or other.distance_to(cross) < 18.0
+					if seen:
+						continue
+					var da: Vector2 = (pa[i + 1] - pa[i]).normalized()
+					var db: Vector2 = (pb[j + 1] - pb[j]).normalized()
+					var na: Vector2 = Vector2(-da.y, da.x)
+					var nb: Vector2 = Vector2(-db.y, db.x)
+					var sine: float = absf(da.cross(db))
+					if sine < 0.5:
+						continue
+					for corner: Vector2 in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
+						# Offsets along each road's normal, corrected for a skewed crossing.
+						var off_a: float = (float(road_a["width"]) * 0.5 + 1.7) / sine
+						var off_b: float = (float(road_b["width"]) * 0.5 + 1.7) / sine
+						var at: Vector2 = cross + db * corner.x * off_a * signf(na.dot(db)) + da * corner.y * off_b * signf(nb.dot(da))
+						if not can_place(at, 0.3):
+							continue
+						w._occupied.append(at)
+						done.append(cross)
+						_decor(at, "street sign", 0.3)
+						var ground: float = _ground_y(at)
+						w._mesh_at(MeshKit.cylinder(0.04, 0.04, 3.0, 6), Vector3(at.x, ground + 1.5, at.y), pole)
+						var blades: Array = [[road_a, da, 2.78], [road_b, db, 2.56]]
+						for blade: Array in blades:
+							var dir: Vector2 = blade[1]
+							var yaw: float = atan2(dir.x, dir.y) + PI * 0.5
+							var y: float = ground + float(blade[2])
+							w._box_with(Vector3(at.x, y, at.y), Vector3(1.1, 0.2, 0.02), plate, false, yaw)
+							var words: String = sign_name(str((blade[0] as Dictionary)["name"]))
+							for side: float in [1.0, -1.0]:
+								var normal: Vector3 = Vector3(sin(yaw), 0, cos(yaw)) * side
+								var label: Label3D = w._label(words, Vector3(at.x, y, at.y) + normal * 0.014, 22, Color(0.95, 0.95, 0.9), yaw + (0.0 if side > 0.0 else PI), 0.0042)
+								label.outline_size = 0
+								label.set_meta("street_sign", true)
+								label.visibility_range_end = 40.0
+						break

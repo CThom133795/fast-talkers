@@ -13,6 +13,12 @@ const TILE_METRES: Dictionary = {
 	"metal": 2.0, "roof": 3.0, "grass": 4.0, "water": 6.0, "cobble": 1.6, "tatami": 2.0,
 }
 
+## Kinds that cover large areas and get the macro variation layer.
+const MACRO_KINDS: Array[String] = ["brick", "stucco", "panel", "asphalt", "tiles", "roof", "grass", "cobble", "metal"]
+## One macro repeat every ~23 m (1/23), coprime-ish with every TILE_METRES value.
+const MACRO_SCALE: float = 0.0437
+var _macro: ImageTexture
+
 var _textures: Dictionary = {}
 var _materials: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -31,6 +37,17 @@ func material(kind: String, color: Color, roughness: float = 0.9) -> StandardMat
 	result.uv1_world_triplanar = true
 	var scale: float = 1.0 / float(TILE_METRES.get(kind, 3.0))
 	result.uv1_scale = Vector3(scale, scale, scale)
+	# Macro variation (anti-slop pass 2): a soft, seamless blotch layer on a second world
+	# triplanar UV at a scale unrelated to the tile, multiplied in, so big walls, lots and
+	# roads stop showing the same 128 px tile marching in a grid. Deterministic (fixed seed).
+	if MACRO_KINDS.has(kind):
+		result.detail_enabled = true
+		result.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+		result.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+		result.detail_albedo = macro_texture()
+		result.uv2_triplanar = true
+		result.uv2_world_triplanar = true
+		result.uv2_scale = Vector3(MACRO_SCALE, MACRO_SCALE, MACRO_SCALE)
 	if kind == "water":
 		result.roughness = 0.08
 		result.metallic = 0.35
@@ -122,3 +139,23 @@ func _sample(kind: String, x: int, y: int) -> float:
 				return 0.62
 			return 0.88 + (0.04 if x % 2 == 0 else -0.02)
 	return base
+
+
+## Seamless low-frequency blotches, 0.86..1.0 (multiplied into albedo: at most 14 % darker).
+func macro_texture() -> ImageTexture:
+	if _macro != null:
+		return _macro
+	var noise: FastNoiseLite = FastNoiseLite.new()
+	noise.seed = 1999
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 0.045
+	noise.fractal_octaves = 3
+	var source: Image = noise.get_seamless_image(64, 64, false, false, 0.1, true)
+	var image: Image = Image.create(64, 64, false, Image.FORMAT_RGB8)
+	for y: int in range(64):
+		for x: int in range(64):
+			var value: float = lerpf(0.86, 1.0, clampf(source.get_pixel(x, y).r, 0.0, 1.0))
+			image.set_pixel(x, y, Color(value, value * 0.995, value * 0.985))
+	image.generate_mipmaps()
+	_macro = ImageTexture.create_from_image(image)
+	return _macro

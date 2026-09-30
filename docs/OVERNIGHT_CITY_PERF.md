@@ -198,3 +198,68 @@ only 6 process frames for a 0.05 s timer, so it is timing-sensitive under load.
   area (or baking neon spill into emissive ground decals) is the next lever if needed.
 - More 1999 set-dressing that did not fit tonight: CRT TVs in shop windows, payphone clutter,
   shop-window displays, a few more leaf drifts along kerbs, per-district poster sets.
+
+## Anti-slop pass 2 (park rails, street signs, macro texture variation)
+
+User ask: another anti-slop pass; hand rails round the parks where they make sense, so the
+world feels kept and alive and vehicles get a natural barrier. Late-1999 "paused" mood.
+
+**Park/plaza perimeter rails** (`CityDetail._perimeter_rails`, built last, no RNG). Along every
+road-facing edge of Trust Plaza, West End Gardens, Old Town Green, Nightlife Commons and the
+Sunset Picnic Lawn: a 0.3 m concrete curb (sunk 0.1 m so it never floats), green steel pipe
+posts every <= 2.2 m, a mid rail at 0.62 m and a top rail at 1.0 m. The parks abut the
+carriageway, so the rail line is 1.3 m inside the site edge behind a walkable verge; a run
+starts and ends on the neighbouring edge's rail line so corners meet. Sampled every 0.5 m, a
+run skips any spot within 1.0 m of a road edge, in a footprint, within 4 m of a door or parked
+car, 6 m of a crew spawn/car/HQ, 1.1 m of placed furniture/clutter, or within 3.2 m of an edge
+midpoint (the path entrances stay open on all four sides). Result: 44 runs over the 5 sites.
+Collision matches what is seen (RAILING_COLLISION_NOTES): one StaticBody per run holding a
+solid curb box, a thin box per post, and thin top and mid rails; eye-height (1.62 m) shots
+clear, low shots meet the curb. Not `potato_optional` (collision, identical in both modes);
+one merged node per site (a single city-wide merge put the bounds centre off-site and the
+range cull hid it), CLUTTER_LAYER, range 150 m, shares two materials. `world.park_rails`
+records runs for the tests.
+
+**Street name signs** (`CityDetail._street_signs`, end of `_clutter`, no RNG): one post per
+named crossing (world.roads segment intersections, merged within 18 m, crossings under 30
+degrees skipped), on the first corner that passes `can_place`; two green blades naming both
+streets (AVENUE -> AVE, STREET -> ST, ...), labelled both sides, labels cull at 40 m. 98 signs,
+74 distinct names. Collision-free thin pole, so it is Decor (`potato_optional`).
+
+**Texture macro variation** (`retro_textures.gd`): big-surface kinds (brick, stucco, panel,
+asphalt, tiles, roof, grass, cobble, metal) get a detail layer: a fixed-seed seamless
+FastNoiseLite blotch texture (64 px, 0.86..1.0, multiplied) on a second world-triplanar UV
+repeating every ~23 m, so the 2-4 m tiles no longer march in an obvious grid across lots and
+long walls. No extra materials or draw calls; +3 texture samples per pixel on those surfaces.
+
+**Tests added.** city_detail: rails built (>= 10 runs, >= 4 sites), off roads and shoulders,
+every run has a solid curb, eye-height shots clear every run, each park keeps >= 2 walkable
+openings (all 5 keep 4), and a sedan (car.gd, full throttle 4 s) driven square at the
+longest rail from 7 m out on the road side stops outside it (centre 2.32 m short of the rail
+line, speed 0). city_audit: >= 12 street signs, every sign label is a real street from
+world.roads, rails on every park clear of doors and parked cars.
+
+**Draw calls** (software GL, 1280x720, `capture_perf.gd`; "before" is pass 1's Final column):
+
+| View | Pass 1 final | Pass 2 (signs, rails culled by bug) | Pass 2 final |
+|---|---:|---:|---:|
+| midtown | 1,235 | 1,334 | **1,322** |
+| midtown_north_long | 1,499 | 1,596 | **1,582** |
+| motor_mile | 1,237 | 1,309 | **1,298** |
+| nightlife | 892 | 918 | **929** |
+
+Pass 1's column predates other agents' concurrent work (buildings/interiors, voice), so the
+delta is not all this pass; the middle run (settle 30 / sample 60) had the rails invisible
+(the cull bug above) and the final run (settle 10 / sample 5) includes them, each site's rails
+costing a handful of calls. Most of the +60..+100 is the street-sign labels near crossings
+(each Label3D is a draw; they cull at 40 m and hide in potato mode). Objects per frame rose
+~300 (midtown 2,268). Acceptable for the RTX 3080 60 fps target; if needed, the next lever is
+baking sign text into one atlas-textured quad per blade instead of Label3D.
+
+Captures (`tests/capture_map06.gd -- only=pass2`, 640x360 JPEG q82 in
+`docs/captures/overnight/city/`): `pass2_rails_trust.jpg`, `pass2_rails_picnic.jpg`,
+`pass2_signs_halcyon.jpg` (Halcyon Ave / Union St sign), `pass2_avenue.jpg`.
+
+Not done this pass (time): bus shelters with timetables, hydrant/newspaper-box audit on the
+avenues, avenue planters with trees, manhole/drain decals, crosswalk paint audit,
+floating-prop audit beyond what city_audit already covers.
