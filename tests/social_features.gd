@@ -172,6 +172,114 @@ func _run() -> void:
 	await _frames(3)
 	game._start_live()
 	await _frames(3)
+	# --- Trade item: sidearm only ------------------------------------------------------
+	player.set_loadout(["pistol", "smg"])
+	_check(player.weapon_id == "smg" and not player.sidearm_only, "Contract loadout: SMG in hand, sidearm rule off")
+	game.carrying = true
+	await _frames(2)
+	_check(player.sidearm_only and player.weapon_id == "pistol", "Offline: carrying the case sets sidearm-only and draws the pistol")
+	_check(not player.switch_weapon("smg") and not player.can_use("smg") and player.can_use("pistol"), "Sidearm-only: the primary cannot be drawn")
+	player.cycle_weapon(1)
+	player.quick_swap()
+	_check(player.weapon_id == "pistol", "Sidearm-only: cycling and quick swap never draw a primary")
+	player.equip("rifle")
+	_check(player.owned.has("rifle") and player.weapon_id == "pistol", "Sidearm-only: a purchased primary is owned but stays holstered")
+	game.carrying = false
+	await _frames(2)
+	_check(not player.sidearm_only and player.weapon_id == "pistol", "Dropping the case clears the rule without auto-switching")
+	_check(player.switch_weapon("rifle") and player.weapon_id == "rifle", "After the drop the holstered primary can be drawn again")
+	player.set_sidearm_only(true)
+	_check(player.weapon_id == "pistol" and player.sidearm_only, "Setting sidearm-only with a primary drawn switches to the pistol")
+	player.set_loadout(["smg"])
+	player.set_sidearm_only(true)
+	_check(player.weapon_id == "pistol" and player.owned.has("pistol"), "With no sidearm owned, sidearm-only adds and draws a pistol")
+	player.reset_player(player.global_position)
+	_check(not player.sidearm_only, "reset_player clears sidearm-only")
+	player.set_loadout(["pistol"])
+
+	# --- Phone drop key, pad holds, hands up / binoculars pad binds -----------------------
+	var k_bound: bool = false
+	for event: InputEvent in InputMap.action_get_events("drop_phone"):
+		if event is InputEventKey and (event as InputEventKey).physical_keycode == KEY_K:
+			k_bound = true
+	_check(k_bound, "drop_phone is bound to K")
+	var pad_hands: bool = false
+	for event: InputEvent in InputMap.action_get_events("hands_up"):
+		if event is InputEventJoypadButton and (event as InputEventJoypadButton).button_index == JOY_BUTTON_RIGHT_STICK:
+			pad_hands = true
+	_check(pad_hands, "hands_up has a pad bind (R3)")
+	_check(game._glyph("drop_phone") == "K" and game._glyph("binoculars") == "Z", "Glyphs exist for the phone drop and binoculars")
+	var press_down: InputEventJoypadButton = InputEventJoypadButton.new()
+	press_down.button_index = JOY_BUTTON_DPAD_DOWN
+	press_down.pressed = true
+	var release_down: InputEventJoypadButton = InputEventJoypadButton.new()
+	release_down.button_index = JOY_BUTTON_DPAD_DOWN
+	release_down.pressed = false
+	game.carrying = true
+	game._unhandled_input(press_down)
+	_check(game.carrying, "Pad D-pad down press alone does not drop the trade item yet")
+	game._unhandled_input(release_down)
+	_check(not game.carrying, "A pad D-pad down tap drops the trade item on release")
+	game.carrying = true
+	game._unhandled_input(press_down)
+	game._pad_hold_start[JOY_BUTTON_DPAD_DOWN] = Time.get_ticks_msec() - 700
+	game._pad_hold_update()
+	_check(bool(game._pad_hold_fired.get(JOY_BUTTON_DPAD_DOWN, false)), "Holding D-pad down 0.5 s fires the phone drop")
+	game._unhandled_input(release_down)
+	_check(game.carrying, "A D-pad down hold does not also drop the trade item")
+	game.carrying = false
+	await _frames(2)
+	var press_up: InputEventJoypadButton = InputEventJoypadButton.new()
+	press_up.button_index = JOY_BUTTON_DPAD_UP
+	press_up.pressed = true
+	var release_up: InputEventJoypadButton = InputEventJoypadButton.new()
+	release_up.button_index = JOY_BUTTON_DPAD_UP
+	release_up.pressed = false
+	game._unhandled_input(press_up)
+	game._pad_hold_start[JOY_BUTTON_DPAD_UP] = Time.get_ticks_msec() - 700
+	game._pad_hold_update()
+	await _frames(2)
+	_check(game._pad_binoculars and player.binoculars, "Holding D-pad up raises the binoculars")
+	game._unhandled_input(release_up)
+	await _frames(2)
+	_check(not game._pad_binoculars and not player.binoculars, "Releasing D-pad up lowers the binoculars")
+
+	# --- Host line-of-sight and map-bound hooks ----------------------------------------------
+	_check(game.net.los_check.is_valid(), "net.los_check is set after online setup")
+	_check(game.net.map_half_extent >= 400.0 and game.net.map_half_extent < 6000.0, "net.map_half_extent is the city plus a margin (%.0f m)" % game.net.map_half_extent)
+	_check(bool(game.net.los_check.call(Vector3(0, 60, 0), Vector3(30, 60, 0))), "los_check: an open-air segment is clear")
+	var walled: bool = false
+	var walled_clear: bool = false
+	for rect: Rect2 in game.world.footprints:
+		if rect.size.x < 8.0 or rect.size.y < 8.0:
+			continue
+		var centre: Vector2 = rect.get_center()
+		var from: Vector3 = Vector3(rect.position.x - 6.0, 1.5, centre.y)
+		var to: Vector3 = Vector3(rect.end.x + 6.0, 1.5, centre.y)
+		if not bool(game.net.los_check.call(from, to)):
+			walled = true
+			# The same wall must not block a segment that never crosses it.
+			walled_clear = bool(game.net.los_check.call(from, from + Vector3(0, 0, 4.0))) or bool(game.net.los_check.call(from, from + Vector3(-4.0, 0, 0)))
+			break
+	_check(walled, "los_check: a segment through a solid building is blocked")
+	_check(walled_clear, "los_check: open ground beside that building is clear")
+	if not game.world.glass_panes.is_empty():
+		var pane: Node3D = game.world.glass_panes[0]["body"] as Node3D
+		var glass_from: Vector3 = pane.global_transform * Vector3(0, 0, -0.6)
+		var glass_to: Vector3 = pane.global_transform * Vector3(0, 0, 0.6)
+		_check(bool(game.net.los_check.call(glass_from, glass_to)), "los_check: an intact shop window does not block a hit")
+
+
+	# Death (ends the contract round, so it runs last and the round is restarted for the report check).
+	player.set_loadout(["pistol", "smg"])
+	player.set_sidearm_only(true)
+	player.take_damage(1000.0)
+	_check(player.is_dead() and not player.sidearm_only, "Death clears sidearm-only")
+	game._start_round()
+	await _frames(3)
+	game._start_live()
+	await _frames(3)
+
 	game.shots_fired += 3
 	game.shots_hit += 1
 	game._finish(false, "Test", "Report check.")

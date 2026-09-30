@@ -156,6 +156,9 @@ var ammo: int = 12
 var reserve: int = 48
 var weapon_id: String = "pistol"
 var owned: Array[String] = ["pistol"]
+## Carrying a trade item (case, Ledger, cash): only the sidearm (pistol class) can be drawn or fired.
+## Owned primaries stay slung. Set through `set_sidearm_only`; cleared by death and `reset_player`.
+var sidearm_only: bool = false
 var infinite_reserve: bool = false
 var regenerate: bool = false
 var invulnerable: bool = false
@@ -661,6 +664,13 @@ func equip(id: String) -> void:
 		id = "pistol"
 	if not owned.has(id):
 		owned.append(id)
+	if sidearm_only and is_primary(id):
+		# Bought while carrying a trade item: it goes slung, full, and the sidearm stays in hand.
+		var stats: Dictionary = compute_stats(id)
+		_ammo_state[id] = Vector2i(int(stats["capacity"]), int(stats["reserve"]))
+		if is_primary(weapon_id) or not owned.has(weapon_id):
+			_draw_sidearm()
+		return
 	_ammo_state.erase(id)
 	_select(id)
 	ammo = int(_stats["capacity"])
@@ -721,7 +731,35 @@ func set_loadout(ids: Array) -> void:
 	equip(owned[owned.size() - 1])
 
 
+## Trade-item rule: while `on`, primaries are slung and only the pistol class works. Turning it on with a
+## primary drawn switches to the owned sidearm (adding a P9 if there is none). Turning it off does not
+## auto-switch: the player draws the primary again themselves.
+func set_sidearm_only(on: bool) -> void:
+	sidearm_only = on
+	if on and is_primary(weapon_id):
+		_draw_sidearm()
+
+
+## Draws the pistol-class weapon for the trade-item rule.
+func _draw_sidearm() -> void:
+	var sidearm: String = owned_in_class("pistol")
+	if sidearm.is_empty():
+		sidearm = "pistol"
+		owned.append(sidearm)
+	if weapon_id == sidearm:
+		return
+	if not switch_weapon(sidearm):
+		# Dead, or otherwise unable to animate a draw: the state must still be sidearm-only.
+		_ammo_state[weapon_id] = Vector2i(ammo, reserve)
+		_select(sidearm)
+		var saved: Vector2i = _ammo_state.get(sidearm, Vector2i(int(_stats["capacity"]), int(_stats["reserve"])))
+		ammo = mini(saved.x, int(_stats["capacity"]))
+		reserve = saved.y
+
+
 func can_use(id: String) -> bool:
+	if sidearm_only and is_primary(id):
+		return false
 	if not in_vehicle:
 		return true
 	return seat_can_shoot and (not seat_one_hand or is_one_hand(id))
@@ -803,6 +841,7 @@ func take_damage(amount: float, source: Vector3 = Vector3.INF) -> void:
 	damaged.emit(amount, source)
 	if health <= 0.0:
 		_dead = true
+		sidearm_only = false
 		enabled = false
 		reloading = false
 		aiming = false
@@ -810,6 +849,7 @@ func take_damage(amount: float, source: Vector3 = Vector3.INF) -> void:
 
 
 func reset_player(pos: Vector3) -> void:
+	sidearm_only = false
 	global_position = pos
 	velocity = Vector3.ZERO
 	health = 100.0

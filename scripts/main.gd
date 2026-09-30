@@ -88,6 +88,12 @@ var round_number: int = 0
 var losses: int = 0
 var time_left: float = ROUND_SECONDS
 var carrying: bool = false
+## Gamepad D-pad taps and holds. Down: tap drops the trade item, hold drops the crew phone. Up: tap swaps to
+## the last weapon, hold raises the binoculars. Keyed by JOY_BUTTON_*; the tap fires on release.
+const PAD_HOLD_SECONDS: float = 0.5
+var _pad_hold_start: Dictionary = {}
+var _pad_hold_fired: Dictionary = {}
+var _pad_binoculars: bool = false
 var violence: bool = false
 var paid: bool = false
 var paused: bool = false
@@ -278,6 +284,9 @@ func _ready() -> void:
 	online.name = "Online"
 	add_child(online)
 	online.setup(self, net)
+	# Host hit-claim hooks (docs/NETWORK_SECURITY_AND_STEAM.md section 6): line of sight and map bounds.
+	net.los_check = _net_los_clear
+	net.map_half_extent = _city_half_extent() + NET_MAP_MARGIN
 	voice = VoiceScript.new()
 	voice.name = "Voice"
 	add_child(voice)
@@ -365,11 +374,48 @@ func _all_guards() -> Array[FastGuard]:
 	all.append_array(drill_guards)
 	return all
 
+## Margin (metres) added around the city when narrowing the host's snapshot bounds.
+const NET_MAP_MARGIN: float = 200.0
+
+## Largest |x| or |z| of any land polygon or road point, at least the city limit `FastWorld.HALF`.
+func _city_half_extent() -> float:
+	var extent: float = FastWorld.HALF
+	if not is_instance_valid(world):
+		return extent
+	for polygon: PackedVector2Array in world.land:
+		for point: Vector2 in polygon:
+			extent = maxf(extent, maxf(absf(point.x), absf(point.y)))
+	for road: Dictionary in world.roads:
+		for point: Vector2 in road["points"]:
+			extent = maxf(extent, maxf(absf(point.x), absf(point.y)))
+	return extent
+
+## Host hit-claim line of sight (`net.los_check`): true when nothing in the world blocks a -> b. Players
+## (layers 2, 4, 8) are off the mask; cars and shop glass share the world layer, so they are excluded by
+## body. The far end is pulled back 0.3 m so the target's own cover lip or surface never blocks a real hit.
+func _net_los_clear(from: Vector3, to: Vector3) -> bool:
+	var span: Vector3 = to - from
+	var length: float = span.length()
+	if length < 0.5:
+		return true
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to - span / length * 0.3, 1)
+	var skip: Array[RID] = [player.get_rid()]
+	for ride: FastCar in cars:
+		if is_instance_valid(ride):
+			skip.append(ride.get_rid())
+	if is_instance_valid(world):
+		for glass: Dictionary in world.glass_panes:
+			var pane: CollisionObject3D = glass["body"] as CollisionObject3D
+			if is_instance_valid(pane):
+				skip.append(pane.get_rid())
+	query.exclude = skip
+	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
 func _setup_input() -> void:
 	var keys: Dictionary = {"move_forward":KEY_W,"move_back":KEY_S,"move_left":KEY_A,"move_right":KEY_D,"sprint":KEY_SHIFT,"crouch":KEY_CTRL,"jump":KEY_SPACE,"handbrake":KEY_SPACE,"reload":KEY_R,"interact":KEY_E,"buy":KEY_B,"escape":KEY_ESCAPE,"drop":KEY_G,
 		"weapon_1":KEY_1,"weapon_2":KEY_2,"weapon_3":KEY_3,"weapon_4":KEY_4,"weapon_5":KEY_5,"quick_swap":KEY_Q,"horn":KEY_H,"rearm":KEY_T,"fullscreen":KEY_F11,"fps":KEY_F3,
 		"map":KEY_M,"gunsmith":KEY_B,"seat":KEY_F,"camera_toggle":KEY_V,"chat":KEY_ENTER,
-		"hands_up":KEY_X,"binoculars":KEY_Z,"voice_radio":KEY_Y,"voice_ptt":KEY_N}
+		"hands_up":KEY_X,"binoculars":KEY_Z,"voice_radio":KEY_Y,"voice_ptt":KEY_N,"drop_phone":KEY_K}
 	for action: String in keys:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
@@ -416,6 +462,9 @@ func _setup_gamepad() -> void:
 		"drop": [JOY_BUTTON_DPAD_DOWN], "gunsmith": [JOY_BUTTON_DPAD_RIGHT], "buy": [JOY_BUTTON_DPAD_LEFT], "rearm": [JOY_BUTTON_DPAD_LEFT],
 		"seat": [JOY_BUTTON_DPAD_RIGHT], "driveby_aim": [JOY_BUTTON_LEFT_SHOULDER], "driveby_fire": [JOY_BUTTON_RIGHT_SHOULDER],
 		"escape": [JOY_BUTTON_START], "map": [JOY_BUTTON_BACK], "camera_toggle": [JOY_BUTTON_RIGHT_STICK],
+		# R3 is only the vehicle camera, so on foot it is free: hands up. Binoculars (hold D-pad up) and the
+		# phone drop (hold D-pad down) are timed holds handled in _pad_hold_update, not plain button actions.
+		"hands_up": [JOY_BUTTON_RIGHT_STICK],
 	}
 	for action: String in pad_buttons:
 		if not InputMap.has_action(action):
@@ -452,7 +501,8 @@ const GLYPHS: Dictionary = {
 	"drop": ["G", "D-PAD DOWN", "D-PAD DOWN"], "horn": ["H", "L3", "L3"], "quick_swap": ["Q", "D-PAD UP", "D-PAD UP"],
 	"weapons": ["1-5", "LB / RB", "L1 / R1"], "handbrake": ["SPACE", "A", "CROSS"],
 	"drive": ["W / S", "RT / LT", "R2 / L2"], "steer": ["A / D", "L-STICK", "L-STICK"], "look": ["MOUSE", "R-STICK", "R-STICK"],
-	"seat": ["F", "D-PAD RIGHT", "D-PAD RIGHT"], "camera_toggle": ["V", "R3", "R3"], "driveby_aim": ["HOLD RMB", "HOLD LB", "HOLD L1"], "driveby_fire": ["LMB", "RB", "R1"],
+	"seat": ["F", "D-PAD RIGHT", "D-PAD RIGHT"], "camera_toggle": ["V", "R3", "R3"], "hands_up": ["X", "R3", "R3"],
+	"binoculars": ["Z", "HOLD D-PAD UP", "HOLD D-PAD UP"], "drop_phone": ["K", "HOLD D-PAD DOWN", "HOLD D-PAD DOWN"], "driveby_aim": ["HOLD RMB", "HOLD LB", "HOLD L1"], "driveby_fire": ["LMB", "RB", "R1"],
 }
 
 ## Prompt name for an action on the device the player is using right now.
@@ -514,8 +564,13 @@ func _process(delta: float) -> void:
 		_update_driveby()
 		_update_gps(delta)
 		_update_ambient_events(delta)
+	_pad_hold_update()
 	player.binoculars = (phase == Phase.LIVE or phase == Phase.BUY) and not paused and not player.is_dead() \
-		and (vehicle == null or not _driving()) and InputMap.has_action("binoculars") and Input.is_action_pressed("binoculars")
+		and (vehicle == null or not _driving()) and InputMap.has_action("binoculars") and (Input.is_action_pressed("binoculars") or _pad_binoculars)
+	# Offline: the briefcase is the trade item, so only the sidearm works while it is carried. Online, the
+	# match layer (online.gd) drives this from the items the player really holds.
+	if not online.active and player.sidearm_only != carrying:
+		player.set_sidearm_only(carrying)
 	_update_space(delta)
 	if vehicle != null and phase != Phase.MENU:
 		_update_seat_modifiers()
@@ -577,6 +632,8 @@ func _notification(what: int) -> void:
 		_pause()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and not event.pressed:
+		_pad_hold_release((event as InputEventJoypadButton).button_index)
 	if online.is_typing():
 		return
 	if online.active and event.is_action_pressed("chat") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
@@ -589,7 +646,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("map") and phase == Phase.LIVE and not paused:
 		map_open = not map_open
 		return
-	if event.is_action_pressed("hands_up") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused:
+	# R3 is also the vehicle camera, and hands cannot go up in a seat, so the pad press is left for that.
+	if event.is_action_pressed("hands_up") and (phase == Phase.LIVE or phase == Phase.BUY) and not paused \
+			and not (vehicle != null and event is InputEventJoypadButton):
 		toggle_hands_up()
 		return
 	if event.is_action_pressed("fullscreen"):
@@ -626,6 +685,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		return
+	if event is InputEventJoypadButton and event.is_action_pressed("quick_swap") and not player.is_dead():
+		_pad_hold_begin(JOY_BUTTON_DPAD_UP)
 	if vehicle != null:
 		if _driving():
 			if event.is_action_pressed("horn"):
@@ -656,24 +717,83 @@ func _unhandled_input(event: InputEvent) -> void:
 		if ride != null:
 			_ride(ride)
 			return
-	if event.is_action_pressed("drop") and online.drop():
-		return
-	if event.is_action_pressed("drop") and carrying:
-		carrying = false
-		case_mesh.position = player.position - player.global_basis.z * 1.2
-		case_mesh.position.y = 0.5
-		case_mesh.visible = true
-		_message("Briefcase dropped. %s to collect it again." % _glyph("interact"))
+	if event.is_action_pressed("drop"):
+		if event is InputEventJoypadButton:
+			# The pad's D-pad down is tap = drop the trade item (on release), hold = drop the phone.
+			_pad_hold_begin(JOY_BUTTON_DPAD_DOWN)
+		elif _drop_trade_item():
+			return
+	if event.is_action_pressed("drop_phone"):
+		_drop_phone()
 	if player.is_dead():
 		return
 	_weapon_keys(event, false)
-	if event.is_action_pressed("quick_swap"):
+	if event.is_action_pressed("quick_swap") and not (event is InputEventJoypadButton):
 		player.quick_swap()
 	if event.is_action_pressed("gunsmith") and free_roam:
 		_gunsmith()
 		return
 	if event.is_action_pressed("rearm") and free_roam:
 		_rearm()
+
+## G / D-pad down tap: drops the trade item at your feet. Online, the match layer owns the items and
+## returns true when it handled the drop; offline, the contract briefcase goes on the ground.
+func _drop_trade_item() -> bool:
+	if online.drop():
+		return true
+	if carrying:
+		carrying = false
+		case_mesh.position = player.position - player.global_basis.z * 1.2
+		case_mesh.position.y = 0.5
+		case_mesh.visible = true
+		_message("Briefcase dropped. %s to collect it again." % _glyph("interact"))
+	return false
+
+## K / hold D-pad down: drops the crew phone. There is no phone offline, so this only exists online.
+func _drop_phone() -> void:
+	if online.active and online.has_method("drop_phone"):
+		online.call("drop_phone")
+
+## Starts timing a D-pad press (see `PAD_HOLD_SECONDS`).
+func _pad_hold_begin(button: int) -> void:
+	_pad_hold_start[button] = Time.get_ticks_msec()
+	_pad_hold_fired[button] = false
+
+## A D-pad release: a press that never reached the hold time counts as the tap.
+func _pad_hold_release(button: int) -> void:
+	if not _pad_hold_start.has(button):
+		return
+	var fired: bool = bool(_pad_hold_fired.get(button, false))
+	_pad_hold_start.erase(button)
+	_pad_hold_fired.erase(button)
+	if button == JOY_BUTTON_DPAD_UP:
+		_pad_binoculars = false
+	if fired or phase != Phase.LIVE or paused or vehicle != null or player.is_dead():
+		return
+	if button == JOY_BUTTON_DPAD_DOWN:
+		_drop_trade_item()
+	elif button == JOY_BUTTON_DPAD_UP:
+		player.quick_swap()
+
+## Fires the hold action of any D-pad press that has been down for `PAD_HOLD_SECONDS`.
+func _pad_hold_update() -> void:
+	if _pad_hold_start.is_empty():
+		return
+	if (phase != Phase.LIVE and phase != Phase.BUY) or paused:
+		_pad_hold_start.clear()
+		_pad_hold_fired.clear()
+		_pad_binoculars = false
+		return
+	for button: int in _pad_hold_start.keys():
+		if bool(_pad_hold_fired.get(button, false)):
+			continue
+		if float(Time.get_ticks_msec() - int(_pad_hold_start[button])) < PAD_HOLD_SECONDS * 1000.0:
+			continue
+		_pad_hold_fired[button] = true
+		if button == JOY_BUTTON_DPAD_DOWN:
+			_drop_phone()
+		elif button == JOY_BUTTON_DPAD_UP:
+			_pad_binoculars = true
 
 ## Number keys pick a weapon class; in free roam, pressing the key of the class in hand
 ## steps through that class's models (P9 → .45 → .357, M4 → KV-47, ...).
@@ -689,6 +809,8 @@ func _weapon_keys(event: InputEvent, locked_wheel: bool) -> void:
 				_message("%s  /  %s. Press %d again for the next %s." % [FastPlayer.WEAPONS[next]["name"], FastPlayer.WEAPONS[next]["pattern"], slot + 1, str(FastPlayer.CLASS_LABEL[weapon_class]).to_lower()], 4.0)
 			elif have.is_empty():
 				_message("No %s in your loadout%s." % [str(FastPlayer.CLASS_LABEL[weapon_class]).to_lower(), "" if free_roam else " this round"])
+			elif player.sidearm_only and FastPlayer.is_primary(have):
+				_message("Hands full: only your sidearm while you carry the trade item. %s drops it." % _glyph("drop"))
 			elif not player.switch_weapon(have) and player.in_vehicle and not player.can_use(have):
 				_message("Only one-handed guns from this seat: pistols, the MAC-11 or the sawn-off.")
 	if locked_wheel:
@@ -1920,7 +2042,7 @@ func _show_title() -> void:
 	_text("Buy at your HQ, get the case from the Exchange by deal or by force, bring it home.", 14, MUTED)
 	_button("CONTROLS & SETTINGS",func(): _settings(true))
 	_button("QUIT",func(): get_tree().quit())
-	_text("Offline modes use practice bots; online matches are players only.\nVoice: use Discord for now. In-game proximity voice is planned.",13,MUTED)
+	_text("Offline modes use practice bots; online matches are players only.\nVoice: open-mic proximity voice is on by default; hold Y for the crew radio.",13,MUTED)
 	menu.show()
 
 func _orbit_title(delta: float) -> void:
@@ -2005,7 +2127,7 @@ func _settings(from_title: bool) -> void:
 		if from_title: _show_title()
 		else: _pause()
 	_heading("OPERATOR HANDBOOK", "CONTROLS & SETTINGS")
-	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        T  rearm (free roam)\nX  hands up (weapon away: a peace signal)        Z  hold for binoculars\nVoice: open mic reaches players within 35 m (or hold N to talk if you switch to push-to-talk)        Y  hold for crew radio\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
+	_text("WASD  walk / drive        MOUSE  look freely, including in vehicles\nSHIFT  sprint        CTRL or C  crouch        SPACE  jump / handbrake\nLMB  fire        RMB  aim / scope        R  reload\n1-5  weapon class (free roam: press again for the next model)\nWHEEL  cycle        Q  last weapon        B  buy menu / gunsmith\nE  enter (driver) / exit, trade, deliver, rearm at the armory\nF  ride as a passenger gunner / change seats\nAt the wheel: hold RMB to enable one-handed fire, then LMB to shoot\nV  vehicle camera (first / third person)        H  horn        G  drop case        K  drop the crew phone        T  rearm (free roam)\nX  hands up (weapon away: a peace signal)        Z  hold for binoculars\nCarrying a case, the Ledger or cash: only your sidearm can be drawn or fired\nVoice: open mic reaches players within 35 m (or hold N to talk if you switch to push-to-talk)        Y  hold for crew radio\nF11  fullscreen        F3  FPS counter        ESC  pause        M  city map\n\nController: sticks move/look, RT fire / throttle, LT aim / brake, A jump / handbrake,\nB crouch / back, X reload, Y interact, LB/RB weapons (buy menu: tabs),\nD-pad left: buy in contracts / rearm in free roam. D-pad right: gunsmith / ride / change seat.\nAt the wheel: hold LB to\nenable one-handed fire, then RB to shoot. L3 sprint (in car: horn), View: map, Menu: pause.\nD-pad down: drop the trade item (hold: drop the crew phone). D-pad up: last weapon (hold: binoculars).\nR3 on foot: hands up (in a vehicle: camera).\n\nVehicles: W throttle, S brake then reverse. Exit below 8 km/h.",14)
 	_text("Sound volume",14,TEAL)
 	var slider := HSlider.new()
 	slider.min_value = 0.0
