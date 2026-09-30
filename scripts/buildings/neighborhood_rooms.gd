@@ -7,7 +7,8 @@ const WOOD: Color = Color(0.42, 0.26, 0.16)
 const RED: Color = Color(0.56, 0.15, 0.12)
 const STEEL: Color = Color(0.15, 0.16, 0.17)
 
-static func shell(kit: Kit, title: String, half: Vector2, color: Color) -> void:
+## `east_openings`: extra BuildingKit.opening()s in the +X side wall (e.g. a drive-through window).
+static func shell(kit: Kit, title: String, half: Vector2, color: Color, east_openings: Array = []) -> void:
 	var wall: Material = kit.mat(color, "stucco")
 	kit.footprint(Rect2(-half, half * 2.0))
 	kit.floor_slab(Rect2(-half, half * 2.0), 0.12, kit.mat(CREAM, "tiles"))
@@ -16,7 +17,7 @@ static func shell(kit: Kit, title: String, half: Vector2, color: Color) -> void:
 		Kit.opening(half.x, 2.4), Kit.opening(half.x - 6, 5, 0.85, 2.9, "window"), Kit.opening(half.x + 6, 5, 0.85, 2.9, "window")])
 	kit.wall(Vector2(-half.x, -half.y), Vector2(half.x, -half.y), 4.2, wall, [Kit.opening(half.x, 2.2)])
 	kit.wall(Vector2(-half.x, -half.y), Vector2(-half.x, half.y), 4.2, wall)
-	kit.wall(Vector2(half.x, -half.y), Vector2(half.x, half.y), 4.2, wall)
+	kit.wall(Vector2(half.x, -half.y), Vector2(half.x, half.y), 4.2, wall, east_openings)
 	kit.add_door(Vector3(0, 0.12, half.y), 2.4, 2.6, Vector3.BACK, title + " entrance")
 	kit.add_door(Vector3(0, 0.12, -half.y), 2.2, 2.6, Vector3.FORWARD, title + " service exit")
 	kit.box(Vector3(0, 3.52, half.y + 0.23), Vector3(half.x * 1.7, 0.95, 0.22), kit.mat(RED))
@@ -58,7 +59,8 @@ static func room_finish(kit: Kit, half: Vector2) -> void:
 
 static func diner(world: Node3D, plot: Dictionary) -> void:
 	var kit: Kit = Kit.new(world, "Burger", plot)
-	shell(kit, "BIG BOY BURGERS", Vector2(12, 10), CREAM)
+	# Drive-through window in the kitchen's east wall (glass; the service sill is in burger.gd).
+	shell(kit, "BIG BOY BURGERS", Vector2(12, 10), CREAM, [Kit.opening(2.0, 1.6, 1.05, 2.1, "window")])
 	kit.begin_interior()
 	room_finish(kit, Vector2(12, 10))
 	for x: float in [-7.0, 7.0]:

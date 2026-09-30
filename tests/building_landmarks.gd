@@ -1,11 +1,13 @@
 extends SceneTree
-## CLUB VOLTAGE, THE VELVET ROOM and the HOTEL MERIDIAN ground floor: walk-in interiors, real exits, walkable routes (including the
+## CLUB VOLTAGE, THE VELVET ROOM, the HOTEL MERIDIAN ground floor and the burger drive-through: walk-in interiors, real exits, walkable routes (including the
 ## mezzanine stair and stage steps), rail/cover collision that matches what is drawn, lamp budget,
 ## merged meshes and no leftover solid stub shell.
 const World = preload("res://scripts/world.gd")
 const Nightclub = preload("res://scripts/buildings/nightclub.gd")
 const Stripclub = preload("res://scripts/buildings/stripclub.gd")
 const Hotel = preload("res://scripts/buildings/hotel.gd")
+const Burger = preload("res://scripts/buildings/burger.gd")
+const Glass = preload("res://scripts/breakable_glass.gd")
 var checks: int = 0
 var failures: int = 0
 var world: Node3D
@@ -153,7 +155,28 @@ func _run() -> void:
 	_check(_route_ok(velvet, [Vector3(4.6, 0.12, -2.9), Vector3(4.0, 0.12, -2.9), Vector3(2.3, 1.01, -2.9), Vector3(0.5, 1.01, -3.6)], "stage steps"), "Stage steps lead onto the stage")
 	var runway_end: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(velvet.global_transform * Vector3(-2.0, 0.5, 6.0), velvet.global_transform * Vector3(-2.0, 0.5, 1.0)))
 	_check(not runway_end.is_empty(), "Runway is solid cover at seated height")
+	# Burger drive-through: a car-sized box fits the whole lane, the pickup window is real glass, the pole stands on the ground.
+	var burger: Node3D = world.plot_nodes["burger"]
+	var lane_clear: bool = true
+	for step: int in range(12):
+		var local: Vector3 = Vector3(Burger.LANE_X, 0, lerpf(9.0, -11.0, step / 11.0))
+		var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+		var car_box: BoxShape3D = BoxShape3D.new()
+		car_box.size = Vector3(1.9, 1.3, 4.4)
+		query.shape = car_box
+		var at: Vector3 = burger.global_transform * local
+		query.transform = Transform3D(burger.global_transform.basis, Vector3(at.x, world.surface_height(Vector2(at.x, at.z)) + 0.9, at.z))
+		var hits: Array[Dictionary] = _space().intersect_shape(query, 2)
+		if not hits.is_empty():
+			print("  LANE BLOCKED at local %s by %s" % [local, (hits[0]["collider"] as Node).get_path()])
+			lane_clear = false
+	_check(lane_clear, "Burger drive-through lane fits a car from entry to exit")
+	var window_hit: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(burger.global_transform * Vector3(Burger.LANE_X, 1.6, Burger.WINDOW_Z), burger.global_transform * Vector3(10.5, 1.6, Burger.WINDOW_Z)))
+	_check(not window_hit.is_empty() and window_hit["collider"] is Glass, "Burger pickup window is breakable glass in the kitchen wall")
+	var pole: Vector3 = burger.global_transform * Vector3(-13.6, 0, 11.8)
+	var pole_hit: Dictionary = _space().intersect_ray(PhysicsRayQueryParameters3D.create(pole + Vector3(3, 1.0, 0) + (burger.global_transform.basis * Vector3(0, 0, 0)), pole + Vector3(-3, 1.0, 0)))
+	_check(not pole_hit.is_empty(), "Burger pole sign has a solid pole where it is drawn")
 	world.queue_free()
 	await _frames(3)
-	print("BUILDING CLUBS RESULT: %d checks, %d failures" % [checks, failures])
+	print("BUILDING LANDMARKS RESULT: %d checks, %d failures" % [checks, failures])
 	quit(0 if failures == 0 else 1)
