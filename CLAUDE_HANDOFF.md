@@ -238,6 +238,12 @@ boomy, with no "childish beeps".
 - **Gun store vs Coast Road: fixed.** Coast Road ran through the Halcyon Arms range yard and past the long-range plates.
   It now swings east round the yard: (386,-105) → (388,-22) → (340,-22), rejoining its old line at x 340. The range is unchanged.
   `building_landmarks` checks the road stays clear, and `city_audit` no longer needs the exception.
+- **Gun store roof doesn't render in software-GL interior captures.** Sky shows and sunlight reaches the shop floor.
+  Other ceilings render. A probe shows the roof is present in `GunStore/Merged` (AABB up to y 8), with
+  `cast_shadow` off and shadows in `ShadowProxy`. That node is unusually large (68 × 146 m, because it includes the
+  range yard). Suspects: the new per-district shadow proxy or mesh merging on a very large node, or index overflow in
+  the merge. Check on the GPU first. If it reproduces, split the yard into its own node or check `MeshMerge` for
+  vertex limits.
 - **Strip ring road meets the beach rock revetment** at about (24, 400). Also KNOWN in `city_audit`.
 - **Props sunk 16 cm into the plinth** in the hotel, high-rise, burger, motel and nightclub lots. `city_audit` REPORTs them without
   failing. Use `world.surface_height()` for exterior solid props.
