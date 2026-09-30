@@ -131,6 +131,9 @@ var los_check: Callable = Callable()
 ## Optional `call_gate(sender: int) -> bool` (host): may this peer phone another crew ("call:<crew>")?
 ## online.gd sets it so only whoever holds a crew phone can call (docs/LEAD_DESIGN_DECISIONS.md §2).
 var call_gate: Callable = Callable()
+## Host lobby setting: Days in a Week (5 = Monday..Friday, 3 = a quick Wednesday..Friday). online.gd reads it
+## when the match starts and sends it to everyone in the round state.
+var week_days: int = 5
 ## Last reason a peer was kicked for flooding (for tests / logs).
 var last_kick: String = ""
 ## Handshake tag; peers with a different one are refused. Defaults to "<protocol>|<config/version>".
@@ -209,11 +212,14 @@ func _exit_tree() -> void:
 # ---------------------------------------------------------------- connection
 
 ## Start listening. Returns OK or the ENet error (for example ERR_CANT_CREATE when the port is taken).
-func host(port: int = PORT) -> Error:
+## Host a match. `bind_ip` "127.0.0.1" keeps it on this PC (the solo Week test: no firewall prompt, no UPnP).
+func host(port: int = PORT, bind_ip: String = "*") -> Error:
 	if not is_inside_tree():
 		return ERR_UNCONFIGURED
 	leave()
 	var peer := ENetMultiplayerPeer.new()
+	if bind_ip != "*":
+		peer.set_bind_ip(bind_ip)
 	var err: Error = peer.create_server(port, MAX_PLAYERS)
 	if err != OK:
 		return err
@@ -226,7 +232,8 @@ func host(port: int = PORT) -> Error:
 	_address = ""
 	players = {1: _new_entry(clean_name(local_name))}
 	_hello_done[1] = true
-	_start_upnp(port)
+	if bind_ip == "*":
+		_start_upnp(port)
 	set_process(true)
 	lobby_changed.emit()
 	return OK

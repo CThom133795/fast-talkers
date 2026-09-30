@@ -175,6 +175,8 @@ func _on_match_started() -> void:
 	recap = []
 	drop_site = ""
 	_seen_week = -1
+	if net.is_host():
+		week_days = clampi(net.week_days, 1, WEEKDAYS.size())
 	for guard: Node in game._all_guards():
 		guard.call("set_present", false)
 	_ensure_chat()
@@ -205,6 +207,19 @@ func _apply_my_crew() -> void:
 	game.hq_spawn += side * ((slot + 1) / 2) * 1.4 * (1.0 if slot % 2 == 1 else -1.0)
 	if is_instance_valid(chat_ui):
 		chat_ui.call("set_my_crew", game.crew)
+
+
+## Title menu: the real Week on this PC alone (a localhost host, no bots), for demos and solo testing
+## of the Day flow, phones, the Dead Drop and the Week standings.
+func start_solo_week() -> void:
+	if net.local_name.strip_edges().is_empty():
+		net.local_name = "Solo"
+	var err: Error = net.host(FastNet.PORT + 11, "127.0.0.1")
+	if err != OK:
+		game._message("Could not start the solo Week (%s)." % error_string(err), 6.0)
+		return
+	net.request_crew(game.crew)
+	net.request_start()
 
 
 func leave_match() -> void:

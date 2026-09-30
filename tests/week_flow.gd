@@ -92,8 +92,9 @@ func _run() -> void:
 	online.live_seconds = 120.0
 	online.settle_seconds = 0.3
 	online.week_end_seconds = 0.3
-	_check(int(net.call("host", PORT)) == OK, "host(%d) OK" % PORT)
-	net.call("request_start")
+	# The title menu's SOLO WEEK: a localhost-only host (no firewall prompt, no UPnP) that starts at once.
+	online.start_solo_week()
+	_check(bool(net.call("is_host")), "SOLO WEEK hosts a match on this PC")
 	var started: bool = await _wait_until(func() -> bool: return bool(online.active) and str(online.phase) == "buy", 5.0)
 	_check(started, "the solo host's Week starts in the buy phase")
 	if not started:
