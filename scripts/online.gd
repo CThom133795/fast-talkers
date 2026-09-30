@@ -65,6 +65,9 @@ var nervous_steps: int = 0
 ## Host: has anyone picked up a trade item this Day?
 var _contract_touched: bool = false
 var _nervous_announced: bool = false
+## Steam is signed in lazily (see _start_steam); a lost controller right after sign-in sets this warning.
+var _steam_started: bool = false
+var steam_input_warning: String = ""
 ## Host playtest telemetry (T0 in docs/DESIGN_WEEK_TRUST.md): one JSON line per Day in `telemetry_path`.
 var telemetry_path: String = ""
 var _day_stats: Dictionary = {}
@@ -146,7 +149,10 @@ func setup(owner_game: Node, owner_net: FastNet) -> void:
 	net.steam_join_started.connect(func() -> void:
 		if not active:
 			show_lobby())
-	net.steam_autostart.call_deferred()
+	# Steam starts when the online lobby first opens, not at the title screen: signed in as the Spacewar test app,
+	# Steam Input can take over the controller, and offline modes (SOLO WEEK, FREE ROAM, CONTRACT) must keep it.
+	if "--steam-at-launch" in OS.get_cmdline_user_args():
+		_start_steam.call_deferred()
 	_build_items()
 
 
@@ -160,7 +166,25 @@ func car_index(ride: Node) -> int:
 
 # --------------------------------------------------------------------- lobby and start
 
+## First time the online lobby opens: sign in to Steam (invites and joins need it). If a controller that
+## was connected disappears right after, Steam Input took it; say how to fix that in Steam.
+func _start_steam() -> void:
+	if _steam_started:
+		return
+	_steam_started = true
+	var pads_before: int = Input.get_connected_joypads().size()
+	net.steam_autostart()
+	if pads_before == 0 or not net.steam_status.is_empty() or not is_inside_tree():
+		return
+	await get_tree().create_timer(3.0).timeout
+	if Input.get_connected_joypads().size() < pads_before:
+		steam_input_warning = "Steam took over your controller (this test build runs as Steam's 'Spacewar'). Fix: in Steam, Library > Spacewar > Properties > Controller > Disable Steam Input, then restart Fast Talkers."
+		print("[steam] controller lost after Steam init: ", steam_input_warning)
+		game._message(steam_input_warning, 14.0)
+
+
 func show_lobby() -> void:
+	_start_steam()
 	if not is_instance_valid(lobby):
 		lobby = (load("res://scripts/lobby_ui.gd") as GDScript).new()
 		game.hud.get_parent().add_child(lobby)

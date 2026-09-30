@@ -7,12 +7,12 @@ STEAM (the easy way)
 --------------------
 1. Install Steam, start it and log in. Leave it running.
 2. Unzip this folder anywhere (the Desktop is fine) and run "Fast Talkers.exe".
-   Steam shows you as playing "Spacewar". That is expected: it is Valve's free test app,
-   and it is how the invite system works before the game has its own Steam page.
+   When you open PLAY ONLINE, Steam shows you as playing "Spacewar". That is expected: it is
+   Valve's free test app, and it is how invites work before the game has its own Steam page.
    If Windows SmartScreen appears, click "More info", then "Run anyway".
 3. HOST: PLAY ONLINE, then HOST ON STEAM (INVITE FRIENDS). The Steam overlay opens;
    pick your friends. (INVITE STEAM FRIENDS in the lobby opens it again.)
-4. FRIENDS: START FAST TALKERS FIRST and stay on the title screen, then accept the Steam
+4. FRIENDS: START FAST TALKERS FIRST and open PLAY ONLINE, then accept the Steam
    invite (the chat popup, or Shift+Tab > Friends). You can also right-click the host in your
    Steam friends list and pick "Join Game".
    Don't accept the invite while the game is closed: Steam would try to start Spacewar
@@ -25,6 +25,12 @@ STEAM (the easy way)
    N is push-to-talk if you turn open mic off in Settings.
 
 Waiting for friends? SOLO WEEK on the title screen plays the same Week alone.
+
+CONTROLLER STOPPED WORKING AFTER PLAY ONLINE?
+---------------------------------------------
+Steam Input can grab pads for the "Spacewar" test app; the game shows a message when it
+notices. Fix once: Steam > Library > Spacewar (it appears after the first run) > Properties >
+Controller > "Disable Steam Input", then restart Fast Talkers. Offline modes never sign in to Steam.
 
 IF THE HOST ON STEAM BUTTON IS MISSING
 --------------------------------------
