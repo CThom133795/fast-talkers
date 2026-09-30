@@ -190,6 +190,31 @@ func _run() -> void:
 		var back: Array = (extra[2] as Array).duplicate()
 		back.reverse()
 		await _case(str(extra[0]) + " DOWN", extra[1], back)
+	# Curbs and single risers: player.gd _try_step_up walks over a 0.18 m ledge but not a 0.45 m one.
+	var pad: Node3D = Node3D.new()
+	pad.name = "CurbTestPad"
+	world.add_child(pad)
+	pad.global_position = Vector3(0, 300, 0)
+	var body: StaticBody3D = StaticBody3D.new()
+	pad.add_child(body)
+	for spec: Array in [[Vector3(0, -0.25, 0), Vector3(24, 0.5, 24)], [Vector3(0, 0.09, -2.0), Vector3(6, 0.18, 1.0)], [Vector3(0, 0.225, -6.0), Vector3(6, 0.45, 1.0)]]:
+		var shape: CollisionShape3D = CollisionShape3D.new()
+		var box: BoxShape3D = BoxShape3D.new()
+		box.size = spec[1]
+		shape.shape = box
+		shape.position = spec[0]
+		body.add_child(shape)
+	await _frames(2)
+	walker.reset_player(pad.global_position + Vector3(0, 0.08, 1.0))
+	walker.rotation.y = yaw_toward(0.0, -1.0)
+	await _frames(8)
+	var curb_stats: Dictionary = {}
+	var over: bool = await walk_route(self, walker, [pad.global_position + Vector3(0, 0, 1.0), pad.global_position + Vector3(0, 0.18, -2.0)] as Array[Vector3], 8.0, curb_stats)
+	_check(over and walker.global_position.y > 300.1, "a 0.18 m curb is walked up without jumping (y %.2f)" % walker.global_position.y)
+	var blocked: bool = await walk_route(self, walker, [walker.global_position, pad.global_position + Vector3(0, 0.45, -7.0)] as Array[Vector3], 4.0, {})
+	_check(not blocked and walker.global_position.y < 300.4, "a 0.45 m ledge still blocks (y %.2f)" % walker.global_position.y)
+	Input.action_release("move_forward")
+	pad.queue_free()
 	print("--- per-flight summary ---")
 	for line: String in results:
 		print(line)
