@@ -2117,7 +2117,7 @@ func _show_title() -> void:
 	chase.make_current()
 	_clear_menu()
 	_menu_back = Callable()
-	_heading("FAST\nTALKERS", "PORT HALCYON  /  PROTOTYPE 0.6")
+	_heading("FAST\nTALKERS", "PORT HALCYON  /  PLAYTEST %s" % str(ProjectSettings.get_setting("application/config/version", "")))
 	_text("GOOD BUSINESS.  BAD COMPANY.",22,GOLD)
 	var identity: Dictionary = Factions.get_crew(crew)
 	_button("CREW:  %s  (%s)" % [identity["name"], str(identity["kind"]).to_upper()], func():
@@ -2125,23 +2125,17 @@ func _show_title() -> void:
 		_apply_crew()
 		_save_settings()
 		_show_title())
-	_button("PLAY ONLINE  /  HOST OR JOIN A MATCH  →", online.show_lobby)
-	_text("The deal round with friends: LAN, Tailscale or a forwarded port. Players only, no bots.", 14, MUTED)
+	_button("PLAY ONLINE  /  HOST OR JOIN THE WEEK  →", online.show_lobby)
+	_text("The Week with friends over Steam, or a direct IP. Players only, no bots.", 14, MUTED)
+	_button("SOLO WEEK  /  THE REAL WEEK, JUST YOU  →", online.start_solo_week)
+	_text("Monday to Friday on this PC: the crew phone, the cases, the Friday Dead Drop. Learn the Week here.", 14, MUTED)
+	# The old offline CONTRACT round (_start_round) is retired from the menu; SOLO WEEK replaces it.
+	# tests/integration.gd still drives _start_round directly.
 	_button("FREE ROAM  /  ARMORY, RANGE & MOTOR POOL  →", _start_free_roam)
 	_text("No clock, no money. Every weapon and vehicle, the range and practice bots.", 14, MUTED)
-	_button("CONTRACT  /  ROUND MODE  →",func():
-		cash = START_CASH
-		round_number = 0
-		losses = 0
-		_carry_gear = false
-		_start_round())
-	_text("Buy at your HQ, get the case from the Exchange by deal or by force, bring it home.", 14, MUTED)
-	# Kept below the older modes so pad/menu walks (tests/free_roam.gd) still reach them in the same order.
-	_button("SOLO WEEK  /  THE REAL WEEK, JUST YOU  →", online.start_solo_week)
-	_text("Monday to Friday on this PC: the crew phone, the cases, the Friday Dead Drop. For demos and practice.", 14, MUTED)
 	_button("CONTROLS & SETTINGS",func(): _settings(true))
 	_button("QUIT",func(): get_tree().quit())
-	_text("Offline modes use practice bots; online matches are players only.\nVoice: open-mic proximity voice is on by default; hold Y for the crew radio.",13,MUTED)
+	_text("Voice: open-mic proximity chat is on by default; hold Y for the crew radio.\nHold your crew's phone to call other crews: talk close to it and the other end hears you.",13,MUTED)
 	menu.show()
 
 func _orbit_title(delta: float) -> void:
