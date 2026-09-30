@@ -463,6 +463,7 @@ func _safety_phase(world: Node3D, nodes: Array[Node3D]) -> void:
 		var last: Vector3 = tower.global_transform * (roof[roof.size() - 1] as Vector3)
 		var up: Dictionary = _ray(last + Vector3(0, 0.3, 0), last + Vector3(0, 30.0, 0))
 		_check(up.is_empty(), "Halcyon Trust's roof route ends in the open: nothing within 30 m straight above %s%s" % [last, "" if up.is_empty() else " (hit " + str((up["collider"] as Node).get_path()) + ")"])
+	await _terrace_phase(world)
 	var total_points: int = 0
 	var solid_points: int = 0
 	var object_points: int = 0
@@ -476,6 +477,7 @@ func _safety_phase(world: Node3D, nodes: Array[Node3D]) -> void:
 		var goals: Array[Vector3] = _flight_goals(flights, xf)
 		var head_bad: Array[String] = []
 		var slot_bad: Array[String] = []
+		var rail_bad: Array[String] = []
 		var trap_bad: Array[String] = []
 		var under_bad: Array[String] = []
 		for flight: Dictionary in flights:
@@ -494,6 +496,27 @@ func _safety_phase(world: Node3D, nodes: Array[Node3D]) -> void:
 					if not hit.is_empty():
 						head_bad.append("%s step %d: %.2f m (%s)" % [kind, index, float((hit["position"] as Vector3).y) - tread.y, (hit["collider"] as Node).name])
 						break
+			# Rails on open sides: at three points up the flight, each side has something solid (a rail bar or a wall)
+			# at chest height within 0.3 m of the flight's edge.
+			# (Exempt: a flight rising 1 m or less, such as stage steps, where a step off is no fall.)
+			if kind != "u_landing" and float(flight["steps"]) * float(flight["rise"]) > 1.0:
+				var f_start: Vector3 = xf * (flight["start"] as Vector3)
+				var f_width: float = float(flight["width"])
+				var f_run: float = float(flight["run"])
+				var f_steps: int = int(flight["steps"])
+				for frac: float in [0.2, 0.5, 0.8]:
+					var f_index: int = mini(f_steps - 1, int(f_steps * frac))
+					var centre: Vector3 = f_start + heading * ((f_index + 0.5) * f_run) + Vector3(0, (f_index + 1) * float(flight["rise"]), 0)
+					for side: float in [-1.0, 1.0]:
+						var closed: bool = false
+						# The rail bar is a thin slanted bar about 0.9 m over the tread: scan every 3 cm from 0.5 to 1.3 m.
+						for step_up: int in range(27):
+							var from: Vector3 = centre + Vector3(0, 0.5 + step_up * 0.03, 0)
+							if not _ray(from, from + lateral * (side * (f_width * 0.5 + 0.3))).is_empty():
+								closed = true
+								break
+						if not closed:
+							rail_bad.append("%s side %+.0f at %d%%: nothing solid at chest height beside the flight" % [kind, side, int(frac * 100.0)])
 			for probe: Dictionary in _probe_points(flight):
 				total_points += 1
 				var at: Vector3 = xf * (probe["at"] as Vector3)
@@ -554,7 +577,111 @@ func _safety_phase(world: Node3D, nodes: Array[Node3D]) -> void:
 						trap_bad.append("%s: the real body could not walk back (stopped at waypoint %d near %s)" % [note, int(stats["waypoint"]), stats["stuck_at"]])
 		_check(head_bad.is_empty(), "%s: 2.1 m of head room above every tread%s" % [tag, "" if head_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(head_bad))])
 		_check(slot_bad.is_empty(), "%s: no slot of 0.1-0.9 m beside a flight%s" % [tag, "" if slot_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(slot_bad))])
+		_check(rail_bad.is_empty(), "%s: every open side of every flight has a rail or a wall%s" % [tag, "" if rail_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(rail_bad))])
 		_check(under_bad.is_empty(), "%s: the space under every flight's high end is solid%s" % [tag, "" if under_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(under_bad))])
 		_check(trap_bad.is_empty(), "%s: nothing dropped beside a flight or landing is stuck%s" % [tag, "" if trap_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(trap_bad))])
 	print("Trap probe: %d points, %d inside solid geometry or walled off from the flight, %d landed on furniture" % [total_points, solid_points, object_points])
+	Input.action_release("move_forward")
+
+
+# --- Halcyon Trust's roof terrace ----------------------------------------------------------------------------
+const Highrise = preload("res://scripts/buildings/highrise.gd")
+
+
+## A standing capsule (feet `at`) swept along `motion`: true when something stops it before the end.
+func _sweep_blocked(at: Vector3, motion: Vector3) -> bool:
+	var query: PhysicsShapeQueryParameters3D = _capsule_query(at, 0.3, 1.8)
+	query.motion = motion
+	var fractions: PackedFloat32Array = _space().cast_motion(query)
+	return fractions.size() >= 2 and fractions[0] < 1.0
+
+
+## The roof stair comes up onto an open-air terrace: floor everywhere west of the tower shaft (bar the stair
+## opening), sky above all of it, a rail or wall that stops a walking body on every open edge and round the stair
+## opening, and a walkable way from the stair head to the plant room door. A real body then walks at the west edge.
+func _terrace_phase(world: Node3D) -> void:
+	if not world.plot_nodes.has("highrise"):
+		return
+	var tower: Node3D = world.plot_nodes["highrise"]
+	var xf: Transform3D = tower.global_transform
+	var y: float = Highrise.OFFICE_TOP
+	var x_lo: float = -Highrise.HALF.x
+	var x_hi: float = Highrise.TOWER_W
+	var z_lo: float = -Highrise.HALF.y
+	var z_hi: float = Highrise.HALF.y
+	var hole: Rect2 = Highrise.HOLE_ROOF
+	var roof: Array = (tower.get_meta("routes") as Dictionary)["roof_stair"]
+	var head: Vector3 = roof[roof.size() - 1]
+	_check(head.x < x_hi - 0.5 and absf(head.y - y) < 0.05, "Halcyon Trust: the roof stair ends on the terrace (west of the tower face, at the roof level)")
+	# Floor and sky over a grid of the terrace.
+	var floor_bad: Array[String] = []
+	var sky_bad: Array[String] = []
+	var sampled: int = 0
+	var x: float = x_lo + 0.6
+	while x <= x_hi - 0.6:
+		var z: float = z_lo + 0.6
+		while z <= z_hi - 0.6:
+			var local: Vector3 = Vector3(x, y, z)
+			var in_hole: bool = hole.grow(0.3).has_point(Vector2(x, z))
+			var at: Vector3 = xf * local
+			if not in_hole and not _blocked(at + Vector3(0, 0.05, 0), 0.28, 1.5):
+				sampled += 1
+				var down: Dictionary = _ray(at + Vector3(0, 0.6, 0), at + Vector3(0, -0.5, 0))
+				if down.is_empty() or absf(float((down["position"] as Vector3).y) - at.y) > 0.1:
+					floor_bad.append(str(local))
+			var up: Dictionary = _ray(at + Vector3(0, 1.4, 0), at + Vector3(0, 40.0, 0))
+			if not up.is_empty():
+				sky_bad.append("%s (hit %s)" % [local, (up["collider"] as Node).name])
+			z += 1.0
+		x += 1.0
+	_check(sampled > 40 and floor_bad.is_empty(), "Halcyon Trust terrace: solid floor at roof level under %d sampled free cells%s" % [sampled, "" if floor_bad.is_empty() else " FAILED at " + ", ".join(PackedStringArray(floor_bad))])
+	_check(sky_bad.is_empty(), "Halcyon Trust terrace: open sky, nothing within 40 m above any point of it%s" % ("" if sky_bad.is_empty() else " FAILED at " + ", ".join(PackedStringArray(sky_bad))))
+	# Rails: a body walking at each open edge (west, north, south) is stopped before it leaves the roof.
+	var edge_bad: Array[String] = []
+	var edge_tested: int = 0
+	var reach: float = 1.5
+	for edge: Array in [["west", Vector3(-1, 0, 0)], ["north", Vector3(0, 0, -1)], ["south", Vector3(0, 0, 1)]]:
+		var outward: Vector3 = edge[1]
+		var along: Vector3 = Vector3(0, 0, 1) if outward.x != 0.0 else Vector3(1, 0, 0)
+		var span_lo: float = (z_lo if outward.x != 0.0 else x_lo) + 0.6
+		var span_hi: float = (z_hi if outward.x != 0.0 else x_hi) - 0.6
+		var inset: float = 0.65
+		var origin: Vector3 = Vector3(x_lo + inset, y, 0) if str(edge[0]) == "west" else (Vector3(0, y, z_lo + inset) if str(edge[0]) == "north" else Vector3(0, y, z_hi - inset))
+		var t: float = span_lo
+		while t <= span_hi:
+			var local: Vector3 = origin + along * t
+			var at: Vector3 = xf * local + Vector3(0, 0.05, 0)
+			if not _blocked(at, 0.3, 1.8):
+				edge_tested += 1
+				if not _sweep_blocked(at, xf.basis * (outward * reach)):
+					edge_bad.append("%s edge at %s" % [edge[0], local])
+			t += 0.8
+	_check(edge_tested > 30 and edge_bad.is_empty(), "Halcyon Trust terrace: a rail stops a body at every open edge (%d sweeps)%s" % [edge_tested, "" if edge_bad.is_empty() else " FAILED: " + "; ".join(PackedStringArray(edge_bad))])
+	# The stair opening in the roof: railed on the terrace sides, so nobody walks into it.
+	var hole_bad: Array[String] = []
+	for z: float in [hole.position.y + 0.6, hole.position.y + hole.size.y * 0.5]:
+		var at: Vector3 = xf * Vector3(hole.end.x + 0.5, y + 0.05, z)
+		if not _sweep_blocked(at, xf.basis * Vector3(-1.2, 0, 0)):
+			hole_bad.append("east side at z %.1f" % z)
+	var north_at: Vector3 = xf * Vector3(hole.get_center().x, y + 0.05, hole.position.y - 0.5)
+	if not _sweep_blocked(north_at, xf.basis * Vector3(0, 0, 1.2)):
+		hole_bad.append("north side")
+	_check(hole_bad.is_empty(), "Halcyon Trust terrace: the stair opening is railed on its east and north sides%s" % ("" if hole_bad.is_empty() else " FAILED: " + ", ".join(PackedStringArray(hole_bad))))
+	# Connectivity: from the stair head to the plant room door, over free terrace floor.
+	var door_route: Array = (tower.get_meta("routes") as Dictionary)["plant_door"]
+	var goal_local: Vector3 = door_route[0]
+	var goals: Array[Vector3] = [Vector3((xf * goal_local).x, (xf * goal_local).y, (xf * goal_local).z)]
+	var head_world: Vector3 = xf * head
+	var way: Array[Vector3] = _floor_path(head_world, goals, head_world.y)
+	_check(not way.is_empty() or _near(Vector2(head_world.x, head_world.z), goals), "Halcyon Trust terrace: a walkable path leads from the stair head to the plant room door")
+	# A real body pushes into the west rail and stays on the roof.
+	var start_local: Vector3 = Vector3(x_lo + 2.5, y + 0.05, 4.0)
+	var start: Vector3 = xf * start_local
+	walker.reset_player(start)
+	await _frames(20)
+	var stats: Dictionary = {}
+	var target: Vector3 = xf * Vector3(x_lo - 2.0, y, 4.0)
+	await walk_route(self, walker, [start, target], 6.0, stats)
+	await _frames(30)
+	_check(absf(walker.global_position.y - start.y + 0.05) < 0.3 and walker.global_position.distance_to(xf * Vector3(x_lo, y, 4.0)) < 1.2, "Halcyon Trust terrace: a player pushing west into the rail stays on the roof (at %s)" % walker.global_position)
 	Input.action_release("move_forward")

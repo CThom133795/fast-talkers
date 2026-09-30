@@ -55,7 +55,7 @@ const ROOF_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 16.6), Vector3(0, 0.17, 11.
 	Vector3(-14.25, 4.77, -8.4), Vector3(-14.25, 4.77, -7.4), Vector3(-14.25, 4.77, -6.0), Vector3(-14.25, 8.37, -0.3), Vector3(-14.25, 8.37, 1.5),
 	Vector3(-11.0, 8.37, 2.5), Vector3(-9.5, 8.37, 2.5)]
 ## From the terrace through the plant room door (level: published for tests/stair_walk.gd's extras).
-const PLANT_ROUTE: Array[Vector3] = [Vector3(-9.5, 8.37, -1.5), Vector3(-7.0, 8.37, -1.5), Vector3(-4.5, 8.37, -1.5), Vector3(-3.0, 8.37, -1.5)]
+const PLANT_ROUTE: Array[Vector3] = [Vector3(-9.5, 8.37, -1.5), Vector3(-7.0, 8.37, -1.5), Vector3(-4.5, 8.37, -1.5), Vector3(-3.7, 8.37, -1.5)]
 const SERVICE_ROUTE: Array[Vector3] = [Vector3(0, 0.17, 11.0), Vector3(6.0, 0.17, -3.0), Vector3(8.0, 0.17, -12.5), Vector3(8.0, 0.17, -16.6)]
 
 
@@ -119,7 +119,6 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 	_lobby(kit)
 	_office(kit)
 	_plant_room(kit)
-	kit.interior_light(Vector3(PLANT.get_center().x, OFFICE_TOP + PLANT_HEIGHT - 0.5, PLANT.get_center().y), Color(1.0, 0.95, 0.85), 1.8, 8.0)
 	kit.interior_light(Vector3(0, 3.8, 4.0), Color(0.95, 0.95, 0.88), 2.4, 22.0)
 	kit.interior_light(Vector3(0, OFFICE_TOP - 0.6, 0.0), Color(0.9, 0.95, 1.0), 2.2, 22.0)
 	_office_props(kit)
