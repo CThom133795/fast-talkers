@@ -1,0 +1,72 @@
+FAST TALKERS 0.9 - PLAYTEST - READ ME FIRST
+============================================
+
+You both need: a Windows PC, Steam, a headset, and to be Steam friends.
+You both must use THIS SAME zip.
+
+
+SETUP (both of you, 2 minutes)
+------------------------------
+1. Open Steam and log in. Leave Steam running.
+2. Right-click the zip > "Extract All..." > Extract. (Don't run the game from inside the zip.)
+3. Open the extracted "Fast Talkers" folder and double-click "Fast Talkers.exe".
+   - Blue "Windows protected your PC" box?  Click "More info", then "Run anyway".
+   - Windows Firewall asks about network access?  Tick both boxes and click "Allow".
+   - Steam will say you are playing "Spacewar". That is normal - it is how the free
+     Steam multiplayer trick works.
+
+
+CONNECT (the host is whoever sets up the game)
+----------------------------------------------
+HOST:
+  1. Title screen > PLAY ONLINE.
+  2. Click HOST ON STEAM (INVITE FRIENDS).
+  3. The Steam overlay opens. Invite your friend.
+     (Closed it by accident? Click INVITE STEAM FRIENDS in the lobby.)
+
+FRIEND:
+  1. Start Fast Talkers FIRST and go to PLAY ONLINE. Wait on that screen.
+  2. Accept the invite in Steam (the chat pop-up, or Shift+Tab > Friends).
+     No invite showing? In the Steam friends list, right-click the host > "Join Game".
+
+BOTH:
+  - In the lobby, each pick a crew. Pick DIFFERENT crews so you can deal with each other.
+  - The host clicks START THE WEEK.
+    (Tick "Quick Week" first for a shorter game: Wednesday to Friday.)
+
+
+TALKING
+-------
+- Your mic is always on. Players NEAR you hear you. Walls block people outside.
+- Hold Y = crew radio (only your crew hears you, anywhere on the map).
+- P = use the crew phone (it sits at your HQ). It calls the other crew's phone.
+
+
+KEYS YOU NEED
+-------------
+WASD move, Shift sprint, Space jump (handbrake in a car), mouse aim, left click shoot,
+R reload, 1-5 weapons, E use / enter car, M map, ENTER text chat,
+B buy menu (morning only), G drop the case, K drop the phone,
+X hands up, hold Z binoculars, F3 shows FPS, ESC menu / settings.
+
+
+THE GAME IN 20 SECONDS
+----------------------
+A game is one WEEK. Each DAY (Monday to Friday) is one round.
+You win on money BANKED at your HQ - not kills.
+Make deals, trade the case, bluff, betray. Friday is the Dead Drop: no rules.
+
+
+SOMETHING WRONG?
+----------------
+- No "HOST ON STEAM" button, or "Steam not running":
+  start Steam, log in, then restart the game.
+- "Different version of the game": one of you has an old copy. Both re-download this zip.
+- Controller stopped working: Steam > Library > Spacewar > right-click > Properties >
+  Controller > "Disable Steam Input". Restart the game.
+- Joining just starts "Spacewar" instead: close it, start Fast Talkers first, and
+  accept the invite again.
+- Too slow? ESC > Settings > POTATO MODE.
+
+More help, the full rules and a no-Steam fallback: "HOW TO PLAY WITH FRIENDS.txt".
+Found a bug? Note the Day, what you were doing and where, and tell the host.

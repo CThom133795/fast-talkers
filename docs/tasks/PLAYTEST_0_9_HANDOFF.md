@@ -80,3 +80,25 @@ Merging in this order gives no conflicts. Each merge only fast-forwards the diff
 - **Lantern Row draw count:** `capture_perf` lantern_row went from 568 to 948 under llvmpipe after crew-hq, and could not be pinned on the HQs. Check it on the RTX 3080.
 - Crew HQ spawn: players drop about 0.6 m onto the floor at spawn. Check that it feels fine.
 - A pad binding for the crew radio.
+
+## 0.9 friends build (cloud, 2026-10-01, branch `claude/serene-cori-0ydbmm` on top of `cloud/playtest-polish`)
+
+- **`playtest-download/FastTalkers-0.9-Playtest.zip`** (35.6 MB) is the build for tonight. It contains `Fast Talkers.exe` (pck
+  embedded), the GodotSteam 4.22.1 DLLs, `steam_appid.txt` (480), the new one-page `READ ME FIRST.txt`, the full
+  `HOW TO PLAY WITH FRIENDS.txt` and licences. It was exported in the cloud on Linux with the official 4.4.1 Windows
+  release template. The game data inside the exe was smoke-tested headless (it runs with no script errors). The exe
+  itself was **not** run on Windows, and Steam and voice were **not** tested here.
+  - The zip is committed only so it can be downloaded. Don't merge the `playtest-download/` commit into `dev`; drop it
+    or delete the folder first.
+- **Version:** `config/version` is 0.9 (the title says PLAYTEST 0.9). Everyone must run the same zip; the handshake
+  refuses mixed versions.
+- **Fixed:**
+  - the Hotel Meridian bar door was blocked from outside by a street bench (moved the door and its wall opening 1 m
+    south);
+  - "SHIPPING CO" appeared on 4 warehouses (two warehouse names added; the RNG draw count is unchanged).
+- **Tests:** every suite in `tests/run_all.sh` passed, plus `net_pair`, after a fresh class cache. A stale
+  `.godot` cache from another branch makes most suites fail with "Identifier not found: BuildingPrefabs". Re-import
+  before trusting a red run.
+- **Cloud export note:** the Linux GodotSteam `.so` crashes the headless Linux editor (signal 11) on import or export. Export
+  from a copy without `addons/godotsteam/linux64`. Windows export with `tools\build_playtest.ps1` is unaffected.
+- `tools/build_playtest.ps1` now also copies `READ ME FIRST.txt`.

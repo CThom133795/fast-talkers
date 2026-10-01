@@ -30,6 +30,7 @@ foreach ($dll in @("libgodotsteam.windows.template_release.x86_64.dll", "steam_a
 }
 Set-Content -Path (Join-Path $folder "steam_appid.txt") -Value "480" -NoNewline -Encoding ascii
 Copy-Item (Join-Path $project "tools\playtest\HOW TO PLAY WITH FRIENDS.txt") $folder
+Copy-Item (Join-Path $project "tools\playtest\READ ME FIRST.txt") $folder
 Copy-Item (Join-Path $project "addons\godotsteam\license.md") (Join-Path $folder "GODOTSTEAM-LICENSE.txt")
 $godotLicense = Join-Path $outputs "play-fast-talkers\GODOT-LICENSE.txt"
 if (Test-Path $godotLicense) { Copy-Item $godotLicense $folder }

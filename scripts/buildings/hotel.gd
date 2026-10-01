@@ -18,7 +18,7 @@ const TOP: float = 25.0
 const BACK_Z: float = -6.0
 const ROUTE: Array[Vector3] = [Vector3(0, 0.17, 15.6), Vector3(0, 0.17, 12), Vector3(0, 0.17, 8), Vector3(5, 0.17, -3.5),
 	Vector3(5, 0.17, -8), Vector3(9, 0.17, -11), Vector3(10, 0.17, -12.8), Vector3(10, 0.17, -15.6)]
-const BAR_ROUTE: Array[Vector3] = [Vector3(-16.6, 0.17, 2), Vector3(-12, 0.17, 2), Vector3(-6, 0.17, 4.2), Vector3(-6, 0.17, 8),
+const BAR_ROUTE: Array[Vector3] = [Vector3(-16.6, 0.17, 1), Vector3(-12, 0.17, 1), Vector3(-6, 0.17, 4.2), Vector3(-6, 0.17, 8),
 	Vector3(-1, 0.17, 9.5), Vector3(0, 0.17, 12), Vector3(0, 0.17, 15.6)]
 
 
@@ -37,11 +37,11 @@ static func build(world: Node3D, plot: Dictionary) -> void:
 		BuildingKit.opening(HALF.x, 2.6), BuildingKit.opening(HALF.x - 6.0, 5.0, 0.6, 3.4, "window"),
 		BuildingKit.opening(HALF.x + 6.0, 5.0, 0.6, 3.4, "window"), BuildingKit.opening(HALF.x - 11.5, 3.0, 0.9, 3.2, "window")])
 	kit.wall(Vector2(-HALF.x, -HALF.y), Vector2(HALF.x, -HALF.y), GROUND, base, [BuildingKit.opening(HALF.x + 10.0, 1.6)])
-	kit.wall(Vector2(-HALF.x, -HALF.y), Vector2(-HALF.x, HALF.y), GROUND, base, [BuildingKit.opening(HALF.y + 2.0, 1.6)])
+	kit.wall(Vector2(-HALF.x, -HALF.y), Vector2(-HALF.x, HALF.y), GROUND, base, [BuildingKit.opening(HALF.y + 1.0, 1.6)])
 	kit.wall(Vector2(HALF.x, -HALF.y), Vector2(HALF.x, HALF.y), GROUND, base)
 	kit.add_door(Vector3(0, FLOOR_Y, HALF.y), 2.6, 2.6, Vector3.BACK, "Hotel Meridian entrance", "door", kit.glass_material())
 	kit.add_door(Vector3(10, FLOOR_Y, -HALF.y), 1.6, 2.6, Vector3.FORWARD, "Hotel Meridian service door", "door", kit.mat(Color(0.4, 0.42, 0.42), "metal", 0.6))
-	kit.add_door(Vector3(-HALF.x, FLOOR_Y, 2.0), 1.6, 2.6, Vector3.LEFT, "Hotel Meridian bar entrance", "door", kit.mat(Color(0.3, 0.16, 0.1), "planks", 0.6))
+	kit.add_door(Vector3(-HALF.x, FLOOR_Y, 1.0), 1.6, 2.6, Vector3.LEFT, "Hotel Meridian bar entrance", "door", kit.mat(Color(0.3, 0.16, 0.1), "planks", 0.6))
 	_tower(kit, stucco, roof)
 	_street_front(kit)
 	# Back-of-house partition (staff door), the office wall and the lift recess.
@@ -257,7 +257,7 @@ static func _ceiling(kit: BuildingKit) -> void:
 	# Wainscot band on the lobby side walls (a thin skin on the inner face; the wall is the collider).
 	# The west run stops either side of the bar's street door.
 	kit.box(Vector3(HALF.x - 0.16, FLOOR_Y + 0.5, lobby_center), Vector3(0.02, 1.0, lobby_depth), trim)
-	for span: Vector2 in [Vector2(BACK_Z + 0.15, 1.1), Vector2(2.9, HALF.y - 0.15)]:
+	for span: Vector2 in [Vector2(BACK_Z + 0.15, 0.1), Vector2(1.9, HALF.y - 0.15)]:
 		kit.box(Vector3(-HALF.x + 0.16, FLOOR_Y + 0.5, (span.x + span.y) * 0.5), Vector3(0.02, 1.0, span.y - span.x), trim)
 
 
